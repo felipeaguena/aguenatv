@@ -12,6 +12,8 @@ import {
   Clock,
   Volume2,
   VolumeX,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useWatched } from '@/hooks/useWatched';
 import { StreamType } from '@/lib/types';
@@ -86,6 +88,16 @@ export default function VideoPlayer({
     },
     []
   );
+
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const handleCopyLink = useCallback(() => {
+    if (!streamUrl) return;
+    navigator.clipboard.writeText(streamUrl).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    });
+  }, [streamUrl]);
 
   // Alternância de Tela Cheia (Fullscreen) - IDÊNTICA ao botão nativo do player de vídeo (alvo direto no elemento <video>)
   const handleToggleFullscreen = useCallback((e?: React.MouseEvent) => {
@@ -698,7 +710,7 @@ export default function VideoPlayer({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
             <button
               onClick={handleRetry}
               className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg shadow-violet-600/30 cursor-pointer"
@@ -708,15 +720,43 @@ export default function VideoPlayer({
             </button>
 
             {streamUrl && (
-              <a
-                href={streamUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-semibold border border-white/10 transition flex items-center gap-2"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                Link Direto
-              </a>
+              <>
+                <button
+                  onClick={handleCopyLink}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-neutral-200 text-xs font-semibold border border-white/10 transition flex items-center gap-2 cursor-pointer"
+                  title="Copiar link do stream para colar no VLC ou outro player"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      Copiado!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-neutral-400" />
+                      Copiar Link (VLC)
+                    </>
+                  )}
+                </button>
+
+                <a
+                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
+                  className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold border border-amber-500/30 transition flex items-center gap-2"
+                  title="Abrir diretamente no reprodutor VLC"
+                >
+                  <span>▶</span> Abrir no VLC
+                </a>
+
+                <a
+                  href={streamUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-semibold border border-white/10 transition flex items-center gap-2"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Link Direto
+                </a>
+              </>
             )}
           </div>
         </div>

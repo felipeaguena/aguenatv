@@ -26,6 +26,7 @@ import {
   localDB,
   getSavedPlaylists,
   savePlaylist,
+  saveIPTVConfig,
   deletePlaylist,
   setActivePlaylist,
   setLastSyncTime,
@@ -266,6 +267,13 @@ export default function SettingsPage() {
     setSyncingPlaylistId(targetList.id);
     setErrorMsg('');
     setSyncProgress('Conectando ao servidor IPTV...');
+
+    // Salva imediatamente como configuração ativa no banco local
+    await saveIPTVConfig({
+      server_url: targetList.server_url,
+      username: targetList.username,
+      password: targetList.password,
+    });
 
     try {
       const fetchEndpoint = async (action: string) => {

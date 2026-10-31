@@ -375,24 +375,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const isLive = streamType === 'live';
   const isMovie = streamType === 'movie';
 
-  // Normalização do Host do servidor IPTV (com suporte seguro a HTTPS em produção na Vercel)
+  // Preserva estritamente o servidor, protocolo e porta originais da lista IPTV para os fluxos de vídeo
   const cleanHost = useMemo(() => {
     if (!config?.server_url) return '';
-    const raw = config.server_url.replace(/\/+$/, '');
-
-    // Se estiver em ambiente HTTPS (como https://aguenatv.vercel.app):
-    // Navegadores bloqueiam streams de vídeo inseguros (HTTP) por regra de Mixed Content.
-    // O domínio rootdns.cc possui certificado SSL válido na porta 443 e entrega os streams HLS com segurança:
-    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-      if (raw.includes('dfpump.top') || raw.includes('rootdns.cc')) {
-        return 'https://rootdns.cc';
-      }
-      if (raw.startsWith('http://')) {
-        return raw.replace('http://', 'https://');
-      }
-    }
-
-    return raw;
+    return config.server_url.trim().replace(/\/+$/, '');
   }, [config?.server_url]);
 
   // Lista de temporadas formatadas
@@ -791,9 +777,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
           </div>
 
           {/* Barra de Status e Metadados Técnicos do Vídeo */}
-          <div className="p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-wrap items-center gap-2 text-xs">
+          <div className="p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
             {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
-            <div className="flex flex-wrap items-center gap-2 text-neutral-300 text-[11px] w-full">
+            <div className="flex flex-wrap items-center gap-2 text-neutral-300 text-[11px]">
               {/* Duração */}
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
                 <Clock className="w-3.5 h-3.5 text-violet-400" />
@@ -822,6 +808,28 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 <span className="font-bold text-white">{displayCodec}</span>
               </div>
             </div>
+
+            {/* Ações Rápidas de Reprodução Externa */}
+            {streamUrl && (
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
+                  title="Abrir diretamente no VLC Player"
+                >
+                  <span>▶</span> VLC
+                </a>
+                <a
+                  href={streamUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
+                  title="Abrir o link direto em nova aba"
+                >
+                  Link Direto
+                </a>
+              </div>
+            )}
           </div>
         </div>
 

@@ -54,8 +54,31 @@ export async function setLastSyncTime(timestamp = Date.now()): Promise<void> {
 
 export async function getSavedIPTVConfig(): Promise<IPTVAccount | null> {
   if (!localDB) return null;
+
+  // 1. Tenta carregar a configuração direta do cache
   const setting = await localDB.settings.get('iptv_config');
-  return setting ? (setting.value as IPTVAccount) : null;
+  if (setting?.value && setting.value.server_url && setting.value.username) {
+    return setting.value as IPTVAccount;
+  }
+
+  // 2. Fallback resiliente: busca na lista de playlists ativas ou na primeira cadastrada
+  try {
+    const lists = await getSavedPlaylists();
+    const active = lists.find((l) => l.is_active) || lists[0];
+    if (active && active.server_url && active.username) {
+      const recovered: IPTVAccount = {
+        server_url: active.server_url,
+        username: active.username,
+        password: active.password,
+      };
+      await localDB.settings.put({ key: 'iptv_config', value: recovered });
+      return recovered;
+    }
+  } catch (err) {
+    console.warn('[db-local] Erro ao recuperar playlist ativa:', err);
+  }
+
+  return null;
 }
 
 export async function saveIPTVConfig(config: IPTVAccount): Promise<void> {

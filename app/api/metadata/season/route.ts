@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const tmdbKey = process.env.TMDB_API_KEY;
+  const tmdbKey = process.env.TMDB_API_KEY || '8476a7ab80ad76f0936744df0430e67c';
   if (!tmdbKey) {
     return NextResponse.json({
       season,

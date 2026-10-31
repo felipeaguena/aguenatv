@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   const isMovie = type === 'movie';
-  const tmdbKey = process.env.TMDB_API_KEY;
+  const tmdbKey = process.env.TMDB_API_KEY || '8476a7ab80ad76f0936744df0430e67c';
   const endpoint = isMovie ? 'movie' : 'tv';
 
   // 1. TIER 1: The Movie Database (TMDb) com Busca por Variantes Inteligentes e Cruzamento
