@@ -13,12 +13,24 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   let host = searchParams.get('host');
-  const username = searchParams.get('username');
-  const password = searchParams.get('password');
+  let username = searchParams.get('username');
+  let password = searchParams.get('password');
   const action = searchParams.get('action');
   const categoryId = searchParams.get('category_id');
   const seriesId = searchParams.get('series_id');
   const vodId = searchParams.get('vod_id');
+
+  // Parser inteligente: Se o host fornecido for uma URL M3U completa (ex: contendo get.php ou query params)
+  if (host && (host.includes('get.php') || host.includes('username=') || host.includes('player_api.php'))) {
+    try {
+      const parsedUrl = new URL(host);
+      if (!username) username = parsedUrl.searchParams.get('username');
+      if (!password) password = parsedUrl.searchParams.get('password');
+      host = parsedUrl.origin;
+    } catch {
+      // Mantém o host original caso ocorra falha de parse
+    }
+  }
 
   if (!host || !username || !password) {
     return NextResponse.json(
@@ -27,21 +39,10 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // 1. Limpeza e normalização do Host
-  // Se o usuário colou a URL completa do M3U com get.php no host, extrai apenas o protocolo + host + porta
-  try {
-    if (host.includes('/get.php') || host.includes('/player_api.php')) {
-      const parsedUrl = new URL(host);
-      host = `${parsedUrl.protocol}//${parsedUrl.host}`;
-    }
-  } catch {
-    // Mantém o host original caso ocorra erro no parser
-  }
-
-  let cleanHost = host.replace(/\/+$/, '');
+  let cleanHost = host.trim().replace(/\/+$/, '');
 
   const buildUrl = (targetHost: string) => {
-    let url = `${targetHost}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    let url = `${targetHost}/player_api.php?username=${encodeURIComponent(username!)}&password=${encodeURIComponent(password!)}`;
     if (action) url += `&action=${encodeURIComponent(action)}`;
     if (categoryId) url += `&category_id=${encodeURIComponent(categoryId)}`;
     if (seriesId) url += `&series_id=${encodeURIComponent(seriesId)}`;
@@ -54,47 +55,81 @@ export async function GET(req: NextRequest) {
     Accept: '*/*',
   };
 
-  try {
-    let targetUrl = buildUrl(cleanHost);
-    let upstreamRes = await fetch(targetUrl, {
-      headers,
-      next: { revalidate: 300 },
-    });
+  // Monta lista de hosts candidatos para tentar de forma resiliente
+  const candidateHosts: string[] = [cleanHost];
 
-    // Auto-recuperação de porta: Se a porta 80 ou default falhar com 404/502, tenta automaticamente na porta 8080
-    if (!upstreamRes.ok && (cleanHost.includes(':80') || !cleanHost.match(/:\d+$/))) {
-      const fallbackHost = cleanHost.includes(':80')
-        ? cleanHost.replace(':80', ':8080')
-        : `${cleanHost}:8080`;
+  // Se cleanHost tiver porta 80 explícita em http, adiciona candidato limpo sem :80
+  if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
+    const without80 = cleanHost.replace(':80', '');
+    if (!candidateHosts.includes(without80)) candidateHosts.push(without80);
+  }
 
-      console.log(`[Proxy IPTV] Tentativa de fallback para ${fallbackHost}...`);
-      const fallbackUrl = buildUrl(fallbackHost);
-      const fallbackRes = await fetch(fallbackUrl, {
+  // Se for http, tenta também versão https (caso o servidor suporte Cloudflare SSL)
+  if (cleanHost.startsWith('http://') && !cleanHost.includes(':8080')) {
+    const httpsCandidate = cleanHost.replace('http://', 'https://').replace(':80', '');
+    if (!candidateHosts.includes(httpsCandidate)) candidateHosts.push(httpsCandidate);
+  }
+
+  // Se o host já tiver :8080 e falhar, tenta também sem :8080
+  if (cleanHost.includes(':8080')) {
+    const without8080 = cleanHost.replace(':8080', '');
+    if (!candidateHosts.includes(without8080)) candidateHosts.push(without8080);
+  }
+
+  let finalResponse: Response | null = null;
+  let lastError: any = null;
+
+  for (const candidate of candidateHosts) {
+    try {
+      const targetUrl = buildUrl(candidate);
+      const upstreamRes = await fetch(targetUrl, {
         headers,
-        next: { revalidate: 300 },
+        cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel para listas grandes
+        signal: AbortSignal.timeout(45000), // Timeout de 45 segundos
       });
 
-      if (fallbackRes.ok) {
-        upstreamRes = fallbackRes;
-        cleanHost = fallbackHost;
+      if (upstreamRes.ok) {
+        finalResponse = upstreamRes;
+        break;
+      } else {
+        lastError = new Error(`HTTP ${upstreamRes.status} (${upstreamRes.statusText})`);
       }
+    } catch (err: any) {
+      lastError = err;
     }
+  }
 
-    if (!upstreamRes.ok) {
+  if (!finalResponse) {
+    console.error('[Proxy IPTV] Todos os candidatos falharam:', candidateHosts, lastError);
+    return NextResponse.json(
+      {
+        error: `Falha na comunicação com o servidor IPTV (${lastError?.message || 'conexão recusada/timeout'}). Verifique o endereço e conexão.`,
+      },
+      { status: 502 }
+    );
+  }
+
+  try {
+    const rawText = await finalResponse.text();
+
+    // Se o servidor upstream retornou HTML (ex: página de erro do Nginx ou desafio Cloudflare)
+    if (rawText.trim().startsWith('<')) {
       return NextResponse.json(
-        {
-          error: `Erro no servidor IPTV upstream: ${upstreamRes.status}. Verifique se a porta do servidor está correta (ex: tente :8080).`,
-        },
-        { status: upstreamRes.status }
+        { error: 'O servidor IPTV retornou uma resposta em HTML em vez de dados JSON. O servidor pode estar indisponível ou bloqueando a requisição.' },
+        { status: 502 }
       );
     }
 
-    const data = await upstreamRes.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    console.error('Erro no proxy IPTV:', error);
+    return new NextResponse(rawText, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
+  } catch (err: any) {
     return NextResponse.json(
-      { error: 'Falha na comunicação com o servidor IPTV. Verifique o endereço e conexão.' },
+      { error: `Erro ao transferir dados do IPTV: ${err?.message}` },
       { status: 502 }
     );
   }

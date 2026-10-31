@@ -142,9 +142,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
             setLoadingSeries(true);
             try {
               let cleanHost = savedCfg.server_url.replace(/\/+$/, '');
-              if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
-                cleanHost = cleanHost.replace(':80', ':8080');
-              }
 
               const res = await fetch(
                 `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(
@@ -169,9 +166,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
           setLoadingSeries(true);
           try {
             let cleanHost = savedCfg.server_url.replace(/\/+$/, '');
-            if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
-              cleanHost = cleanHost.replace(':80', ':8080');
-            }
 
             const res = await fetch(
               `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(

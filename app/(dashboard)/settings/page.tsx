@@ -133,10 +133,8 @@ export default function SettingsPage() {
       const p = parsed.searchParams.get('password');
 
       let parsedHost = `${parsed.protocol}//${parsed.hostname}`;
-      if (parsed.port && parsed.port !== '80') {
+      if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
         parsedHost += `:${parsed.port}`;
-      } else if (parsed.hostname.includes('rootdns') || parsed.port === '80') {
-        parsedHost += ':8080';
       }
 
       if (isEditing) {
@@ -161,7 +159,7 @@ export default function SettingsPage() {
 
     let cleanHost = formHost.trim().replace(/\/+$/, '');
     if (cleanHost.endsWith(':80')) {
-      cleanHost = cleanHost.replace(':80', ':8080');
+      cleanHost = cleanHost.replace(/:80$/, '');
     }
 
     const newPlaylist: IPTVPlaylist = {
@@ -204,7 +202,7 @@ export default function SettingsPage() {
 
     let cleanHost = editHost.trim().replace(/\/+$/, '');
     if (cleanHost.endsWith(':80')) {
-      cleanHost = cleanHost.replace(':80', ':8080');
+      cleanHost = cleanHost.replace(/:80$/, '');
     }
 
     const updatedItem: IPTVPlaylist = {
@@ -858,9 +856,16 @@ export default function SettingsPage() {
                   </label>
                   <input
                     type="text"
-                    placeholder="ex: http://meu-servidor.com:8080"
+                    placeholder="ex: http://meu-servidor.com ou link M3U completo"
                     value={formHost}
-                    onChange={(e) => setFormHost(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes('get.php') || val.includes('username=')) {
+                        handleParseM3U(val, false);
+                      } else {
+                        setFormHost(val);
+                      }
+                    }}
                     required
                     className="w-full bg-[#0b0c10] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-violet-500 font-mono"
                   />
@@ -986,8 +991,16 @@ export default function SettingsPage() {
                   </label>
                   <input
                     type="text"
+                    placeholder="ex: http://meu-servidor.com ou link M3U completo"
                     value={editHost}
-                    onChange={(e) => setEditHost(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.includes('get.php') || val.includes('username=')) {
+                        handleParseM3U(val, true);
+                      } else {
+                        setEditHost(val);
+                      }
+                    }}
                     required
                     className="w-full bg-[#0b0c10] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-violet-500 font-mono"
                   />

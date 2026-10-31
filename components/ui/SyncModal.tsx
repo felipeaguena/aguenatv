@@ -56,12 +56,8 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
       const p = parsed.searchParams.get('password');
 
       let parsedHost = `${parsed.protocol}//${parsed.hostname}`;
-      // Se a porta for 80 ou estiver vazia em domínios como rootdns, sugere :8080 (porta padrão do Xtream)
-      if (parsed.port && parsed.port !== '80') {
+      if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
         parsedHost += `:${parsed.port}`;
-      } else if (parsed.hostname.includes('rootdns') || parsed.port === '80') {
-        // Fallback conhecido para servidores Xtream com Cloudflare na porta 8080
-        parsedHost += ':8080';
       }
 
       setHost(parsedHost);
@@ -84,7 +80,7 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
       // Normalização do Host (caso o usuário tenha colado com porta 80)
       let cleanHost = host.trim().replace(/\/+$/, '');
       if (cleanHost.endsWith(':80')) {
-        cleanHost = cleanHost.replace(':80', ':8080');
+        cleanHost = cleanHost.replace(/:80$/, '');
       }
 
       const config: IPTVAccount = {
@@ -299,9 +295,16 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
             </label>
             <input
               type="text"
-              placeholder="http://servidor.xyz:8080"
+              placeholder="http://servidor.xyz:80 ou http://servidor.xyz:8080"
               value={host}
-              onChange={(e) => setHost(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val.includes('get.php') || val.includes('username=')) {
+                  handleParseM3U(val);
+                } else {
+                  setHost(val);
+                }
+              }}
               required
               disabled={syncing}
               className="w-full bg-[#0b0c10] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-violet-500"

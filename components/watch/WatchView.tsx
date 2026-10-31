@@ -165,9 +165,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
       setLoadingSeries(true);
       try {
         let cleanHost = config!.server_url.replace(/\/+$/, '');
-        if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
-          cleanHost = cleanHost.replace(':80', ':8080');
-        }
 
         const res = await fetch(
           `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(
@@ -384,11 +381,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // Normalização do Host do servidor IPTV (ajuste para porta 8080 se necessário)
   const cleanHost = useMemo(() => {
     if (!config?.server_url) return '';
-    let host = config.server_url.replace(/\/+$/, '');
-    if (host.includes(':80') && !host.includes(':8080')) {
-      host = host.replace(':80', ':8080');
-    }
-    return host;
+    return config.server_url.replace(/\/+$/, '');
   }, [config?.server_url]);
 
   // Lista de temporadas formatadas
