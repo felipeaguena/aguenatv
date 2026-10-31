@@ -57,8 +57,11 @@ export async function GET(req: NextRequest) {
   // Monta lista de hosts candidatos para tentar de forma resiliente, SEMPRE priorizando a porta informada pelo usuário
   const candidateHosts: string[] = [cleanHost];
 
-  // Auto-espelho inteligente entre rootdns.cc e dfpump.top
+  // Auto-espelho inteligente entre rootdns.cc e dfpump.top, incluindo HTTPS seguro
   if (cleanHost.includes('rootdns.cc')) {
+    if (!cleanHost.startsWith('https://')) {
+      candidateHosts.push('https://rootdns.cc');
+    }
     const dfpumpMirror = cleanHost.replace('rootdns.cc', 'dfpump.top');
     if (!candidateHosts.includes(dfpumpMirror)) candidateHosts.push(dfpumpMirror);
   } else if (cleanHost.includes('dfpump.top')) {
@@ -72,6 +75,9 @@ export async function GET(req: NextRequest) {
     }
     const rootdnsMirror = cleanHost.replace('dfpump.top', 'rootdns.cc');
     if (!candidateHosts.includes(rootdnsMirror)) candidateHosts.push(rootdnsMirror);
+    if (!candidateHosts.includes('https://rootdns.cc')) candidateHosts.push('https://rootdns.cc');
+  } else if (cleanHost.includes('zonaverde.sbs')) {
+    if (!candidateHosts.includes('https://rootdns.cc')) candidateHosts.push('https://rootdns.cc');
   }
 
   const userAgents = [

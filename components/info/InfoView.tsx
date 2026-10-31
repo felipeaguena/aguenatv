@@ -25,6 +25,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
+import { fetchIPTVApi } from '@/lib/iptv-client';
 import {
   BaseStreamItem,
   StreamType,
@@ -141,16 +142,12 @@ export default function InfoView({ type, id }: InfoViewProps) {
           if (found.stream_type === 'series' && savedCfg) {
             setLoadingSeries(true);
             try {
-              let cleanHost = savedCfg.server_url.replace(/\/+$/, '');
+              const sData: SeriesInfoResponse = await fetchIPTVApi(savedCfg, {
+                action: 'get_series_info',
+                params: { series_id: found.stream_id },
+              });
 
-              const res = await fetch(
-                `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(
-                  savedCfg.username
-                )}&password=${encodeURIComponent(savedCfg.password)}&action=get_series_info&series_id=${found.stream_id}`
-              );
-
-              if (res.ok && isMounted) {
-                const sData: SeriesInfoResponse = await res.json();
+              if (sData && isMounted) {
                 setSeriesInfo(sData);
                 const sorted = buildSortedSeasonList(sData);
                 setSelectedSeason(getDefaultSeason(sorted));
@@ -165,16 +162,12 @@ export default function InfoView({ type, id }: InfoViewProps) {
           // Fallback se não estiver no Dexie
           setLoadingSeries(true);
           try {
-            let cleanHost = savedCfg.server_url.replace(/\/+$/, '');
+            const sData: SeriesInfoResponse = await fetchIPTVApi(savedCfg, {
+              action: 'get_series_info',
+              params: { series_id: id },
+            });
 
-            const res = await fetch(
-              `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(
-                savedCfg.username
-              )}&password=${encodeURIComponent(savedCfg.password)}&action=get_series_info&series_id=${id}`
-            );
-
-            if (res.ok && isMounted) {
-              const sData: SeriesInfoResponse = await res.json();
+            if (sData && isMounted) {
               setSeriesInfo(sData);
               setItem({
                 stream_id: String(id),

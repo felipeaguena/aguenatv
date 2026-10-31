@@ -687,6 +687,17 @@ export default function VideoPlayer({
             <p className="text-xs text-neutral-400 leading-relaxed">{error}</p>
           </div>
 
+          {typeof window !== 'undefined' && window.location.protocol === 'https:' && streamUrl?.startsWith('http:') && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 max-w-md text-left space-y-1">
+              <p className="font-semibold text-amber-200 flex items-center gap-1.5">
+                <span>🔒</span> Reprodução em HTTPS (Conteúdo Misto)
+              </p>
+              <p className="text-amber-300/80 leading-relaxed">
+                Navegadores modernos podem pausar streams HTTP quando abertos em páginas HTTPS. Para assistir direto no navegador, clique no ícone ao lado do endereço do site (cadeado ou configurações do site) e marque <strong>&quot;Conteúdo não seguro&quot;</strong> como <strong>&quot;Permitir&quot;</strong>, ou use o botão <strong>&quot;Link Direto&quot;</strong> abaixo para abrir no VLC ou reprodutor externo.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <button
               onClick={handleRetry}

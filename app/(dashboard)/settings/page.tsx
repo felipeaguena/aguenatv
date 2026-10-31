@@ -33,6 +33,7 @@ import {
 } from '@/lib/db-local';
 import { IPTVPlaylist, BaseStreamItem, SessionUser } from '@/lib/types';
 import { initSearchIndex } from '@/lib/search-index';
+import { fetchIPTVApi } from '@/lib/iptv-client';
 
 export default function SettingsPage() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -268,18 +269,7 @@ export default function SettingsPage() {
 
     try {
       const fetchEndpoint = async (action: string) => {
-        const url = `/api/iptv?host=${encodeURIComponent(
-          targetList.server_url
-        )}&username=${encodeURIComponent(targetList.username)}&password=${encodeURIComponent(
-          targetList.password
-        )}&action=${action}`;
-
-        const res = await fetch(url);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || `Falha na requisição: ${action} (${res.status})`);
-        }
-        return res.json();
+        return fetchIPTVApi(targetList, { action });
       };
 
       // 1. Busca Categorias

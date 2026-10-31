@@ -10,6 +10,7 @@ import {
 } from '@/lib/db-local';
 import { initSearchIndex } from '@/lib/search-index';
 import { BaseStreamItem, IPTVAccount } from '@/lib/types';
+import { fetchIPTVApi } from '@/lib/iptv-client';
 
 interface SyncModalProps {
   isOpen: boolean;
@@ -88,16 +89,7 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
       await saveIPTVConfig(config);
 
       const fetchEndpoint = async (action: string) => {
-        const url = `/api/iptv?host=${encodeURIComponent(config.server_url)}&username=${encodeURIComponent(
-          config.username
-        )}&password=${encodeURIComponent(config.password)}&action=${action}`;
-
-        const res = await fetch(url);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || `Falha ao obter ${action} (Status HTTP ${res.status})`);
-        }
-        return res.json();
+        return fetchIPTVApi(config, { action });
       };
 
       // 1. Busca Categorias

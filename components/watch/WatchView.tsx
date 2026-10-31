@@ -24,6 +24,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
+import { fetchIPTVApi } from '@/lib/iptv-client';
 import {
   BaseStreamItem,
   IPTVAccount,
@@ -164,16 +165,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
     async function fetchSeriesDetails() {
       setLoadingSeries(true);
       try {
-        let cleanHost = config!.server_url.replace(/\/+$/, '');
+        const data: SeriesInfoResponse = await fetchIPTVApi(config!, {
+          action: 'get_series_info',
+          params: { series_id: id },
+        });
 
-        const res = await fetch(
-          `/api/iptv?host=${encodeURIComponent(cleanHost)}&username=${encodeURIComponent(
-            config!.username
-          )}&password=${encodeURIComponent(config!.password)}&action=get_series_info&series_id=${id}`
-        );
-
-        if (!res.ok) throw new Error('Falha ao obter episódios da série');
-        const data: SeriesInfoResponse = await res.json();
+        if (!data) throw new Error('Falha ao obter episódios da série');
 
         if (!isMounted) return;
         setSeriesInfo(data);
