@@ -856,7 +856,7 @@ export default function SettingsPage() {
                   </label>
                   <input
                     type="text"
-                    placeholder="ex: http://meu-servidor.com ou link M3U completo"
+                    placeholder="ex: http://dfpump.top:80 ou link M3U completo"
                     value={formHost}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -991,7 +991,7 @@ export default function SettingsPage() {
                   </label>
                   <input
                     type="text"
-                    placeholder="ex: http://meu-servidor.com ou link M3U completo"
+                    placeholder="ex: http://dfpump.top:80 ou link M3U completo"
                     value={editHost}
                     onChange={(e) => {
                       const val = e.target.value;

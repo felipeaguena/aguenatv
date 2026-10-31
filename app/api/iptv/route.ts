@@ -50,13 +50,26 @@ export async function GET(req: NextRequest) {
     return url;
   };
 
-  const headers = {
-    'User-Agent': 'IPTVSmarters/1.0',
-    Accept: '*/*',
-  };
-
   // Monta lista de hosts candidatos para tentar de forma resiliente
   const candidateHosts: string[] = [cleanHost];
+
+  // Auto-espelho inteligente: rootdns.cc e dfpump.top são espelhos conhecidos deste provedor
+  if (cleanHost.includes('rootdns.cc')) {
+    const dfpump80 = cleanHost.replace('rootdns.cc', 'dfpump.top');
+    if (!candidateHosts.includes(dfpump80)) candidateHosts.push(dfpump80);
+    const dfpumpClean = dfpump80.replace(':80', '');
+    if (!candidateHosts.includes(dfpumpClean)) candidateHosts.push(dfpumpClean);
+  } else if (cleanHost.includes('dfpump.top')) {
+    if (cleanHost.includes(':80')) {
+      const without80 = cleanHost.replace(':80', '');
+      if (!candidateHosts.includes(without80)) candidateHosts.push(without80);
+    } else {
+      const with80 = cleanHost.replace('dfpump.top', 'dfpump.top:80');
+      if (!candidateHosts.includes(with80)) candidateHosts.push(with80);
+    }
+    const rootdnsCandidate = cleanHost.replace('dfpump.top', 'rootdns.cc');
+    if (!candidateHosts.includes(rootdnsCandidate)) candidateHosts.push(rootdnsCandidate);
+  }
 
   // Se cleanHost tiver porta 80 explícita em http, adiciona candidato limpo sem :80
   if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
@@ -76,26 +89,45 @@ export async function GET(req: NextRequest) {
     if (!candidateHosts.includes(without8080)) candidateHosts.push(without8080);
   }
 
+  const userAgents = [
+    'IPTVSmarters/1.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'VLC/3.0.18 LibVLC/3.0.18',
+  ];
+
   let finalResponse: Response | null = null;
   let lastError: any = null;
 
   for (const candidate of candidateHosts) {
-    try {
-      const targetUrl = buildUrl(candidate);
-      const upstreamRes = await fetch(targetUrl, {
-        headers,
-        cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel para listas grandes
-        signal: AbortSignal.timeout(45000), // Timeout de 45 segundos
-      });
+    if (finalResponse) break;
 
-      if (upstreamRes.ok) {
-        finalResponse = upstreamRes;
-        break;
-      } else {
-        lastError = new Error(`HTTP ${upstreamRes.status} (${upstreamRes.statusText})`);
+    for (const ua of userAgents) {
+      try {
+        const targetUrl = buildUrl(candidate);
+        const upstreamRes = await fetch(targetUrl, {
+          headers: {
+            'User-Agent': ua,
+            Accept: '*/*',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+          },
+          cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel para listas grandes
+          signal: AbortSignal.timeout(30000), // Timeout de 30 segundos por tentativa
+        });
+
+        if (upstreamRes.ok) {
+          finalResponse = upstreamRes;
+          break;
+        } else {
+          lastError = new Error(`HTTP ${upstreamRes.status} em ${candidate} (${upstreamRes.statusText})`);
+          // Se o erro não for 403 (ou seja, 404, 500, etc), não adianta tentar outro User-Agent no mesmo host
+          if (upstreamRes.status !== 403) {
+            break;
+          }
+        }
+      } catch (err: any) {
+        lastError = err;
+        break; // Erro de rede ou timeout, tenta o próximo host candidato
       }
-    } catch (err: any) {
-      lastError = err;
     }
   }
 

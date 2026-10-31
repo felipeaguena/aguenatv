@@ -295,7 +295,7 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
             </label>
             <input
               type="text"
-              placeholder="http://servidor.xyz:80 ou http://servidor.xyz:8080"
+              placeholder="http://dfpump.top:80"
               value={host}
               onChange={(e) => {
                 const val = e.target.value;
