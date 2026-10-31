@@ -378,10 +378,24 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const isLive = streamType === 'live';
   const isMovie = streamType === 'movie';
 
-  // Normalização do Host do servidor IPTV (ajuste para porta 8080 se necessário)
+  // Normalização do Host do servidor IPTV (com suporte seguro a HTTPS em produção na Vercel)
   const cleanHost = useMemo(() => {
     if (!config?.server_url) return '';
-    return config.server_url.replace(/\/+$/, '');
+    const raw = config.server_url.replace(/\/+$/, '');
+
+    // Se estiver em ambiente HTTPS (como https://aguenatv.vercel.app):
+    // Navegadores bloqueiam streams de vídeo inseguros (HTTP) por regra de Mixed Content.
+    // O domínio rootdns.cc possui certificado SSL válido na porta 443 e entrega os streams HLS com segurança:
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+      if (raw.includes('dfpump.top') || raw.includes('rootdns.cc')) {
+        return 'https://rootdns.cc';
+      }
+      if (raw.startsWith('http://')) {
+        return raw.replace('http://', 'https://');
+      }
+    }
+
+    return raw;
   }, [config?.server_url]);
 
   // Lista de temporadas formatadas

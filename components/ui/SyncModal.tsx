@@ -56,7 +56,7 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
       const p = parsed.searchParams.get('password');
 
       let parsedHost = `${parsed.protocol}//${parsed.hostname}`;
-      if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      if (parsed.port) {
         parsedHost += `:${parsed.port}`;
       }
 
@@ -77,11 +77,8 @@ export default function SyncModal({ isOpen, onClose, onSyncComplete }: SyncModal
     setProgressMsg('Iniciando comunicação com o servidor...');
 
     try {
-      // Normalização do Host (caso o usuário tenha colado com porta 80)
+      // Preserva exatamente a porta digitada pelo usuário
       let cleanHost = host.trim().replace(/\/+$/, '');
-      if (cleanHost.endsWith(':80')) {
-        cleanHost = cleanHost.replace(/:80$/, '');
-      }
 
       const config: IPTVAccount = {
         server_url: cleanHost,

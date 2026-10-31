@@ -133,7 +133,7 @@ export default function SettingsPage() {
       const p = parsed.searchParams.get('password');
 
       let parsedHost = `${parsed.protocol}//${parsed.hostname}`;
-      if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      if (parsed.port) {
         parsedHost += `:${parsed.port}`;
       }
 
@@ -157,10 +157,7 @@ export default function SettingsPage() {
     setErrorMsg('');
     setSuccessMsg('');
 
-    let cleanHost = formHost.trim().replace(/\/+$/, '');
-    if (cleanHost.endsWith(':80')) {
-      cleanHost = cleanHost.replace(/:80$/, '');
-    }
+    const cleanHost = formHost.trim().replace(/\/+$/, '');
 
     const newPlaylist: IPTVPlaylist = {
       id: `list_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -200,10 +197,7 @@ export default function SettingsPage() {
     setErrorMsg('');
     setSuccessMsg('');
 
-    let cleanHost = editHost.trim().replace(/\/+$/, '');
-    if (cleanHost.endsWith(':80')) {
-      cleanHost = cleanHost.replace(/:80$/, '');
-    }
+    const cleanHost = editHost.trim().replace(/\/+$/, '');
 
     const updatedItem: IPTVPlaylist = {
       ...editPlaylist,

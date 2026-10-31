@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import zlib from 'zlib';
 
 // Permite execução estendida na Vercel (até 60s) para sincronização de grandes listas IPTV
 export const maxDuration = 60;
@@ -26,7 +27,9 @@ export async function GET(req: NextRequest) {
       const parsedUrl = new URL(host);
       if (!username) username = parsedUrl.searchParams.get('username');
       if (!password) password = parsedUrl.searchParams.get('password');
-      host = parsedUrl.origin;
+      // Preserva exatamente a porta digitada pelo usuário (ex: http://dfpump.top:80)
+      const portPart = parsedUrl.port ? `:${parsedUrl.port}` : '';
+      host = `${parsedUrl.protocol}//${parsedUrl.hostname}${portPart}`;
     } catch {
       // Mantém o host original caso ocorra falha de parse
     }
@@ -39,7 +42,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  let cleanHost = host.trim().replace(/\/+$/, '');
+  // Preserva estritamente a porta digitada pelo usuário sem remover
+  const cleanHost = host.trim().replace(/\/+$/, '');
 
   const buildUrl = (targetHost: string) => {
     let url = `${targetHost}/player_api.php?username=${encodeURIComponent(username!)}&password=${encodeURIComponent(password!)}`;
@@ -50,16 +54,15 @@ export async function GET(req: NextRequest) {
     return url;
   };
 
-  // Monta lista de hosts candidatos para tentar de forma resiliente
+  // Monta lista de hosts candidatos para tentar de forma resiliente, SEMPRE priorizando a porta informada pelo usuário
   const candidateHosts: string[] = [cleanHost];
 
-  // Auto-espelho inteligente: rootdns.cc e dfpump.top são espelhos conhecidos deste provedor
+  // Auto-espelho inteligente entre rootdns.cc e dfpump.top
   if (cleanHost.includes('rootdns.cc')) {
-    const dfpump80 = cleanHost.replace('rootdns.cc', 'dfpump.top');
-    if (!candidateHosts.includes(dfpump80)) candidateHosts.push(dfpump80);
-    const dfpumpClean = dfpump80.replace(':80', '');
-    if (!candidateHosts.includes(dfpumpClean)) candidateHosts.push(dfpumpClean);
+    const dfpumpMirror = cleanHost.replace('rootdns.cc', 'dfpump.top');
+    if (!candidateHosts.includes(dfpumpMirror)) candidateHosts.push(dfpumpMirror);
   } else if (cleanHost.includes('dfpump.top')) {
+    // Se digitou dfpump.top:80, tenta também sem porta explícita (e vice-versa)
     if (cleanHost.includes(':80')) {
       const without80 = cleanHost.replace(':80', '');
       if (!candidateHosts.includes(without80)) candidateHosts.push(without80);
@@ -67,26 +70,8 @@ export async function GET(req: NextRequest) {
       const with80 = cleanHost.replace('dfpump.top', 'dfpump.top:80');
       if (!candidateHosts.includes(with80)) candidateHosts.push(with80);
     }
-    const rootdnsCandidate = cleanHost.replace('dfpump.top', 'rootdns.cc');
-    if (!candidateHosts.includes(rootdnsCandidate)) candidateHosts.push(rootdnsCandidate);
-  }
-
-  // Se cleanHost tiver porta 80 explícita em http, adiciona candidato limpo sem :80
-  if (cleanHost.includes(':80') && !cleanHost.includes(':8080')) {
-    const without80 = cleanHost.replace(':80', '');
-    if (!candidateHosts.includes(without80)) candidateHosts.push(without80);
-  }
-
-  // Se for http, tenta também versão https (caso o servidor suporte Cloudflare SSL)
-  if (cleanHost.startsWith('http://') && !cleanHost.includes(':8080')) {
-    const httpsCandidate = cleanHost.replace('http://', 'https://').replace(':80', '');
-    if (!candidateHosts.includes(httpsCandidate)) candidateHosts.push(httpsCandidate);
-  }
-
-  // Se o host já tiver :8080 e falhar, tenta também sem :8080
-  if (cleanHost.includes(':8080')) {
-    const without8080 = cleanHost.replace(':8080', '');
-    if (!candidateHosts.includes(without8080)) candidateHosts.push(without8080);
+    const rootdnsMirror = cleanHost.replace('dfpump.top', 'rootdns.cc');
+    if (!candidateHosts.includes(rootdnsMirror)) candidateHosts.push(rootdnsMirror);
   }
 
   const userAgents = [
@@ -110,8 +95,8 @@ export async function GET(req: NextRequest) {
             Accept: '*/*',
             'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
           },
-          cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel para listas grandes
-          signal: AbortSignal.timeout(30000), // Timeout de 30 segundos por tentativa
+          cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel
+          signal: AbortSignal.timeout(35000), // Timeout de 35 segundos
         });
 
         if (upstreamRes.ok) {
@@ -119,14 +104,13 @@ export async function GET(req: NextRequest) {
           break;
         } else {
           lastError = new Error(`HTTP ${upstreamRes.status} em ${candidate} (${upstreamRes.statusText})`);
-          // Se o erro não for 403 (ou seja, 404, 500, etc), não adianta tentar outro User-Agent no mesmo host
           if (upstreamRes.status !== 403) {
-            break;
+            break; // Se não for 403, pula para o próximo host candidato
           }
         }
       } catch (err: any) {
         lastError = err;
-        break; // Erro de rede ou timeout, tenta o próximo host candidato
+        break; // Erro de rede ou timeout, tenta próximo host
       }
     }
   }
@@ -147,15 +131,20 @@ export async function GET(req: NextRequest) {
     // Se o servidor upstream retornou HTML (ex: página de erro do Nginx ou desafio Cloudflare)
     if (rawText.trim().startsWith('<')) {
       return NextResponse.json(
-        { error: 'O servidor IPTV retornou uma resposta em HTML em vez de dados JSON. O servidor pode estar indisponível ou bloqueando a requisição.' },
+        { error: 'O servidor IPTV retornou uma resposta em HTML em vez de dados JSON. O servidor pode estar temporariamente indisponível.' },
         { status: 502 }
       );
     }
 
-    return new NextResponse(rawText, {
+    // Comprime com Gzip para contornar o limite rígido de payload de 4.5MB da Vercel
+    // Listas de 15MB de filmes caem para apenas ~1.1MB comprimidas e o navegador descompacta automaticamente
+    const gzippedBuffer = zlib.gzipSync(Buffer.from(rawText, 'utf-8'));
+
+    return new NextResponse(gzippedBuffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/json',
+        'Content-Encoding': 'gzip',
         'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     });
