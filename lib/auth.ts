@@ -23,9 +23,10 @@ export async function createSession(user: {
     .sign(SECRET_KEY);
 
   const cookieStore = await cookies();
+  const isHttps = process.env.NODE_ENV === 'production' && process.env.ENABLE_HTTPS === 'true';
   cookieStore.set('session_token', token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isHttps,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 30, // 30 dias
     path: '/',
