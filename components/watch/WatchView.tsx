@@ -665,46 +665,46 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 sm:space-y-8 overflow-x-hidden w-full max-w-full">
       {/* 1. Barra Superior com Navegação, Título e Ações */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4 w-full min-w-0">
+        <div className="flex items-start sm:items-center gap-3 min-w-0 w-full">
           <button
             onClick={() => router.push(getInfoUrl(streamType, id))}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer"
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer shrink-0 mt-0.5 sm:mt-0"
             title="Voltar para a página de detalhes"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
                 {isLive ? 'Ao Vivo' : isMovie ? 'Filme' : 'Série'}
               </span>
-              <span className="text-xs text-neutral-400 font-medium">
+              <span className="text-xs text-neutral-400 font-medium truncate max-w-[140px] sm:max-w-none">
                 {item?.category_name || 'Geral'}
               </span>
               {isSeries && activeEpisode && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-neutral-300">
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-neutral-300 shrink-0">
                   T{selectedSeason} • EP {activeEpisode.episode_num}
                 </span>
               )}
             </div>
-            <h1 className="text-base sm:text-xl font-bold text-white truncate max-w-xl">
+            <h1 className="text-sm sm:text-xl font-bold text-white break-words sm:truncate max-w-xl line-clamp-2 sm:line-clamp-1 leading-snug">
               {playerTitle}
             </h1>
           </div>
         </div>
 
         {/* Ações Rápidas: Info, Favorito, Assistido */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0">
           <Link
             href={getInfoUrl(streamType, id)}
-            className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-semibold border border-white/10 flex items-center gap-1.5 transition"
+            className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-semibold border border-white/10 flex items-center gap-1.5 transition"
           >
             <Info className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Ver Resumo</span>
+            <span>Ver Resumo</span>
           </Link>
 
           <button
@@ -724,14 +724,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 }
               }
             }}
-            className={`px-3.5 py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
               favorited
                 ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
                 : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-white/10'
             }`}
           >
             <Heart className={`w-3.5 h-3.5 ${favorited ? 'fill-rose-500 text-rose-500' : ''}`} />
-            <span className="hidden sm:inline">{favorited ? 'Favoritado' : 'Favoritar'}</span>
+            <span>{favorited ? 'Favoritado' : 'Favoritar'}</span>
           </button>
 
           <button
@@ -742,23 +742,23 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 markWatched(currentActiveId, streamType, playerTitle, true);
               }
             }}
-            className={`px-3.5 py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+            className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
               watched
                 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
                 : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-white/10'
             }`}
           >
             <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
-            <span className="hidden sm:inline">{watched ? 'Assistido' : 'Marcar Assistido'}</span>
+            <span>{watched ? 'Assistido' : 'Marcar Assistido'}</span>
           </button>
         </div>
       </div>
 
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0">
         {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
-          <div className="aspect-video w-full rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4 min-w-0 w-full">
+          <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -785,33 +785,33 @@ export default function WatchView({ type, id }: WatchViewProps) {
           </div>
 
           {/* Barra de Status e Metadados Técnicos do Vídeo */}
-          <div className="p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs w-full min-w-0">
             {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
-            <div className="flex flex-wrap items-center gap-2 text-neutral-300 text-[11px]">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-neutral-300 text-[11px] w-full sm:w-auto">
               {/* Duração */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Clock className="w-3.5 h-3.5 text-violet-400" />
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+                <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                 <span className="text-neutral-400">Duração:</span>
                 <span className="font-bold text-white">{displayDuration}</span>
               </div>
 
               {/* Tamanho em MB */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-                <HardDrive className="w-3.5 h-3.5 text-violet-400" />
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+                <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                 <span className="text-neutral-400">Tamanho:</span>
                 <span className="font-bold text-white">{displaySize}</span>
               </div>
 
               {/* Dimensões */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Monitor className="w-3.5 h-3.5 text-violet-400" />
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+                <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                 <span className="text-neutral-400">Dimensões:</span>
                 <span className="font-bold text-white font-mono">{displayDimensions}</span>
               </div>
 
               {/* Codec Utilizado */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Cpu className="w-3.5 h-3.5 text-violet-400" />
+              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+                <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                 <span className="text-neutral-400">Codec:</span>
                 <span className="font-bold text-white">{displayCodec}</span>
               </div>
@@ -819,7 +819,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
             {/* Ações Rápidas de Reprodução Externa */}
             {streamUrl && (
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
                 <a
                   href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
                   className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
@@ -842,8 +842,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
         </div>
 
         {/* Lado Direito: Dinâmica Diferenciada para Séries vs Ao Vivo / Filmes */}
-        <div className="lg:col-span-4 xl:col-span-3 space-y-3">
-          <div className="p-4 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-[540px]">
+        <div className="lg:col-span-4 xl:col-span-3 space-y-3 min-w-0 w-full">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-[480px] sm:h-[540px] max-w-full overflow-hidden">
             {/* ======================================================== */}
             {/* CENÁRIO 1: SÉRIES (Capítulos com Seletor de Temporada)     */}
             {/* ======================================================== */}
@@ -1134,84 +1134,84 @@ export default function WatchView({ type, id }: WatchViewProps) {
       {/* ========================================================================= */}
       {/* 3. SEÇÃO DEPOIS DO REPRODUTOR: DETALHES DO CAPÍTULO & SUGESTÕES DE SÉRIES/FILMES */}
       {/* ========================================================================= */}
-      <div className="space-y-8 pt-4">
+      <div className="space-y-6 sm:space-y-8 pt-2 sm:pt-4 w-full min-w-0">
         {/* Painel de Informações do Capítulo Selecionado */}
-        <div className="p-5 sm:p-6 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white">
-                      {isSeries ? 'Capítulo Atual' : isMovie ? 'Filme' : 'Canal'}
-                    </span>
+        <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4 w-full min-w-0 overflow-hidden">
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-white/5 pb-4 min-w-0 w-full">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+                <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shrink-0">
+                  {isSeries ? 'Capítulo Atual' : isMovie ? 'Filme' : 'Canal'}
+                </span>
 
-                    {genresList.map((genre) => (
-                      <span
-                        key={`pill_${genre}`}
-                        className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10"
-                      >
-                        {genre}
-                      </span>
-                    ))}
+                {genresList.map((genre) => (
+                  <span
+                    key={`pill_${genre}`}
+                    className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 shrink-0"
+                  >
+                    {genre}
+                  </span>
+                ))}
 
-                    {/* Data de Lançamento do Episódio ou Ano da Obra */}
-                    {currentEpAirDate ? (
-                      <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-violet-400" />
-                        Lançamento: {currentEpAirDate}
-                      </span>
-                    ) : enrichedMetadata?.year ? (
-                      <span className="text-[11px] font-medium text-neutral-400">
-                        {enrichedMetadata.year}
-                      </span>
-                    ) : null}
+                {/* Data de Lançamento do Episódio ou Ano da Obra */}
+                {currentEpAirDate ? (
+                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 flex items-center gap-1 shrink-0">
+                    <Calendar className="w-3 h-3 text-violet-400" />
+                    Lançamento: {currentEpAirDate}
+                  </span>
+                ) : enrichedMetadata?.year ? (
+                  <span className="text-[11px] font-medium text-neutral-400 shrink-0">
+                    {enrichedMetadata.year}
+                  </span>
+                ) : null}
 
-                    {/* Nota / Avaliação */}
-                    {currentEpMeta?.rating ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{' '}
-                        {currentEpMeta.rating}
-                      </span>
-                    ) : enrichedMetadata?.rating ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {enrichedMetadata.rating}
-                      </span>
-                    ) : null}
+                {/* Nota / Avaliação */}
+                {currentEpMeta?.rating ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{' '}
+                    {currentEpMeta.rating}
+                  </span>
+                ) : enrichedMetadata?.rating ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {enrichedMetadata.rating}
+                  </span>
+                ) : null}
 
-                    {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
-                      <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30">
-                        Via {enrichedMetadata.source.toUpperCase()}
-                      </span>
-                    )}
-                  </div>
-
-                  <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    {playerTitle}
-                  </h2>
-                </div>
-
-                {/* Duração e Resolução */}
-                <div className="flex items-center gap-3 text-xs text-neutral-400">
-                  {activeEpisode?.info?.duration && (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 border border-white/5">
-                      <Clock className="w-3.5 h-3.5 text-violet-400" />
-                      <span>{activeEpisode.info.duration}</span>
-                    </div>
-                  )}
-                  <div className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/5 font-mono text-[11px] uppercase text-neutral-300">
-                    {item?.container_extension || 'HD 1080p'}
-                  </div>
-                </div>
+                {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
+                  <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30 shrink-0">
+                    Via {enrichedMetadata.source.toUpperCase()}
+                  </span>
+                )}
               </div>
 
-              {/* Sinopse do Capítulo ou da Obra */}
-              <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl">
-                {currentEpMeta?.overview ||
-                  activeEpisode?.info?.plot ||
-                  enrichedMetadata?.overview ||
-                  seriesInfo?.info?.plot ||
-                  'Aproveite a reprodução fluida direta dos servidores CDN com navegação rápida de episódios.'}
-              </p>
+              <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words">
+                {playerTitle}
+              </h2>
             </div>
+
+            {/* Duração e Resolução */}
+            <div className="flex items-center gap-2 sm:gap-3 text-xs text-neutral-400 flex-wrap shrink-0">
+              {activeEpisode?.info?.duration && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-white/5 border border-white/5">
+                  <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span>{activeEpisode.info.duration}</span>
+                </div>
+              )}
+              <div className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-white/5 border border-white/5 font-mono text-[11px] uppercase text-neutral-300">
+                {item?.container_extension || 'HD 1080p'}
+              </div>
+            </div>
+          </div>
+
+          {/* Sinopse do Capítulo ou da Obra */}
+          <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words">
+            {currentEpMeta?.overview ||
+              activeEpisode?.info?.plot ||
+              enrichedMetadata?.overview ||
+              seriesInfo?.info?.plot ||
+              'Aproveite a reprodução fluida direta dos servidores CDN com navegação rápida de episódios.'}
+          </p>
+        </div>
 
         {/* Grade de Sugestões: Outras Séries e Filmes que Você Pode Gostar */}
         {suggestions.length > 0 && (
