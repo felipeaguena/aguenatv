@@ -90,10 +90,57 @@ export async function saveIPTVConfig(config: IPTVAccount): Promise<void> {
 // Gerenciamento de Múltiplas Listas M3U / IPTV
 // ==========================================
 
+// Sincronização em nuvem / servidor por usuário autenticado
+async function fetchUserServerPlaylists(): Promise<IPTVPlaylist[] | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch('/api/playlists');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data?.playlists)) {
+        return data.playlists;
+      }
+    }
+  } catch (err) {
+    console.warn('[db-local] Erro ao sincronizar playlists com servidor:', err);
+  }
+  return null;
+}
+
+async function syncUserServerPlaylists(lists: IPTVPlaylist[]): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    await fetch('/api/playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlists: lists }),
+    });
+  } catch (err) {
+    console.warn('[db-local] Erro ao enviar playlists para servidor:', err);
+  }
+}
+
 export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
   if (!localDB) return [];
   const setting = await localDB.settings.get('iptv_playlists');
   let lists = setting?.value as IPTVPlaylist[] | undefined;
+
+  // Se não tem no banco local ou foi feita nova sessão, tenta sincronizar da conta do usuário no servidor
+  if (!lists || !Array.isArray(lists) || lists.length === 0) {
+    const serverLists = await fetchUserServerPlaylists();
+    if (serverLists && serverLists.length > 0) {
+      lists = serverLists;
+      await localDB.settings.put({ key: 'iptv_playlists', value: lists });
+      const active = lists.find((l) => l.is_active) || lists[0];
+      if (active) {
+        await localDB.settings.put({
+          key: 'iptv_config',
+          value: { server_url: active.server_url, username: active.username, password: active.password },
+        });
+      }
+      return lists;
+    }
+  }
 
   // Migração transparente da lista única anterior para o modelo de múltiplas listas
   if (!lists || !Array.isArray(lists) || lists.length === 0) {
@@ -111,6 +158,7 @@ export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
       };
       lists = [defaultList];
       await localDB.settings.put({ key: 'iptv_playlists', value: lists });
+      await syncUserServerPlaylists(lists);
     } else {
       lists = [];
     }
@@ -122,6 +170,7 @@ export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
 export async function savePlaylists(lists: IPTVPlaylist[]): Promise<void> {
   if (!localDB) return;
   await localDB.settings.put({ key: 'iptv_playlists', value: lists });
+  await syncUserServerPlaylists(lists);
 }
 
 export async function savePlaylist(playlist: IPTVPlaylist): Promise<IPTVPlaylist[]> {

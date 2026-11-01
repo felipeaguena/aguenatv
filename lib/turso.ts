@@ -89,6 +89,23 @@ export async function ensureTursoSchema(): Promise<void> {
             last_watched_at TEXT DEFAULT (datetime('now'))
           );
 
+          CREATE TABLE IF NOT EXISTS user_playlists (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            server_url TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            is_active INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            last_synced INTEGER,
+            channels_count INTEGER,
+            movies_count INTEGER,
+            series_count INTEGER
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_user_playlists_user ON user_playlists(user_id);
           CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address);
           CREATE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username);
           CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);

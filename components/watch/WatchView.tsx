@@ -212,24 +212,32 @@ export default function WatchView({ type, id }: WatchViewProps) {
     if (!seriesInfo?.episodes) return;
 
     let targetEp: SeriesEpisode | null = null;
-    let targetSeason = selectedSeason;
+    let targetSeason = seasonParam || selectedSeason;
 
-    // Se temos um ep no query param, procura em todas as temporadas
+    // Se temos um ep no query param, procura na temporada selecionada primeiro, depois em todas
     if (episodeParam) {
-      for (const sKey of Object.keys(seriesInfo.episodes)) {
-        const found = seriesInfo.episodes[sKey].find((e) => String(e.id) === String(episodeParam));
+      if (seriesInfo.episodes[targetSeason]) {
+        const found = seriesInfo.episodes[targetSeason].find((e) => String(e.id) === String(episodeParam));
         if (found) {
           targetEp = found;
-          targetSeason = sKey;
-          break;
+        }
+      }
+      if (!targetEp) {
+        for (const sKey of Object.keys(seriesInfo.episodes)) {
+          const found = seriesInfo.episodes[sKey].find((e) => String(e.id) === String(episodeParam));
+          if (found) {
+            targetEp = found;
+            targetSeason = sKey;
+            break;
+          }
         }
       }
     }
 
-    // Se não encontrou pelo epParam ou não foi passado, pega o primeiro episódio da temporada
+    // Se não encontrou pelo epParam ou não foi passado, pega o primeiro episódio da temporada alvo
     if (!targetEp) {
       const sKeys = Object.keys(seriesInfo.episodes);
-      const chosenSeason = seriesInfo.episodes[selectedSeason] ? selectedSeason : sKeys[0];
+      const chosenSeason = seriesInfo.episodes[targetSeason] ? targetSeason : sKeys[0];
       if (chosenSeason && seriesInfo.episodes[chosenSeason]?.length > 0) {
         targetEp = seriesInfo.episodes[chosenSeason][0];
         targetSeason = chosenSeason;
@@ -240,7 +248,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
       setActiveEpisode(targetEp);
       setSelectedSeason(targetSeason);
     }
-  }, [seriesInfo, episodeParam, selectedSeason]);
+  }, [seriesInfo, episodeParam, seasonParam]);
 
   // 4. Efeito: Busca Metadados Enriquecidos (TMDb / Kitsu / TVMaze) e Gera Sugestões Relacionadas
   useEffect(() => {
@@ -607,8 +615,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   const handleSelectEpisode = useCallback((ep: SeriesEpisode) => {
     setActiveEpisode(ep);
-    router.replace(getWatchUrl('series', id, ep.id));
-  }, [id, router]);
+    router.replace(getWatchUrl('series', id, ep.id, selectedSeason));
+  }, [id, router, selectedSeason]);
 
   // =========================================================================
   // 3. RETORNOS CONDICIONAIS DE RENDERIZAÇÃO (SEGUROS - APÓS TODOS OS HOOKS)
@@ -882,8 +890,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                           <button
                             key={`season_opt_${season.season_number}`}
                             onClick={() => {
-                              setSelectedSeason(String(season.season_number));
+                              const newSeason = String(season.season_number);
+                              setSelectedSeason(newSeason);
                               setIsSeasonDropdownOpen(false);
+                              if (seriesInfo?.episodes && seriesInfo.episodes[newSeason]?.length > 0) {
+                                const firstEp = seriesInfo.episodes[newSeason][0];
+                                setActiveEpisode(firstEp);
+                                router.replace(getWatchUrl('series', id, firstEp.id, newSeason));
+                              }
                             }}
                             className={`w-full px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between text-left transition cursor-pointer ${
                               isCurrent
