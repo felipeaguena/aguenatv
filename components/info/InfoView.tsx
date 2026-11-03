@@ -700,17 +700,21 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   <span className="hidden md:inline">{favorited ? 'Favoritado' : 'Adicionar aos Favoritos'}</span>
                 </button>
 
-                {/* Botão Marcar Assistido */}
+                {/* Botão Marcar Concluído */}
                 <button
                   onClick={() => {
                     if (watched) {
                       removeWatched(item.stream_id, streamType);
                     } else {
-                      markWatched(item.stream_id, streamType, item.title || item.name, true);
+                      markWatched(item.stream_id, streamType, item.title || item.name, true, {
+                        posterUrl: posterImage,
+                        categoryName: item.category_name,
+                        rating: displayRating || item.rating,
+                      });
                     }
                   }}
-                  title={watched ? 'Desmarcar assistido' : 'Marcar como assistido'}
-                  aria-label={watched ? 'Desmarcar assistido' : 'Marcar como assistido'}
+                  title={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
+                  aria-label={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
                   className={`w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-4 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
                     watched
                       ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
@@ -718,7 +722,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   }`}
                 >
                   <CheckCircle2 className={`w-5 h-5 md:w-4 md:h-4 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
-                  <span className="hidden md:inline">{watched ? 'Assistido' : 'Marcar Assistido'}</span>
+                  <span className="hidden md:inline">{watched ? 'Concluído' : 'Marcar Concluído'}</span>
                 </button>
               </div>
             </div>

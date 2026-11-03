@@ -61,7 +61,7 @@ function CatalogContent() {
   const paramPage = paramPageRaw ? parseInt(paramPageRaw, 10) || 1 : 1;
 
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
-  const { isWatched } = useWatched();
+  const { isWatched, markWatched, removeWatched } = useWatched();
 
   const [allItems, setAllItems] = useState<BaseStreamItem[]>([]);
   const [allCategories, setAllCategories] = useState<LocalCategory[]>([]);
@@ -650,6 +650,35 @@ function CatalogContent() {
                             title={favorited ? 'Remover dos favoritos' : 'Favoritar'}
                           >
                             <Heart className={`w-3.5 h-3.5 ${favorited ? 'fill-rose-500' : ''}`} />
+                          </button>
+
+                          {/* Botão Fixo Concluído / Não Concluído */}
+                          <button
+                            onClick={() => {
+                              if (watched) {
+                                removeWatched(item.stream_id, item.stream_type);
+                              } else {
+                                markWatched(
+                                  item.stream_id,
+                                  item.stream_type,
+                                  item.title || item.name,
+                                  true,
+                                  {
+                                    posterUrl: item.stream_icon,
+                                    categoryName: item.category_name,
+                                    rating: item.rating,
+                                  }
+                                );
+                              }
+                            }}
+                            className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                              watched
+                                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                                : 'bg-white/5 border-white/5 text-neutral-400 hover:text-white hover:border-emerald-500/30'
+                            }`}
+                            title={watched ? 'Concluído (clique para desmarcar)' : 'Marcar como concluído'}
+                          >
+                            <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-500/20' : ''}`} />
                           </button>
 
                           {/* Botão Assistir */}

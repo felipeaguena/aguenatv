@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { IPTVPlaylist } from '@/lib/types';
+import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -27,16 +28,18 @@ async function saveLocalFilePlaylists(data: Record<string, IPTVPlaylist[]>): Pro
   }
 }
 
-// GET /api/playlists - Retorna as playlists do usuário logado
+// GET /api/playlists - Retorna as playlists exclusivamente do usuário logado
 export async function GET() {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
+  await ensureDataMigratedToFelipeAguena();
+
   const userId = session.userId;
 
-  // 1. Se Turso configurado, busca do banco
+  // 1. Se Turso configurado, busca do banco para o usuário logado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -60,7 +63,7 @@ export async function GET() {
         series_count: row.series_count ? Number(row.series_count) : undefined,
       }));
 
-      return NextResponse.json({ playlists });
+      return NextResponse.json({ playlists, userId });
     } catch (e) {
       console.warn('[Playlists] Turso falhou, usando fallback em arquivo local:', e);
     }
@@ -69,15 +72,17 @@ export async function GET() {
   // 2. Fallback de arquivo local por usuário
   const allUserPlaylists = await getLocalFilePlaylists();
   const userLists = allUserPlaylists[userId] || [];
-  return NextResponse.json({ playlists: userLists });
+  return NextResponse.json({ playlists: userLists, userId });
 }
 
-// POST /api/playlists - Salva a lista completa de playlists do usuário logado
+// POST /api/playlists - Salva a lista completa de playlists exclusivamente do usuário logado
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
+
+  await ensureDataMigratedToFelipeAguena();
 
   const userId = session.userId;
   const body = await req.json();
@@ -115,16 +120,16 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      return NextResponse.json({ success: true, playlists });
+      return NextResponse.json({ success: true, playlists, userId });
     } catch (e) {
       console.warn('[Playlists] Erro ao salvar playlists no Turso, usando fallback:', e);
     }
   }
 
-  // 2. Salva no arquivo local persistente no servidor
+  // 2. Salva no arquivo local persistente no servidor com chave de usuário isolada
   const allUserPlaylists = await getLocalFilePlaylists();
   allUserPlaylists[userId] = playlists;
   await saveLocalFilePlaylists(allUserPlaylists);
 
-  return NextResponse.json({ success: true, playlists });
+  return NextResponse.json({ success: true, playlists, userId });
 }

@@ -2,30 +2,40 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FavoriteItem, StreamType } from '@/lib/types';
 
-const STORAGE_KEY = 'miruro_local_favorites';
 const EVENT_NAME = 'miruro_favorites_updated';
+
+function getStorageKey(userId?: string | null): string {
+  return userId ? `miruro_fav_${userId}` : 'miruro_local_favorites';
+}
 
 function normalizeType(t: string): string {
   if (t === 'movies') return 'movie';
   return t;
 }
 
-// Cache em memória a nível de módulo (compartilhado entre todas as instâncias)
+// Cache em memória compartilhado
 let globalFavoritesCache: FavoriteItem[] | null = null;
+let globalFavoritesUserId: string | null = null;
 let lastFavoritesFetch = 0;
 let favoritesInFlight: Promise<FavoriteItem[]> | null = null;
 const CACHE_TTL_MS = 60 * 1000; // 60 segundos de cooldown entre chamadas à API
 
-/**
- * Atualiza o cache global, localStorage e notifica outros componentes assincronamente
- * via setTimeout para NUNCA conflitar com a renderização do React.
- */
-function broadcastFavoritesUpdated(next: FavoriteItem[]) {
+export function resetFavoritesCache() {
+  globalFavoritesCache = null;
+  globalFavoritesUserId = null;
+  lastFavoritesFetch = 0;
+  favoritesInFlight = null;
+}
+
+function broadcastFavoritesUpdated(next: FavoriteItem[], userId?: string | null) {
   globalFavoritesCache = next;
   lastFavoritesFetch = Date.now();
+  if (userId) {
+    globalFavoritesUserId = userId;
+  }
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(getStorageKey(globalFavoritesUserId), JSON.stringify(next));
     } catch (e) {}
     setTimeout(() => {
       window.dispatchEvent(new Event(EVENT_NAME));
@@ -44,7 +54,14 @@ async function syncFavoritesFromServer(): Promise<FavoriteItem[]> {
       if (res.ok) {
         const data = await res.json();
         const serverFavs: FavoriteItem[] = data.favorites || [];
-        broadcastFavoritesUpdated(serverFavs);
+        const resUserId: string | null = data.userId || null;
+
+        // Se o usuário logado mudou, invalida o cache antigo
+        if (resUserId && globalFavoritesUserId && resUserId !== globalFavoritesUserId) {
+          globalFavoritesCache = null;
+        }
+        globalFavoritesUserId = resUserId;
+        broadcastFavoritesUpdated(serverFavs, resUserId);
         return serverFavs;
       }
     } catch (e) {
@@ -60,12 +77,10 @@ async function syncFavoritesFromServer(): Promise<FavoriteItem[]> {
 
 export function useFavorites() {
   const [favorites, setFavorites] = useState<FavoriteItem[]>(() => {
-    // Retorna o cache em memória caso já tenha sido carregado em navegação client-side
     return globalFavoritesCache || [];
   });
   const [loading, setLoading] = useState(!globalFavoritesCache);
 
-  // Sincroniza com /api/favorites (que salva em disco local ou Supabase)
   const fetchFavorites = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && globalFavoritesCache && now - lastFavoritesFetch < CACHE_TTL_MS) {
@@ -82,12 +97,10 @@ export function useFavorites() {
     }
   }, []);
 
-  // Carrega ao montar e sincroniza com eventos de abas/outros componentes
   useEffect(() => {
-    // Restaura do localStorage no cliente logo após a hidratação se o cache global ainda estiver vazio
     if (!globalFavoritesCache && typeof window !== 'undefined') {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalFavoritesUserId));
         if (cached) {
           const parsed = JSON.parse(cached);
           globalFavoritesCache = parsed;
@@ -100,11 +113,13 @@ export function useFavorites() {
 
     const handleSync = () => {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalFavoritesUserId));
         if (cached) {
           const parsed: FavoriteItem[] = JSON.parse(cached);
           globalFavoritesCache = parsed;
           setFavorites(parsed);
+        } else if (globalFavoritesCache) {
+          setFavorites(globalFavoritesCache);
         }
       } catch (e) {}
     };
@@ -131,7 +146,7 @@ export function useFavorites() {
 
       const tempItem: FavoriteItem = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        user_id: 'me',
+        user_id: globalFavoritesUserId || 'me',
         stream_id: targetId,
         stream_type: normType,
         title: item.title,
@@ -141,20 +156,17 @@ export function useFavorites() {
         created_at: new Date().toISOString(),
       };
 
-      // 1. Calcula o próximo estado a partir da lista mais atualizada
       const currentList = globalFavoritesCache || favorites;
       const filtered = currentList.filter(
         (f) => !(String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType)
       );
       const next = [tempItem, ...filtered];
 
-      // 2. Atualização otimista imediata no componente atual
+      // 1. Otimista imediato
       setFavorites(next);
+      broadcastFavoritesUpdated(next, globalFavoritesUserId);
 
-      // 3. Atualiza cache em memória, localStorage e notifica outros componentes
-      broadcastFavoritesUpdated(next);
-
-      // 4. Persistência na API (servidor local ou Supabase)
+      // 2. Persistência na API
       try {
         const res = await fetch('/api/favorites', {
           method: 'POST',
@@ -176,7 +188,7 @@ export function useFavorites() {
                 : f
             );
             setFavorites(updated);
-            broadcastFavoritesUpdated(updated);
+            broadcastFavoritesUpdated(updated, data.userId || globalFavoritesUserId);
           }
         }
       } catch (err) {
@@ -196,11 +208,9 @@ export function useFavorites() {
         (f) => !(String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType)
       );
 
-      // Atualização imediata
       setFavorites(next);
-      broadcastFavoritesUpdated(next);
+      broadcastFavoritesUpdated(next, globalFavoritesUserId);
 
-      // Remoção na API
       try {
         await fetch(`/api/favorites?streamId=${targetId}&streamType=${normType}`, {
           method: 'DELETE',

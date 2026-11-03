@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
+import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
 import fs from 'fs/promises';
 import path from 'path';
 import { ContinueWatchingItem } from '@/lib/types';
@@ -18,7 +19,6 @@ async function getLocalContinueWatching(): Promise<ContinueWatchingItem[]> {
 }
 
 async function saveLocalContinueWatching(items: ContinueWatchingItem[]): Promise<void> {
-  // Em ambientes serverless como a Vercel, o sistema de arquivos raiz é read-only
   if (process.env.VERCEL) return;
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
@@ -28,12 +28,17 @@ async function saveLocalContinueWatching(items: ContinueWatchingItem[]): Promise
   }
 }
 
-// GET: Retorna os itens de Continue Assistindo ordenados por data mais recente
+// GET: Retorna os itens de Continue Assistindo ordenados por data mais recente estritamente do usuário logado
 export async function GET() {
   const session = await getSession();
-  const userId = session?.userId || 'local_user';
+  if (!session) {
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+  }
+  const userId = session.userId;
 
-  // 1. Se o Turso estiver configurado, tenta buscar
+  await ensureDataMigratedToFelipeAguena();
+
+  // 1. Se o Turso estiver configurado, busca por user_id estrito
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -43,23 +48,17 @@ export async function GET() {
       });
 
       if (res.rows.length > 0) {
-        return NextResponse.json({ items: res.rows });
+        return NextResponse.json({ items: res.rows, userId });
       }
     } catch (e) {
       console.warn('[ContinueWatching] Turso falhou ou tabela ausente, usando arquivo local:', e);
     }
   }
 
-  // 2. Fallback de Desenvolvimento / Localhost: Lê do arquivo JSON local
+  // 2. Armazenamento local: estritamente o user_id logado
   const allItems = await getLocalContinueWatching();
   const sortedItems = allItems
-    .filter(
-      (item: any) =>
-        !item.user_id ||
-        item.user_id === userId ||
-        item.user_id === 'local_user' ||
-        item.user_id === '00000000-0000-0000-0000-000000000001'
-    )
+    .filter((item: any) => item.user_id === userId)
     .sort(
       (a, b) =>
         new Date(b.last_watched_at).getTime() - new Date(a.last_watched_at).getTime()
@@ -80,16 +79,21 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ items: userItems.slice(0, 25) });
+  return NextResponse.json({ items: userItems.slice(0, 25), userId });
 }
 
-// POST: Salva ou atualiza o progresso de reprodução
+// POST: Salva ou atualiza o progresso de reprodução estritamente para o usuário logado
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
-    const userId = session?.userId || 'local_user';
-    const body = await req.json();
+    if (!session) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    }
+    const userId = session.userId;
 
+    await ensureDataMigratedToFelipeAguena();
+
+    const body = await req.json();
     const {
       streamId,
       streamType,
@@ -115,7 +119,7 @@ export async function POST(req: NextRequest) {
     const dur = Number(duration) || 0;
     const progressPercent = dur > 0 ? Math.min(100, Math.round((curTime / dur) * 1000) / 10) : 0;
 
-    // Chave única: armazena 1 único registro por título, com o último capítulo assistido
+    // Chave única: armazena 1 único registro por título para este usuário
     const effectiveStreamId = streamType === 'series' && seriesId ? String(seriesId) : String(streamId);
     const uniqueId = `${streamType}_${effectiveStreamId}`;
 
@@ -142,16 +146,19 @@ export async function POST(req: NextRequest) {
       last_watched_at: new Date().toISOString(),
     };
 
-    // 1. Persiste no arquivo JSON local garantindo 1 único registro por título
+    // 1. Persiste no arquivo JSON local garantindo isolamento estrito de usuário
     const allItems = await getLocalContinueWatching();
     const filtered = allItems.filter(
       (i: any) =>
-        i.id !== uniqueId &&
-        !(i.stream_type === streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) &&
-        !String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`)
+        !(
+          i.user_id === userId &&
+          (i.id === uniqueId ||
+            (i.stream_type === streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) ||
+            String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`))
+        )
     );
     // Insere no início
-    const updated = [item, ...filtered].slice(0, 50);
+    const updated = [item, ...filtered];
     await saveLocalContinueWatching(updated);
 
     // 2. Se o Turso estiver configurado, salva na nuvem
@@ -162,9 +169,10 @@ export async function POST(req: NextRequest) {
           sql: `INSERT INTO continue_watching (
                   id, user_id, stream_id, stream_type, title,
                   poster_url, backdrop_url, category_name,
+                  series_id, series_title,
                   episode_id, episode_num, season_num, episode_title,
                   current_time, duration, progress_percentage, last_watched_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   user_id = excluded.user_id,
                   stream_id = excluded.stream_id,
@@ -173,6 +181,8 @@ export async function POST(req: NextRequest) {
                   poster_url = excluded.poster_url,
                   backdrop_url = excluded.backdrop_url,
                   category_name = excluded.category_name,
+                  series_id = excluded.series_id,
+                  series_title = excluded.series_title,
                   episode_id = excluded.episode_id,
                   episode_num = excluded.episode_num,
                   season_num = excluded.season_num,
@@ -180,7 +190,8 @@ export async function POST(req: NextRequest) {
                   current_time = excluded.current_time,
                   duration = excluded.duration,
                   progress_percentage = excluded.progress_percentage,
-                  last_watched_at = excluded.last_watched_at`,
+                  last_watched_at = excluded.last_watched_at
+                WHERE continue_watching.user_id = excluded.user_id`,
           args: [
             uniqueId,
             userId,
@@ -190,6 +201,8 @@ export async function POST(req: NextRequest) {
             item.poster_url || null,
             item.backdrop_url || null,
             item.category_name || null,
+            item.series_id || null,
+            item.series_title || null,
             item.episode_id || null,
             item.episode_num !== undefined ? item.episode_num : null,
             item.season_num !== undefined ? item.season_num : null,
@@ -205,16 +218,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, item });
+    return NextResponse.json({ success: true, item, userId });
   } catch (error) {
     console.error('[ContinueWatching] Erro no POST:', error);
     return NextResponse.json({ error: 'Erro ao salvar progresso' }, { status: 500 });
   }
 }
 
-// DELETE: Remove um item do Continue Assistindo
+// DELETE: Remove um item do Continue Assistindo do usuário logado
 export async function DELETE(req: NextRequest) {
   try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    }
+    const userId = session.userId;
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     const streamId = searchParams.get('streamId');
@@ -226,6 +245,7 @@ export async function DELETE(req: NextRequest) {
 
     const allItems = await getLocalContinueWatching();
     const updated = allItems.filter((i: any) => {
+      if (i.user_id !== userId) return true; // Preserva itens de outros usuários
       if (id && i.id === id) return false;
       if (streamId && streamType && i.stream_id === streamId && i.stream_type === streamType) return false;
       return true;
@@ -237,13 +257,13 @@ export async function DELETE(req: NextRequest) {
         await ensureTursoSchema();
         if (id) {
           await turso.execute({
-            sql: 'DELETE FROM continue_watching WHERE id = ?',
-            args: [id],
+            sql: 'DELETE FROM continue_watching WHERE id = ? AND user_id = ?',
+            args: [id, userId],
           });
         } else if (streamId && streamType) {
           await turso.execute({
-            sql: 'DELETE FROM continue_watching WHERE stream_id = ? AND stream_type = ?',
-            args: [String(streamId), streamType],
+            sql: 'DELETE FROM continue_watching WHERE stream_id = ? AND stream_type = ? AND user_id = ?',
+            args: [String(streamId), streamType, userId],
           });
         }
       } catch (e) {
@@ -251,7 +271,7 @@ export async function DELETE(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, userId });
   } catch (error) {
     console.error('[ContinueWatching] Erro no DELETE:', error);
     return NextResponse.json({ error: 'Erro ao remover item' }, { status: 500 });

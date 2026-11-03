@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
+import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -32,7 +33,9 @@ export async function GET() {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
-  // 1. Se o Turso estiver configurado, busca no banco
+  await ensureDataMigratedToFelipeAguena();
+
+  // 1. Se o Turso estiver configurado, busca no banco por user_id estrito
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -41,27 +44,22 @@ export async function GET() {
         args: [session.userId],
       });
 
-      return NextResponse.json({ favorites: res.rows });
+      return NextResponse.json({ favorites: res.rows, userId: session.userId });
     } catch (e) {
       console.warn('[Favorites] Turso falhou, usando armazenamento local:', e);
     }
   }
 
-  // 2. Fallback de Desenvolvimento / Localhost (sem Turso): Lê do arquivo JSON local
+  // 2. Armazenamento local: estritamente o user_id logado
   const allFavorites = await getLocalFavorites();
   const userFavorites = allFavorites
-    .filter(
-      (f) =>
-        f.user_id === session.userId ||
-        f.user_id === '00000000-0000-0000-0000-000000000001' ||
-        f.user_id === 'me'
-    )
+    .filter((f) => f.user_id === session.userId)
     .sort(
       (a, b) =>
         new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
     );
 
-  return NextResponse.json({ favorites: userFavorites });
+  return NextResponse.json({ favorites: userFavorites, userId: session.userId });
 }
 
 export async function POST(req: NextRequest) {
@@ -69,6 +67,8 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
+
+  await ensureDataMigratedToFelipeAguena();
 
   const body = await req.json();
   const { streamId, streamType, title, posterUrl, categoryName, rating } = body;
@@ -111,14 +111,14 @@ export async function POST(req: NextRequest) {
       });
 
       if (res.rows.length > 0) {
-        return NextResponse.json({ favorite: res.rows[0] }, { status: 201 });
+        return NextResponse.json({ favorite: res.rows[0], userId: session.userId }, { status: 201 });
       }
     } catch (e) {
       console.warn('[Favorites] Falha no Turso, gravando em persistência local:', e);
     }
   }
 
-  // 2. Fallback Localhost: Grava no arquivo JSON local data/local-favorites.json
+  // 2. Persistência Localhost: Grava no arquivo JSON local data/local-favorites.json
   const allFavorites = await getLocalFavorites();
   const newFav = {
     id: `fav_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -132,11 +132,11 @@ export async function POST(req: NextRequest) {
     created_at: new Date().toISOString(),
   };
 
-  // Remove duplicata pré-existente do mesmo título para este usuário
+  // Remove duplicata pré-existente do mesmo título para este usuário específico
   const filtered = allFavorites.filter(
     (f) =>
       !(
-        (f.user_id === session.userId || f.user_id === '00000000-0000-0000-0000-000000000001' || f.user_id === 'me') &&
+        f.user_id === session.userId &&
         String(f.stream_id) === String(streamId) &&
         f.stream_type === streamType
       )
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
   filtered.unshift(newFav);
   await saveLocalFavorites(filtered);
 
-  return NextResponse.json({ favorite: newFav }, { status: 201 });
+  return NextResponse.json({ favorite: newFav, userId: session.userId }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
@@ -162,7 +162,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400 });
   }
 
-  // 1. Remove do Turso se configurado
+  // 1. Remove do Turso se configurado (isolado por user_id)
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -175,17 +175,17 @@ export async function DELETE(req: NextRequest) {
     }
   }
 
-  // 2. Fallback Localhost: Remove do arquivo local-favorites.json
+  // 2. Remove do arquivo local-favorites.json (estritamente para o user_id logado)
   const allFavorites = await getLocalFavorites();
   const filtered = allFavorites.filter(
     (f) =>
       !(
-        (f.user_id === session.userId || f.user_id === '00000000-0000-0000-0000-000000000001' || f.user_id === 'me') &&
+        f.user_id === session.userId &&
         String(f.stream_id) === String(streamId) &&
         f.stream_type === streamType
       )
   );
   await saveLocalFavorites(filtered);
 
-  return NextResponse.json({ success: true, message: 'Removido dos favoritos' });
+  return NextResponse.json({ success: true, message: 'Removido dos favoritos', userId: session.userId });
 }

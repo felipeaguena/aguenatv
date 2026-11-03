@@ -91,14 +91,14 @@ export async function saveIPTVConfig(config: IPTVAccount): Promise<void> {
 // ==========================================
 
 // Sincronização em nuvem / servidor por usuário autenticado
-async function fetchUserServerPlaylists(): Promise<IPTVPlaylist[] | null> {
+async function fetchUserServerPlaylists(): Promise<{ playlists: IPTVPlaylist[]; userId: string } | null> {
   if (typeof window === 'undefined') return null;
   try {
     const res = await fetch('/api/playlists');
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.playlists)) {
-        return data.playlists;
+        return { playlists: data.playlists, userId: data.userId || '' };
       }
     }
   } catch (err) {
@@ -122,14 +122,40 @@ async function syncUserServerPlaylists(lists: IPTVPlaylist[]): Promise<void> {
 
 export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
   if (!localDB) return [];
+
+  // Verifica o usuário ativo no servidor
+  const serverResult = await fetchUserServerPlaylists();
+  const currentUserId = serverResult?.userId || null;
+  const storedUserSetting = await localDB.settings.get('iptv_user_id');
+  const storedUserId = storedUserSetting?.value || null;
+
+  // Se o usuário na sessão mudou em relação ao que estava salvo no Dexie, sincroniza com o usuário atual
+  if (currentUserId && storedUserId !== currentUserId) {
+    const lists = serverResult?.playlists || [];
+    await localDB.settings.put({ key: 'iptv_user_id', value: currentUserId });
+    await localDB.settings.put({ key: 'iptv_playlists', value: lists });
+
+    const active = lists.find((l) => l.is_active) || lists[0];
+    if (active) {
+      await localDB.settings.put({
+        key: 'iptv_config',
+        value: { server_url: active.server_url, username: active.username, password: active.password },
+      });
+    } else {
+      await localDB.settings.delete('iptv_config');
+    }
+
+    return lists;
+  }
+
   const setting = await localDB.settings.get('iptv_playlists');
   let lists = setting?.value as IPTVPlaylist[] | undefined;
 
-  // Se não tem no banco local ou foi feita nova sessão, tenta sincronizar da conta do usuário no servidor
+  // Se não tem no banco local ou foi feita nova sessão, usa playlists vindas do servidor
   if (!lists || !Array.isArray(lists) || lists.length === 0) {
-    const serverLists = await fetchUserServerPlaylists();
-    if (serverLists && serverLists.length > 0) {
-      lists = serverLists;
+    if (serverResult && serverResult.playlists.length > 0) {
+      lists = serverResult.playlists;
+      await localDB.settings.put({ key: 'iptv_user_id', value: serverResult.userId });
       await localDB.settings.put({ key: 'iptv_playlists', value: lists });
       const active = lists.find((l) => l.is_active) || lists[0];
       if (active) {
@@ -142,29 +168,7 @@ export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
     }
   }
 
-  // Migração transparente da lista única anterior para o modelo de múltiplas listas
-  if (!lists || !Array.isArray(lists) || lists.length === 0) {
-    const currentCfg = await getSavedIPTVConfig();
-    if (currentCfg && currentCfg.server_url) {
-      const defaultList: IPTVPlaylist = {
-        id: 'default_list',
-        name: 'Lista Atual',
-        server_url: currentCfg.server_url,
-        username: currentCfg.username,
-        password: currentCfg.password,
-        is_active: true,
-        created_at: new Date().toISOString(),
-        last_synced: (await getLastSyncTime()) || undefined,
-      };
-      lists = [defaultList];
-      await localDB.settings.put({ key: 'iptv_playlists', value: lists });
-      await syncUserServerPlaylists(lists);
-    } else {
-      lists = [];
-    }
-  }
-
-  return lists;
+  return lists || [];
 }
 
 export async function savePlaylists(lists: IPTVPlaylist[]): Promise<void> {
@@ -242,4 +246,27 @@ export async function deletePlaylist(id: string): Promise<IPTVPlaylist[]> {
 
   await savePlaylists(filtered);
   return filtered;
+}
+
+// Limpa todos os dados locais do usuário em caso de logout
+export async function clearUserLocalData(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    if (localDB) {
+      await localDB.settings.clear();
+      await localDB.streams.clear();
+      await localDB.categories.clear();
+    }
+    // Limpa chaves de cache em localStorage
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('miruro_') || key.startsWith('iptv_'))) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach((k) => localStorage.removeItem(k));
+  } catch (err) {
+    console.warn('[db-local] Erro ao limpar dados locais do usuário:', err);
+  }
 }

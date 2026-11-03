@@ -2,30 +2,40 @@
 import { useState, useEffect, useCallback } from 'react';
 import { WatchedItem, StreamType } from '@/lib/types';
 
-const STORAGE_KEY = 'miruro_local_watched';
 const EVENT_NAME = 'miruro_watched_updated';
+
+function getStorageKey(userId?: string | null): string {
+  return userId ? `miruro_wat_${userId}` : 'miruro_local_watched';
+}
 
 function normalizeType(t: string): string {
   if (t === 'movies') return 'movie';
   return t;
 }
 
-// Cache em memória a nível de módulo (compartilhado entre todas as instâncias)
+// Cache em memória compartilhado
 let globalWatchedCache: WatchedItem[] | null = null;
+let globalWatchedUserId: string | null = null;
 let lastWatchedFetch = 0;
 let watchedInFlight: Promise<WatchedItem[]> | null = null;
 const CACHE_TTL_MS = 60 * 1000; // 60 segundos de cooldown entre chamadas à API
 
-/**
- * Atualiza o cache global, localStorage e notifica outros componentes assincronamente
- * via setTimeout para NUNCA conflitar com a renderização do React.
- */
-function broadcastWatchedUpdated(next: WatchedItem[]) {
+export function resetWatchedCache() {
+  globalWatchedCache = null;
+  globalWatchedUserId = null;
+  lastWatchedFetch = 0;
+  watchedInFlight = null;
+}
+
+function broadcastWatchedUpdated(next: WatchedItem[], userId?: string | null) {
   globalWatchedCache = next;
   lastWatchedFetch = Date.now();
+  if (userId) {
+    globalWatchedUserId = userId;
+  }
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(getStorageKey(globalWatchedUserId), JSON.stringify(next));
     } catch (e) {}
     setTimeout(() => {
       window.dispatchEvent(new Event(EVENT_NAME));
@@ -44,7 +54,13 @@ async function syncWatchedFromServer(): Promise<WatchedItem[]> {
       if (res.ok) {
         const data = await res.json();
         const serverWatched: WatchedItem[] = data.watched || [];
-        broadcastWatchedUpdated(serverWatched);
+        const resUserId: string | null = data.userId || null;
+
+        if (resUserId && globalWatchedUserId && resUserId !== globalWatchedUserId) {
+          globalWatchedCache = null;
+        }
+        globalWatchedUserId = resUserId;
+        broadcastWatchedUpdated(serverWatched, resUserId);
         return serverWatched;
       }
     } catch (e) {
@@ -81,10 +97,9 @@ export function useWatched() {
   }, []);
 
   useEffect(() => {
-    // Restaura do localStorage no cliente logo após a hidratação se o cache global ainda estiver vazio
     if (!globalWatchedCache && typeof window !== 'undefined') {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalWatchedUserId));
         if (cached) {
           const parsed = JSON.parse(cached);
           globalWatchedCache = parsed;
@@ -97,11 +112,13 @@ export function useWatched() {
 
     const handleSync = () => {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalWatchedUserId));
         if (cached) {
           const parsed: WatchedItem[] = JSON.parse(cached);
           globalWatchedCache = parsed;
           setWatchedList(parsed);
+        } else if (globalWatchedCache) {
+          setWatchedList(globalWatchedCache);
         }
       } catch (e) {}
     };
@@ -119,17 +136,25 @@ export function useWatched() {
       streamId: string | number,
       streamType: string,
       title: string,
-      isCompleted = true
+      isCompleted = true,
+      meta?: {
+        posterUrl?: string;
+        categoryName?: string;
+        rating?: string | number;
+      }
     ) => {
       const normType = normalizeType(streamType) as StreamType;
       const targetId = String(streamId);
 
       const tempItem: WatchedItem = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        user_id: 'me',
+        user_id: globalWatchedUserId || 'me',
         stream_id: targetId,
         stream_type: normType,
         title,
+        poster_url: meta?.posterUrl,
+        category_name: meta?.categoryName,
+        rating: meta?.rating ? String(meta?.rating) : undefined,
         progress_seconds: 0,
         is_completed: isCompleted,
         watched_at: new Date().toISOString(),
@@ -141,8 +166,9 @@ export function useWatched() {
       );
       const next = [tempItem, ...filtered];
 
+      // Otimista imediato
       setWatchedList(next);
-      broadcastWatchedUpdated(next);
+      broadcastWatchedUpdated(next, globalWatchedUserId);
 
       try {
         const res = await fetch('/api/watched', {
@@ -153,6 +179,9 @@ export function useWatched() {
             streamType: normType,
             title,
             isCompleted,
+            posterUrl: meta?.posterUrl,
+            categoryName: meta?.categoryName,
+            rating: meta?.rating,
           }),
         });
 
@@ -166,7 +195,7 @@ export function useWatched() {
                 : w
             );
             setWatchedList(updated);
-            broadcastWatchedUpdated(updated);
+            broadcastWatchedUpdated(updated, data.userId || globalWatchedUserId);
           }
         }
       } catch (e) {
@@ -187,7 +216,7 @@ export function useWatched() {
       );
 
       setWatchedList(next);
-      broadcastWatchedUpdated(next);
+      broadcastWatchedUpdated(next, globalWatchedUserId);
 
       try {
         await fetch(`/api/watched?streamId=${targetId}&streamType=${normType}`, {

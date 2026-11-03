@@ -24,6 +24,10 @@ import { searchStreams, ensureSearchDataLoaded } from '@/lib/search-index';
 import { BaseStreamItem, SessionUser } from '@/lib/types';
 import { getInfoUrl, getWatchUrl } from '@/lib/routes';
 import { usePlayer } from '@/context/PlayerContext';
+import { clearUserLocalData } from '@/lib/db-local';
+import { resetFavoritesCache } from '@/hooks/useFavorites';
+import { resetWatchedCache } from '@/hooks/useWatched';
+import { resetContinueCache } from '@/hooks/useContinueWatching';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
 
 export default function Navbar() {
@@ -184,7 +188,13 @@ export default function Navbar() {
   };
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch {}
+    resetFavoritesCache();
+    resetWatchedCache();
+    resetContinueCache();
+    await clearUserLocalData();
     router.push('/login');
     router.refresh();
   };

@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS watched_items (
   stream_id TEXT NOT NULL,
   stream_type TEXT NOT NULL CHECK (stream_type IN ('live', 'movie', 'series')),
   title TEXT NOT NULL,
+  poster_url TEXT,
+  category_name TEXT,
+  rating TEXT,
   progress_seconds INTEGER DEFAULT 0,
   is_completed INTEGER DEFAULT 1,
   watched_at TEXT DEFAULT (datetime('now')),
@@ -55,6 +58,8 @@ CREATE TABLE IF NOT EXISTS continue_watching (
   poster_url TEXT,
   backdrop_url TEXT,
   category_name TEXT,
+  series_id TEXT,
+  series_title TEXT,
   episode_id TEXT,
   episode_num INTEGER,
   season_num INTEGER,
@@ -62,7 +67,25 @@ CREATE TABLE IF NOT EXISTS continue_watching (
   current_time REAL DEFAULT 0,
   duration REAL DEFAULT 0,
   progress_percentage REAL DEFAULT 0,
-  last_watched_at TEXT DEFAULT (datetime('now'))
+  last_watched_at TEXT DEFAULT (datetime('now')),
+  UNIQUE (user_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS user_playlists (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  server_url TEXT NOT NULL,
+  username TEXT NOT NULL,
+  password TEXT NOT NULL,
+  is_active INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  last_synced INTEGER,
+  channels_count INTEGER,
+  movies_count INTEGER,
+  series_count INTEGER,
+  UNIQUE (user_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address);
@@ -70,6 +93,7 @@ CREATE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username);
 CREATE INDEX IF NOT EXISTS idx_favorites_user_id ON favorites(user_id);
 CREATE INDEX IF NOT EXISTS idx_watched_user_id ON watched_items(user_id);
 CREATE INDEX IF NOT EXISTS idx_continue_watching_user ON continue_watching(user_id, last_watched_at);
+CREATE INDEX IF NOT EXISTS idx_user_playlists_user ON user_playlists(user_id);
 
 -- Administrador Inicial Padrão (usuário: felipeaguena / senha: 1652)
 INSERT OR IGNORE INTO app_users (id, username, password_hash, display_name, role, is_active)

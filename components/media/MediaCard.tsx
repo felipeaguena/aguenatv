@@ -22,7 +22,7 @@ function cleanCategoryName(raw?: string): string {
     .trim();
 }
 
-export default function MediaCard({ item, streamUrl }: MediaCardProps) {
+export default function MediaCard({ item }: MediaCardProps) {
   const router = useRouter();
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { isWatched, markWatched, removeWatched } = useWatched();
@@ -62,7 +62,17 @@ export default function MediaCard({ item, streamUrl }: MediaCardProps) {
     if (watched) {
       removeWatched(item.stream_id, item.stream_type);
     } else {
-      markWatched(item.stream_id, item.stream_type, item.title || item.name, true);
+      markWatched(
+        item.stream_id,
+        item.stream_type,
+        item.title || item.name,
+        true,
+        {
+          posterUrl: item.stream_icon,
+          categoryName: item.category_name,
+          rating: item.rating,
+        }
+      );
     }
   };
 
@@ -86,10 +96,11 @@ export default function MediaCard({ item, streamUrl }: MediaCardProps) {
         {/* Gradiente sutil sobre a imagem */}
         <div className="absolute inset-0 bg-gradient-to-t from-[#0b0c10] via-transparent to-black/30 pointer-events-none z-[1]" />
 
-        {/* Overlay com Ações ao passar o mouse (z-10: fica abaixo dos badges superiores e favoritos) */}
+        {/* Overlay com Ações ao passar o mouse */}
         <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/55 backdrop-blur-[2px]">
           {/* Botão Assistir Direto */}
           <button
+            type="button"
             onClick={handleDirectPlay}
             className="w-11 h-11 rounded-full bg-violet-600 hover:bg-violet-700 text-white flex items-center justify-center shadow-lg shadow-violet-600/50 hover:scale-110 transition-transform cursor-pointer"
             title="Assistir Agora"
@@ -99,6 +110,7 @@ export default function MediaCard({ item, streamUrl }: MediaCardProps) {
 
           {/* Botão Detalhes */}
           <button
+            type="button"
             onClick={handleOpenInfo}
             className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/10 hover:scale-110 transition-transform cursor-pointer"
             title="Ver Resumo e Detalhes"
@@ -107,10 +119,10 @@ export default function MediaCard({ item, streamUrl }: MediaCardProps) {
           </button>
         </div>
 
-        {/* Badges superiores e Botão de Favoritar (z-20: SEMPRE ACIMA DO HOVER E DO BLUR) */}
+        {/* Badges superiores e Botões Fixos de Concluído e Favorito (z-20: sempre visíveis) */}
         <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between pointer-events-none">
           {/* Tag de Categoria e Tipo */}
-          <div className="flex items-center gap-1.5 max-w-[65%] truncate pointer-events-auto">
+          <div className="flex items-center gap-1.5 max-w-[55%] truncate pointer-events-auto">
             <span
               className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider bg-black/75 backdrop-blur-md text-neutral-200 border border-white/15 truncate shadow-md"
               title={item.category_name || (item.stream_type === 'live' ? 'TV' : item.stream_type === 'movie' ? 'Filme' : 'Série')}
@@ -119,28 +131,34 @@ export default function MediaCard({ item, streamUrl }: MediaCardProps) {
             </span>
           </div>
 
-          {/* Ações Rápidas: Assistido e Favoritos (Clicáveis e com Destaque Máximo) */}
+          {/* Ações Rápidas Fixas: Concluído / Não Concluído e Favoritos */}
           <div className="flex items-center gap-1.5 pointer-events-auto">
-            {/* Ícone Verde de Já Assistido */}
-            {watched && (
-              <button
-                onClick={handleWatchedClick}
-                className="p-1.5 rounded-lg bg-black/80 backdrop-blur-md text-emerald-400 border border-emerald-500/40 hover:scale-110 transition shadow-lg cursor-pointer"
-                title="Já assistido (clique para desmarcar)"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 fill-emerald-500/20" />
-              </button>
-            )}
-
-            {/* Botão de Favoritar */}
+            {/* Botão Fixo de Concluído / Não Concluído */}
             <button
+              type="button"
+              onClick={handleWatchedClick}
+              className={`p-1.5 rounded-lg backdrop-blur-md transition-all border shadow-lg cursor-pointer ${
+                watched
+                  ? 'bg-emerald-600 text-white border-emerald-400 scale-105 shadow-emerald-600/40'
+                  : 'bg-black/70 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-emerald-500/50 hover:scale-110'
+              }`}
+              title={watched ? 'Concluído (clique para desmarcar)' : 'Marcar como concluído'}
+              aria-label={watched ? 'Concluído (clique para desmarcar)' : 'Marcar como concluído'}
+            >
+              <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-400 text-white' : ''}`} />
+            </button>
+
+            {/* Botão Fixo de Favoritos */}
+            <button
+              type="button"
               onClick={handleFavoriteClick}
-              className={`p-1.5 rounded-lg backdrop-blur-md transition border shadow-lg cursor-pointer ${
+              className={`p-1.5 rounded-lg backdrop-blur-md transition-all border shadow-lg cursor-pointer ${
                 favorited
-                  ? 'bg-rose-500 text-white border-rose-400 scale-105'
-                  : 'bg-black/70 text-neutral-300 border-white/15 hover:text-white hover:bg-black hover:scale-110'
+                  ? 'bg-rose-500 text-white border-rose-400 scale-105 shadow-rose-500/40'
+                  : 'bg-black/70 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-rose-500/50 hover:scale-110'
               }`}
               title={favorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
+              aria-label={favorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
             >
               <Heart className={`w-3.5 h-3.5 ${favorited ? 'fill-white text-white' : ''}`} />
             </button>

@@ -57,6 +57,9 @@ export interface WatchedItem {
   stream_id: string;
   stream_type: StreamType;
   title: string;
+  poster_url?: string;
+  category_name?: string;
+  rating?: string;
   progress_seconds: number;
   duration_seconds?: number;
   is_completed: boolean;

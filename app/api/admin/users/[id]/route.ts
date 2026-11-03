@@ -3,6 +3,10 @@ import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { hashPassword } from '@/lib/password';
 import { getLocalUsers, saveLocalUsers } from '@/lib/users-local';
+import fs from 'fs/promises';
+import path from 'path';
+
+const DATA_DIR = path.join(process.cwd(), 'data');
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession();
@@ -121,7 +125,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     localList[index] = targetUser;
     await saveLocalUsers(localList);
   } else {
-    // Se o usuário não existia no arquivo local mas veio da sessão admin inicial
     targetUser = {
       id,
       username: username ? String(username).toLowerCase().trim() : 'felipeaguena',
@@ -162,14 +165,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: 'Você não pode excluir sua própria conta logada' }, { status: 400 });
   }
 
-  // 1. Remove do Turso se configurado
+  // 1. Remove do Turso se configurado (inclui dados em cascata de favoritos, watched, continue e playlists)
   if (isTursoConfigured()) {
     await ensureTursoSchema();
     try {
-      await turso.execute({
-        sql: 'DELETE FROM app_users WHERE id = ?',
-        args: [id],
-      });
+      await turso.batch([
+        { sql: 'DELETE FROM app_users WHERE id = ?', args: [id] },
+        { sql: 'DELETE FROM favorites WHERE user_id = ?', args: [id] },
+        { sql: 'DELETE FROM watched_items WHERE user_id = ?', args: [id] },
+        { sql: 'DELETE FROM continue_watching WHERE user_id = ?', args: [id] },
+        { sql: 'DELETE FROM user_playlists WHERE user_id = ?', args: [id] },
+      ], 'write');
     } catch (err: any) {
       console.warn('Erro ao deletar usuário no Turso:', err);
     }
@@ -180,5 +186,37 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const filtered = localList.filter((u) => u.id !== id);
   await saveLocalUsers(filtered);
 
-  return NextResponse.json({ success: true, message: 'Usuário removido com sucesso' });
+  // Limpa arquivos locais de favoritos, watched, continue-watching e playlists
+  try {
+    const favPath = path.join(DATA_DIR, 'local-favorites.json');
+    const rawFav = await fs.readFile(favPath, 'utf-8').catch(() => '[]');
+    const favs = JSON.parse(rawFav);
+    await fs.writeFile(favPath, JSON.stringify(favs.filter((f: any) => f.user_id !== id), null, 2), 'utf-8');
+  } catch {}
+
+  try {
+    const watchedPath = path.join(DATA_DIR, 'local-watched.json');
+    const rawWatched = await fs.readFile(watchedPath, 'utf-8').catch(() => '[]');
+    const watched = JSON.parse(rawWatched);
+    await fs.writeFile(watchedPath, JSON.stringify(watched.filter((w: any) => w.user_id !== id), null, 2), 'utf-8');
+  } catch {}
+
+  try {
+    const continuePath = path.join(DATA_DIR, 'local-continue-watching.json');
+    const rawContinue = await fs.readFile(continuePath, 'utf-8').catch(() => '[]');
+    const cont = JSON.parse(rawContinue);
+    await fs.writeFile(continuePath, JSON.stringify(cont.filter((c: any) => c.user_id !== id), null, 2), 'utf-8');
+  } catch {}
+
+  try {
+    const playlistsPath = path.join(DATA_DIR, 'local-playlists.json');
+    const rawPlaylists = await fs.readFile(playlistsPath, 'utf-8').catch(() => '{}');
+    const pl = JSON.parse(rawPlaylists);
+    if (pl[id]) {
+      delete pl[id];
+      await fs.writeFile(playlistsPath, JSON.stringify(pl, null, 2), 'utf-8');
+    }
+  } catch {}
+
+  return NextResponse.json({ success: true, message: 'Usuário e seus dados exclusivos removidos com sucesso' });
 }

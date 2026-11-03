@@ -64,6 +64,9 @@ export async function ensureTursoSchema(): Promise<void> {
             stream_id TEXT NOT NULL,
             stream_type TEXT NOT NULL CHECK (stream_type IN ('live', 'movie', 'series')),
             title TEXT NOT NULL,
+            poster_url TEXT,
+            category_name TEXT,
+            rating TEXT,
             progress_seconds INTEGER DEFAULT 0,
             is_completed INTEGER DEFAULT 1,
             watched_at TEXT DEFAULT (datetime('now')),
@@ -79,6 +82,8 @@ export async function ensureTursoSchema(): Promise<void> {
             poster_url TEXT,
             backdrop_url TEXT,
             category_name TEXT,
+            series_id TEXT,
+            series_title TEXT,
             episode_id TEXT,
             episode_num INTEGER,
             season_num INTEGER,
@@ -128,6 +133,37 @@ export async function ensureTursoSchema(): Promise<void> {
               password_hash = '$2b$10$gT5gcyYViuAZ3ovYI/rNoeDR/mQNPgDx7ZdJVWsejJqghgOJc9wo6'
           WHERE id = '00000000-0000-0000-0000-000000000001' AND username = 'admin';
         `);
+
+        // Migração de colunas adicionais e isolamento para felipeaguena
+        try {
+          await turso.execute('ALTER TABLE watched_items ADD COLUMN poster_url TEXT;');
+        } catch {}
+        try {
+          await turso.execute('ALTER TABLE watched_items ADD COLUMN category_name TEXT;');
+        } catch {}
+        try {
+          await turso.execute('ALTER TABLE watched_items ADD COLUMN rating TEXT;');
+        } catch {}
+        try {
+          await turso.execute('ALTER TABLE continue_watching ADD COLUMN series_title TEXT;');
+        } catch {}
+
+        // Migra registros legados ('me', 'local_user', etc.) para o usuário felipeaguena
+        try {
+          await turso.executeMultiple(`
+            UPDATE favorites SET user_id = '00000000-0000-0000-0000-000000000001' 
+            WHERE user_id IN ('me', 'local_user', 'admin') OR user_id IS NULL;
+
+            UPDATE watched_items SET user_id = '00000000-0000-0000-0000-000000000001' 
+            WHERE user_id IN ('me', 'local_user', 'admin') OR user_id IS NULL;
+
+            UPDATE continue_watching SET user_id = '00000000-0000-0000-0000-000000000001' 
+            WHERE user_id IN ('me', 'local_user', 'admin') OR user_id IS NULL;
+
+            UPDATE user_playlists SET user_id = '00000000-0000-0000-0000-000000000001' 
+            WHERE user_id IN ('me', 'local_user', 'admin') OR user_id IS NULL;
+          `);
+        } catch {}
       } catch (err) {
         console.warn('[Turso] Aviso ao verificar/inicializar esquema do banco:', err);
       }

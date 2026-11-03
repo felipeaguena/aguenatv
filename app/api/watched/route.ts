@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
+import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -32,7 +33,9 @@ export async function GET() {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
-  // 1. Turso se configurado
+  await ensureDataMigratedToFelipeAguena();
+
+  // 1. Turso: busca estritamente pelo user_id logado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -46,27 +49,22 @@ export async function GET() {
         is_completed: Boolean(row.is_completed),
       }));
 
-      return NextResponse.json({ watched: items });
+      return NextResponse.json({ watched: items, userId: session.userId });
     } catch (e) {
       console.warn('[Watched] Falha no Turso, usando armazenamento local:', e);
     }
   }
 
-  // 2. Fallback Localhost: Lê de data/local-watched.json
+  // 2. Armazenamento local: estritamente o user_id logado
   const allWatched = await getLocalWatched();
   const userWatched = allWatched
-    .filter(
-      (w) =>
-        w.user_id === session.userId ||
-        w.user_id === '00000000-0000-0000-0000-000000000001' ||
-        w.user_id === 'me'
-    )
+    .filter((w) => w.user_id === session.userId)
     .sort(
       (a, b) =>
         new Date(b.watched_at || 0).getTime() - new Date(a.watched_at || 0).getTime()
     );
 
-  return NextResponse.json({ watched: userWatched });
+  return NextResponse.json({ watched: userWatched, userId: session.userId });
 }
 
 export async function POST(req: NextRequest) {
@@ -75,25 +73,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
   }
 
+  await ensureDataMigratedToFelipeAguena();
+
   const body = await req.json();
-  const { streamId, streamType, title, progressSeconds, isCompleted } = body;
+  const { streamId, streamType, title, posterUrl, categoryName, rating, progressSeconds, isCompleted } = body;
 
   if (!streamId || !streamType || !title) {
     return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
   }
+
+  const isComp = typeof isCompleted === 'boolean' ? (isCompleted ? 1 : 0) : 1;
+  const now = new Date().toISOString();
 
   // 1. Turso se configurado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
       const watchedId = `watched_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const now = new Date().toISOString();
-      const isComp = typeof isCompleted === 'boolean' ? (isCompleted ? 1 : 0) : 1;
 
       await turso.execute({
-        sql: `INSERT INTO watched_items (id, user_id, stream_id, stream_type, title, progress_seconds, is_completed, watched_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        sql: `INSERT INTO watched_items (id, user_id, stream_id, stream_type, title, poster_url, category_name, rating, progress_seconds, is_completed, watched_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(user_id, stream_id, stream_type) DO UPDATE SET
+                title = excluded.title,
+                poster_url = coalesce(excluded.poster_url, watched_items.poster_url),
+                category_name = coalesce(excluded.category_name, watched_items.category_name),
+                rating = coalesce(excluded.rating, watched_items.rating),
                 progress_seconds = excluded.progress_seconds,
                 is_completed = excluded.is_completed,
                 watched_at = excluded.watched_at`,
@@ -103,6 +108,9 @@ export async function POST(req: NextRequest) {
           String(streamId),
           streamType,
           title,
+          posterUrl || null,
+          categoryName || null,
+          rating ? String(rating) : null,
           progressSeconds || 0,
           isComp,
           now,
@@ -122,6 +130,7 @@ export async function POST(req: NextRequest) {
               ...row,
               is_completed: Boolean(row.is_completed),
             },
+            userId: session.userId,
           },
           { status: 201 }
         );
@@ -131,7 +140,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2. Fallback Localhost: Grava em data/local-watched.json
+  // 2. Persistência Local: Grava em data/local-watched.json isolado por user_id
   const allWatched = await getLocalWatched();
   const newWatched = {
     id: `watched_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -139,15 +148,18 @@ export async function POST(req: NextRequest) {
     stream_id: String(streamId),
     stream_type: streamType,
     title,
+    poster_url: posterUrl || null,
+    category_name: categoryName || null,
+    rating: rating ? String(rating) : null,
     progress_seconds: progressSeconds || 0,
     is_completed: typeof isCompleted === 'boolean' ? isCompleted : true,
-    watched_at: new Date().toISOString(),
+    watched_at: now,
   };
 
   const filtered = allWatched.filter(
     (w) =>
       !(
-        (w.user_id === session.userId || w.user_id === '00000000-0000-0000-0000-000000000001' || w.user_id === 'me') &&
+        w.user_id === session.userId &&
         String(w.stream_id) === String(streamId) &&
         w.stream_type === streamType
       )
@@ -156,7 +168,7 @@ export async function POST(req: NextRequest) {
   filtered.unshift(newWatched);
   await saveLocalWatched(filtered);
 
-  return NextResponse.json({ watchedItem: newWatched }, { status: 201 });
+  return NextResponse.json({ watchedItem: newWatched, userId: session.userId }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
@@ -173,7 +185,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400 });
   }
 
-  // 1. Turso se configurado
+  // 1. Turso se configurado (isolado por user_id)
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -186,17 +198,17 @@ export async function DELETE(req: NextRequest) {
     }
   }
 
-  // 2. Fallback Localhost: Remove de data/local-watched.json
+  // 2. Remove de data/local-watched.json (estritamente para o user_id logado)
   const allWatched = await getLocalWatched();
   const filtered = allWatched.filter(
     (w) =>
       !(
-        (w.user_id === session.userId || w.user_id === '00000000-0000-0000-0000-000000000001' || w.user_id === 'me') &&
+        w.user_id === session.userId &&
         String(w.stream_id) === String(streamId) &&
         w.stream_type === streamType
       )
   );
   await saveLocalWatched(filtered);
 
-  return NextResponse.json({ success: true, message: 'Item removido do histórico' });
+  return NextResponse.json({ success: true, message: 'Item removido do histórico', userId: session.userId });
 }

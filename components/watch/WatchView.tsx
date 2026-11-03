@@ -739,7 +739,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
               if (watched) {
                 removeWatched(currentActiveId, streamType);
               } else {
-                markWatched(currentActiveId, streamType, playerTitle, true);
+                markWatched(currentActiveId, streamType, playerTitle, true, {
+                  posterUrl: item?.stream_icon,
+                  categoryName: item?.category_name,
+                  rating: item?.rating,
+                });
               }
             }}
             className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
@@ -749,7 +753,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
             }`}
           >
             <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
-            <span>{watched ? 'Assistido' : 'Marcar Assistido'}</span>
+            <span>{watched ? 'Concluído' : 'Marcar Concluído'}</span>
           </button>
         </div>
       </div>

@@ -2,25 +2,35 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ContinueWatchingItem, StreamType } from '@/lib/types';
 
-const STORAGE_KEY = 'miruro_continue_watching';
 const EVENT_NAME = 'miruro_continue_watching_updated';
+
+function getStorageKey(userId?: string | null): string {
+  return userId ? `miruro_con_${userId}` : 'miruro_continue_watching';
+}
 
 // Cache em memória a nível de módulo
 let globalContinueCache: ContinueWatchingItem[] | null = null;
+let globalContinueUserId: string | null = null;
 let lastContinueFetch = 0;
 let continueInFlight: Promise<ContinueWatchingItem[]> | null = null;
 const CACHE_TTL_MS = 60 * 1000; // 60 segundos de cooldown entre chamadas à API
 
-/**
- * Atualiza o cache e o localStorage, notificando outros componentes de forma assíncrona
- * via macrotask (setTimeout) para NUNCA atualizar outro componente durante a renderização.
- */
-function broadcastContinueUpdated(next: ContinueWatchingItem[]) {
+export function resetContinueCache() {
+  globalContinueCache = null;
+  globalContinueUserId = null;
+  lastContinueFetch = 0;
+  continueInFlight = null;
+}
+
+function broadcastContinueUpdated(next: ContinueWatchingItem[], userId?: string | null) {
   globalContinueCache = next;
   lastContinueFetch = Date.now();
+  if (userId) {
+    globalContinueUserId = userId;
+  }
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(getStorageKey(globalContinueUserId), JSON.stringify(next));
     } catch (e) {}
     setTimeout(() => {
       window.dispatchEvent(new Event(EVENT_NAME));
@@ -39,7 +49,13 @@ async function syncContinueFromServer(): Promise<ContinueWatchingItem[]> {
       if (res.ok) {
         const data = await res.json();
         const serverItems: ContinueWatchingItem[] = data.items || [];
-        broadcastContinueUpdated(serverItems);
+        const resUserId: string | null = data.userId || null;
+
+        if (resUserId && globalContinueUserId && resUserId !== globalContinueUserId) {
+          globalContinueCache = null;
+        }
+        globalContinueUserId = resUserId;
+        broadcastContinueUpdated(serverItems, resUserId);
         return serverItems;
       }
     } catch (e) {
@@ -93,10 +109,9 @@ export function useContinueWatching() {
   }, []);
 
   useEffect(() => {
-    // Restaura do localStorage no cliente logo após a hidratação se o cache global ainda estiver vazio
     if (!globalContinueCache && typeof window !== 'undefined') {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
         if (cached) {
           const parsed = JSON.parse(cached);
           globalContinueCache = parsed;
@@ -109,11 +124,13 @@ export function useContinueWatching() {
 
     const handleSync = () => {
       try {
-        const cached = localStorage.getItem(STORAGE_KEY);
+        const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
         if (cached) {
           const parsed: ContinueWatchingItem[] = JSON.parse(cached);
           globalContinueCache = parsed;
           setItems(parsed);
+        } else if (globalContinueCache) {
+          setItems(globalContinueCache);
         }
       } catch (e) {}
     };
@@ -129,17 +146,17 @@ export function useContinueWatching() {
   const saveProgress = useCallback(async (payload: SaveProgressPayload) => {
     const curTime = Math.floor(payload.currentTime);
     const dur = Math.floor(payload.duration);
-    if (dur <= 0 || curTime < 5) return; // Não salva os primeiros 5 segundos para evitar ruído
+    if (dur <= 0 || curTime < 5) return;
 
     const progressPercent = Math.min(100, Math.round((curTime / dur) * 1000) / 10);
     const effectiveStreamId = payload.streamType === 'series' && payload.seriesId
       ? String(payload.seriesId)
       : String(payload.streamId);
-    // Chave única por título: armazena 1 único card por título, contendo o último capítulo assistido
     const uniqueId = `${payload.streamType}_${effectiveStreamId}`;
 
     const optimisticItem: ContinueWatchingItem = {
       id: uniqueId,
+      user_id: globalContinueUserId || undefined,
       stream_id: effectiveStreamId,
       stream_type: payload.streamType,
       title: payload.streamType === 'series' && payload.seriesTitle ? payload.seriesTitle : payload.title,
@@ -161,7 +178,6 @@ export function useContinueWatching() {
     };
 
     const currentList = globalContinueCache || items;
-    // Remove qualquer registro anterior do mesmo filme/série (inclusive IDs antigos com sufixo _ep_)
     const filtered = currentList.filter(
       (i) =>
         i.id !== uniqueId &&
@@ -171,9 +187,8 @@ export function useContinueWatching() {
     const next = [optimisticItem, ...filtered].slice(0, 24);
 
     setItems(next);
-    broadcastContinueUpdated(next);
+    broadcastContinueUpdated(next, globalContinueUserId);
 
-    // Envia para o servidor para gravar no disco local e nuvem
     try {
       await fetch('/api/continue-watching', {
         method: 'POST',
@@ -190,7 +205,7 @@ export function useContinueWatching() {
     const next = currentList.filter((i) => i.id !== id);
 
     setItems(next);
-    broadcastContinueUpdated(next);
+    broadcastContinueUpdated(next, globalContinueUserId);
 
     try {
       await fetch(`/api/continue-watching?id=${encodeURIComponent(id)}`, {
