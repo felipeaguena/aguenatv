@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { isSafePublicUrl } from '@/lib/security';
 import zlib from 'zlib';
 
 // Permite execução estendida na Vercel (até 60s) para sincronização de grandes listas IPTV
@@ -44,6 +45,14 @@ export async function GET(req: NextRequest) {
 
   // Preserva estritamente a porta digitada pelo usuário sem remover
   const cleanHost = host.trim().replace(/\/+$/, '');
+
+  // Proteção contra SSRF: bloqueia requisições a loopbacks, redes privadas ou metadados de nuvem
+  if (!isSafePublicUrl(cleanHost)) {
+    return NextResponse.json(
+      { error: 'Endereço de servidor IPTV inválido ou restrito por segurança' },
+      { status: 400 }
+    );
+  }
 
   const buildUrl = (targetHost: string) => {
     let url = `${targetHost}/player_api.php?username=${encodeURIComponent(username!)}&password=${encodeURIComponent(password!)}`;

@@ -1,62 +1,81 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'iptv-miruro-secure-jwt-secret-key-32chars!';
-const SECRET_KEY = new TextEncoder().encode(JWT_SECRET);
+function getSecretKey(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.trim().length === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      return new Uint8Array();
+    }
+    return new TextEncoder().encode('iptv-dev-only-secret-do-not-use-in-production-32chars');
+  }
+  return new TextEncoder().encode(secret);
+}
+
+// Extensões reais de arquivos estáticos públicos
+const STATIC_EXTENSIONS = /\.(ico|png|jpg|jpeg|svg|css|js|webp|woff2?|map|webmanifest|txt)$/i;
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1. Rotas públicas permitidas
-  const isPublicAuth = pathname === '/login' || pathname === '/api/auth/login';
+  // 1. Arquivos estáticos (não se aplica a rotas de API)
+  const isApiRoute = pathname.startsWith('/api/');
   const isStaticAsset =
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon.ico') ||
-    pathname.includes('.');
+    !isApiRoute &&
+    (pathname.startsWith('/_next') ||
+      pathname === '/favicon.ico' ||
+      pathname.startsWith('/icon.') ||
+      STATIC_EXTENSIONS.test(pathname));
 
   if (isStaticAsset) {
     return NextResponse.next();
   }
 
-  // 2. Extrai cookie de sessão
+  // 2. Rotas públicas permitidas
+  const isPublicAuth = pathname === '/login' || pathname === '/api/auth/login';
+
+  // 3. Extrai e valida o cookie de sessão com a chave JWT
   const sessionToken = req.cookies.get('session_token')?.value;
   let userPayload: any = null;
 
   if (sessionToken) {
     try {
-      const { payload } = await jwtVerify(sessionToken, SECRET_KEY);
-      userPayload = payload;
+      const secretKey = getSecretKey();
+      if (secretKey.length > 0) {
+        const { payload } = await jwtVerify(sessionToken, secretKey);
+        userPayload = payload;
+      }
     } catch {
       userPayload = null;
     }
   }
 
-  // 3. Usuário NÃO autenticado
+  // 4. Usuário NÃO autenticado
   if (!userPayload) {
     // Se estiver acessando a página de login pública, permite
     if (isPublicAuth) {
       return NextResponse.next();
     }
 
-    // Se for rota de API interna, oculta respondendo 401
-    if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Recurso restrito' }, { status: 401 });
+    // Se for rota de API interna, responde 401 não autorizado
+    if (isApiRoute) {
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    // Para todas as outras páginas, esconde tudo e joga para /login
+    // Para qualquer outra página privada, redireciona para /login
     const loginUrl = new URL('/login', req.url);
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. Usuário JÁ autenticado tentando acessar /login
+  // 5. Usuário JÁ autenticado tentando acessar /login
   if (isPublicAuth && pathname === '/login') {
     return NextResponse.redirect(new URL('/', req.url));
   }
 
-  // 5. Proteção de rotas administrativas (/admin/*)
+  // 6. Proteção estrita de rotas administrativas (/admin/* e /api/admin/*)
   if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
     if (userPayload.role !== 'admin') {
-      if (pathname.startsWith('/api/')) {
+      if (isApiRoute) {
         return NextResponse.json({ error: 'Acesso restrito ao administrador' }, { status: 403 });
       }
       return NextResponse.redirect(new URL('/', req.url));

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { isSafePublicUrl } from '@/lib/security';
 
 export interface VideoStreamStats {
   sizeBytes?: number;
@@ -27,6 +28,11 @@ export async function GET(req: NextRequest) {
 
   if (!streamUrl) {
     return NextResponse.json({ error: 'URL do stream é obrigatória' }, { status: 400 });
+  }
+
+  // Proteção contra SSRF: bloqueia URLs internas, loopbacks e metadados de nuvem
+  if (!isSafePublicUrl(streamUrl)) {
+    return NextResponse.json({ error: 'Endereço de stream inválido ou restrito por segurança' }, { status: 400 });
   }
 
   // Verifica cache em memória para resposta instantânea

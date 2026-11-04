@@ -1,0 +1,24 @@
+services:
+  aguenatv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aguenatv
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - TURSO_DATABASE_URL=${TURSO_DATABASE_URL}
+      - TURSO_AUTH_TOKEN=${TURSO_AUTH_TOKEN}
+      - JWT_SECRET=${JWT_SECRET}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

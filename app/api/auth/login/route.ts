@@ -5,18 +5,34 @@ import { createSession } from '@/lib/auth';
 import { checkIpBlock, registerFailedAttempt, clearIpAttempts } from '@/lib/rate-limit';
 import { UserRole } from '@/lib/types';
 import {
-  INITIAL_DEFAULT_ADMIN,
   findLocalUserByUsername,
-  saveLocalUsers,
   getLocalUsers,
 } from '@/lib/users-local';
 
+function getClientIp(req: NextRequest): string {
+  // 1. Tenta cabeçalho confiável de proxy reverso (Nginx, Caddy, Vercel)
+  const realIp = req.headers.get('x-real-ip');
+  if (realIp && realIp.trim().length > 0) {
+    return realIp.trim();
+  }
+
+  const vercelIp = req.headers.get('x-vercel-forwarded-for');
+  if (vercelIp && vercelIp.trim().length > 0) {
+    return vercelIp.split(',')[0].trim();
+  }
+
+  const forwardedFor = req.headers.get('x-forwarded-for');
+  if (forwardedFor && forwardedFor.trim().length > 0) {
+    return forwardedFor.split(',')[0].trim();
+  }
+
+  return '127.0.0.1';
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // 1. Extração do IP do cliente
-    const forwardedFor = req.headers.get('x-forwarded-for');
-    const realIp = req.headers.get('x-real-ip');
-    const clientIp = (forwardedFor ? forwardedFor.split(',')[0] : realIp) || '127.0.0.1';
+    // 1. Extração segura do IP do cliente
+    const clientIp = getClientIp(req);
 
     // 2. Proteção Anti-Brute-Force: Checagem de bloqueio de 1 hora
     const ipStatus = await checkIpBlock(clientIp);
@@ -74,51 +90,30 @@ export async function POST(req: NextRequest) {
       const localUser = await findLocalUserByUsername(cleanUsername);
       if (localUser) {
         userRecord = localUser;
-      }
-    }
-
-    // Fallback padrão se for a primeira inicialização do admin felipeaguena
-    if (!userRecord && cleanUsername === INITIAL_DEFAULT_ADMIN.username) {
-      if (password === '1652') {
-        userRecord = INITIAL_DEFAULT_ADMIN;
-        // Salva localmente para garantir persistência futura
-        const list = await getLocalUsers();
-        if (!list.find((u) => u.username === INITIAL_DEFAULT_ADMIN.username)) {
-          list.push(INITIAL_DEFAULT_ADMIN);
-          await saveLocalUsers(list);
+      } else {
+        // Se a lista de usuários ainda não foi inicializada em disco, obtém a lista inicial padrão
+        const localList = await getLocalUsers();
+        const found = localList.find((u) => u.username.toLowerCase().trim() === cleanUsername);
+        if (found) {
+          userRecord = found;
         }
       }
     }
 
-    // Suporte retrocompatível temporário se for 'admin' com 'admin123'
-    if (!userRecord && cleanUsername === 'admin' && password === 'admin123') {
-      userRecord = {
-        ...INITIAL_DEFAULT_ADMIN,
-        username: 'admin',
-        display_name: 'Administrador Legado',
-      };
-    }
-
-    // 6. Verificação da senha com bcrypt
+    // 6. Verificação estrita e segura da senha via Bcrypt (sem backdoors)
     let isValidPassword = false;
-    if (userRecord && userRecord.is_active) {
-      if (cleanUsername === 'felipeaguena' && password === '1652') {
-        isValidPassword = true;
-      } else if (cleanUsername === 'admin' && password === 'admin123') {
-        isValidPassword = true;
-      } else if (userRecord.password_hash) {
-        isValidPassword = await verifyPassword(password, userRecord.password_hash);
-      }
+    if (userRecord && userRecord.is_active && userRecord.password_hash) {
+      isValidPassword = await verifyPassword(String(password), userRecord.password_hash);
     }
 
-    // Se senha ou usuário inválidos -> contabiliza tentativa
+    // Se usuário não encontrado ou senha incorreta -> registra tentativa falha
     if (!isValidPassword) {
-      const { blockedNow, remainingMinutes } = await registerFailedAttempt(clientIp);
+      const { blockedNow } = await registerFailedAttempt(clientIp);
 
       if (blockedNow) {
         return NextResponse.json(
           {
-            error: `Você atingiu 3 tentativas incorretas. Seu IP foi bloqueado por 1 hora.`,
+            error: 'Você atingiu 3 tentativas incorretas. Seu IP foi bloqueado por 1 hora.',
             isBlocked: true,
             remainingMinutes: 60,
           },

@@ -17,7 +17,7 @@ export const DATA_DIR = path.join(process.cwd(), 'data');
 export const USERS_FILE = path.join(DATA_DIR, 'local-users.json');
 export const FELIPE_AGUENA_USER_ID = '00000000-0000-0000-0000-000000000001';
 
-// Hash Bcrypt de 10 rounds para a senha '1652'
+// Hash Bcrypt inicial para a primeira carga administrativa
 export const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$gT5gcyYViuAZ3ovYI/rNoeDR/mQNPgDx7ZdJVWsejJqghgOJc9wo6';
 
 export const INITIAL_DEFAULT_ADMIN: LocalUserRecord = {

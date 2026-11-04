@@ -2,8 +2,17 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { SessionUser, UserRole } from './types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'iptv-miruro-secure-jwt-secret-key-32chars!';
-const SECRET_KEY = new TextEncoder().encode(JWT_SECRET);
+export function getSecretKey(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.trim().length === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('[Security] A variável de ambiente JWT_SECRET é obrigatória em produção!');
+    }
+    // Fallback restrito apenas a ambiente local de desenvolvimento (localhost)
+    return new TextEncoder().encode('iptv-dev-only-secret-do-not-use-in-production-32chars');
+  }
+  return new TextEncoder().encode(secret);
+}
 
 export async function createSession(user: {
   id: string;
@@ -11,6 +20,7 @@ export async function createSession(user: {
   displayName: string;
   role: UserRole;
 }) {
+  const secretKey = getSecretKey();
   const token = await new SignJWT({
     userId: user.id,
     username: user.username,
@@ -20,13 +30,15 @@ export async function createSession(user: {
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('30d')
-    .sign(SECRET_KEY);
+    .sign(secretKey);
 
   const cookieStore = await cookies();
-  const isHttps = process.env.NODE_ENV === 'production' && process.env.ENABLE_HTTPS === 'true';
+  // Em produção, o cookie deve ser sempre Secure por padrão para evitar interceptação
+  const isSecure = process.env.NODE_ENV === 'production' && process.env.ALLOW_INSECURE_HTTP !== 'true';
+
   cookieStore.set('session_token', token, {
     httpOnly: true,
-    secure: isHttps,
+    secure: isSecure,
     sameSite: 'lax',
     maxAge: 60 * 60 * 24 * 30, // 30 dias
     path: '/',
@@ -41,7 +53,8 @@ export async function getSession(): Promise<SessionUser | null> {
     const token = cookieStore.get('session_token')?.value;
     if (!token) return null;
 
-    const { payload } = await jwtVerify(token, SECRET_KEY);
+    const secretKey = getSecretKey();
+    const { payload } = await jwtVerify(token, secretKey);
     return {
       userId: payload.userId as string,
       username: payload.username as string,
@@ -60,7 +73,8 @@ export async function clearSession() {
 
 export async function verifyToken(token: string): Promise<SessionUser | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET_KEY);
+    const secretKey = getSecretKey();
+    const { payload } = await jwtVerify(token, secretKey);
     return {
       userId: payload.userId as string,
       username: payload.username as string,

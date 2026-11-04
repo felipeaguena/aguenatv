@@ -95,7 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_watched_user_id ON watched_items(user_id);
 CREATE INDEX IF NOT EXISTS idx_continue_watching_user ON continue_watching(user_id, last_watched_at);
 CREATE INDEX IF NOT EXISTS idx_user_playlists_user ON user_playlists(user_id);
 
--- Administrador Inicial Padrão (usuário: felipeaguena / senha: 1652)
+-- Administrador Inicial Padrão
 INSERT OR IGNORE INTO app_users (id, username, password_hash, display_name, role, is_active)
 VALUES (
   '00000000-0000-0000-0000-000000000001',

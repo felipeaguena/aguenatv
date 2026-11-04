@@ -2,7 +2,7 @@
 
 Sistema moderno, ultra-otimizado e seguro de reprodução IPTV inspirado no Design System do **[Miruro](https://www.miruro.cx/)**, desenvolvido com **Next.js (App Router)**, **Tailwind CSS**, **HLS.js**, **Turso (libSQL/SQLite Serverless)** e **IndexedDB**.
 
-Projetado especificamente para rodar com **consumo zero** no plano gratuito da **Vercel** e do **Turso**, **sem pausa por inatividade** (diferente de instâncias tradicionais de banco de dados).
+Projetado para rodar com **alto desempenho** e **baixo consumo** na **Oracle Cloud (Always Free)**, **Vercel** ou **Docker**.
 
 ---
 
@@ -14,86 +14,110 @@ Projetado especificamente para rodar com **consumo zero** no plano gratuito da *
    * Carrossel de destaques dinâmico (*Hero Spotlight*).
    * Cards com proporção vertical 3:4, zoom suave no hover e badges de qualidade.
 
-2. **Segurança Reforçada e Anti-Bot:**
-   * **Página de Login Fechada:** Sem links de cadastro público. Acesso exclusivo para usuários já cadastrados.
-   * **Proteção contra Brute-Force:** Bloqueio automático do IP por **1 hora** após 3 tentativas consecutivas de senha incorreta.
-   * **Rotas Ocultas (*Stealth Mode*):** Visitantes não autenticados não conseguem visualizar nenhuma rota interna ou catálogo; todas as rotas redirecionam ou retornam 404/401 via middleware.
-   * **Senhas Criptografadas:** Hashes seguros gerados com **Bcrypt** e sessões gerenciadas em cookies `httpOnly` via **JWT (Jose)**.
+2. **Segurança Reforçada (Security by Design):**
+   * **Página de Login Fechada:** Sem links de cadastro público. Acesso exclusivo para usuários administrados.
+   * **Proteção Anti-Brute-Force:** Bloqueio automático de IP por **1 hora** após 3 tentativas consecutivas de senha incorreta.
+   * **Criptografia Forte:** Hashes seguros gerados com **Bcrypt** e sessões gerenciadas em cookies `httpOnly` via **JWT (Jose)** com chave criptográfica aleatória.
+   * **Mitigação de SSRF (Server-Side Request Forgery):** Validação estrita de URLs que bloqueia acessos a loopback (`127.0.0.1`), redes privadas (RFC 1918) e serviços de metadados de nuvem (`169.254.169.254`).
+   * **Cabeçalhos de Segurança HTTP:** Proteção nativa contra Clickjacking (`X-Frame-Options: SAMEORIGIN`), MIME-sniffing (`X-Content-Type-Options: nosniff`), HSTS e políticas de permissões restritas.
 
 3. **Gerenciamento de Usuários (Painel Admin) & Configurações M3U:**
    * Acesso restrito a administradores em `/admin/users`.
-   * Criação, edição de dados/senhas e exclusão de contas.
-   * Dropdown de navegação no desktop com links rápidos para Favoritos, Usuários, Configurações de Listas e Sair.
-   * Gerenciamento de múltiplas listas M3U / Xtream em `/settings`.
-   * Isolamento total: cada usuário tem sua própria lista de favoritos e histórico de reprodução.
+   * Criação, edição de dados/senhas e exclusão de contas com isolamento completo de histórico, favoritos e playlists.
 
 4. **Busca Relativa (Fuzzy Search) 100% no Frontend:**
-   * Motor **MiniSearch** rodando na memória RAM do navegador.
-   * Tolerância a erros de digitação e acentuação (ex: digite `"vingadors"` e encontre `"Vingadores: Ultimato"`).
-   * **Zero requisições ao servidor**: respostas instantâneas em menos de 15ms.
+   * Motor **MiniSearch** rodando na memória RAM do navegador com tolerância a erros de digitação e acentuação.
+   * Respostas instantâneas em menos de 15ms sem onerar o servidor.
 
 5. **Consumo Zero de Servidor para Listas (Offline-First):**
    * Listas IPTV armazenadas localmente no **IndexedDB** do navegador com **Dexie.js**.
-   * Suporte a sincronização automática (TTL inteligente) e botão de sincronização manual imediata.
-   * O fluxo de vídeo é consumido **direto do cliente para o servidor IPTV**, sem passar pela Vercel (economizando 100% da banda).
-
-6. **Reprodução em Popup / Modal e Histórico de Assistidos:**
-   * Player com suporte a HLS (`.m3u8`), MPEG-TS e MP4.
-   * Alternância entre **Modo Teatro Expandido** e **MiniPlayer Flutuante (Picture-in-Picture)** que continua tocando enquanto você navega pelo site.
-   * **Status Visual de Assistido:** Conteúdos assistidos recebem **borda verde esmeralda (`border-emerald-500`)** e um ícone de confirmação no canto do poster.
-   * **Continue Assistindo Otimizado:** Armazena de forma unificada 1 único card por título contendo o último capítulo assistido.
-
-7. **Catálogo Geral em Lista de Texto Puro (`/catalog`):**
-   * Página ultrarrápida sem carregamento de imagens.
-   * Exibição paginada em lotes de **50 itens por página**.
-   * Filtros dinâmicos por tipo (TV ao Vivo, Filmes, Séries) e categoria.
+   * O fluxo de vídeo é consumido **direto do cliente para o servidor IPTV**, sem intermediação desnecessária de banda.
 
 ---
 
 ## 🛠️ Como Iniciar Localmente
 
-### 1. Iniciar o servidor de desenvolvimento:
+### 1. Pré-requisitos:
+* Node.js 20+ instalado.
+
+### 2. Configurar o ambiente:
+Copie o arquivo de exemplo e defina suas variáveis:
+```bash
+cp .env.example .env.local
+```
+
+Gere um segredo seguro para JWT:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+Cole o valor gerado na variável `JWT_SECRET` no seu `.env.local`.
+
+### 3. Iniciar o servidor de desenvolvimento:
 ```bash
 npm run dev
 ```
 
 Abra no navegador em: [http://localhost:3000](http://localhost:3000)
 
-### 2. Primeiro Acesso:
-O sistema vem pré-configurado com uma conta administrativa inicial:
+### 4. Primeiro Acesso:
+O sistema inicializa uma conta administrativa padrão:
 * **Usuário:** `felipeaguena`
-* **Senha:** `1652`
+* Acesse o painel em `/admin/users` no primeiro login para atualizar sua senha pessoal para uma credencial forte e exclusiva.
 
 ---
 
-## 🗄️ Configuração do Banco de Dados (Turso - Gratuito sem Pausa)
+## ☁️ Como Fazer o Deploy na Oracle Cloud (OCI Always Free)
 
-O Turso fornece um banco SQLite Serverless na nuvem com até 9GB e 500 bancos gratuitos, **sem pausar por inatividade**.
+A Oracle Cloud oferece instâncias gratuitas vitalícias (Always Free) excelentes para hospedar esta aplicação.
 
-1. Crie uma conta gratuita em [turso.tech](https://turso.tech).
-2. Instale a CLI do Turso ou crie um banco pelo painel web:
-   ```bash
-   turso db create aguenatv
-   turso db show aguenatv --url
-   turso db tokens create aguenatv
-   ```
-3. Opcional: Se preferir aplicar as tabelas manualmente, copie o conteúdo de [`turso/schema.sql`](file:///c:/Users/felipeaguena/Documents/iptv/turso/schema.sql) no shell SQL do Turso (`turso db shell aguenatv`).
-   * *Nota: O sistema possui auto-migração transparente (`ensureTursoSchema`), criando as tabelas e o administrador inicial automaticamente na primeira requisição se o banco estiver vazio!*
-4. Adicione as variáveis no seu `.env.local`:
-   ```env
-   TURSO_DATABASE_URL=libsql://aguenatv-seu-usuario.turso.io
-   TURSO_AUTH_TOKEN=seu_token_gerado_no_turso
-   JWT_SECRET=sua-chave-secreta-jwt-de-32-caracteres
-   ```
+### Passo 1: Criar a Instância na Oracle Cloud
+1. No painel da Oracle Cloud, vá em **Compute -> Instances -> Create Instance**.
+2. Escolha **Ubuntu 22.04 LTS** ou **Ubuntu 24.04** (ou Oracle Linux).
+3. Selecione a forma (shape) **Ampere (ARM)** com até 4 OCPUs e 24GB RAM, ou **VM.Standard.E2.1.Micro (AMD)**.
+4. Salve sua chave SSH privada (`.key`) e clique em **Create**.
+
+### Passo 2: Liberar as Portas na VCN (Virtual Cloud Network)
+No painel da Oracle Cloud:
+1. Vá em **Networking -> Virtual Cloud Networks** e selecione a VCN da sua instância.
+2. Clique na **Default Security List**.
+3. Em **Ingress Rules**, clique em **Add Ingress Rules**:
+   * **Source CIDR:** `0.0.0.0/0`
+   * **IP Protocol:** `TCP`
+   * **Destination Port Range:** `80, 443, 3000`
+   * Clique em **Add Ingress Rules**.
+
+### Passo 3: Executar o Deploy Automatizado
+Conecte-se à sua VM via SSH:
+```bash
+ssh -i sua-chave.key ubuntu@IP_PUBLICO_DA_ORACLE
+```
+
+Clone o repositório e execute o script de deploy:
+```bash
+git clone https://github.com/felipeaguena/aguenatv.git
+cd aguenatv
+chmod +x deploy-oracle.sh
+./deploy-oracle.sh
+```
+
+O script cuidará de:
+* Instalar o Docker e Docker Compose automaticamente;
+* Liberar o firewall interno (`iptables`/`ufw`) da VM na Oracle;
+* Gerar uma chave `JWT_SECRET` criptográfica de 64 caracteres no arquivo `.env`;
+* Construir e iniciar o contêiner em modo de produção otimizado com auto-reinício.
+
+Acesse no navegador:
+`http://IP_PUBLICO_DA_ORACLE:3000`
 
 ---
 
-## 🚢 Como Fazer o Deploy Gratuito na Vercel
+## 🚢 Deploy Alternativo na Vercel
 
-1. Suba este projeto para um repositório no seu GitHub.
-2. Acesse [vercel.com](https://vercel.com) e clique em **Add New Project -> Import Git Repository**.
-3. Em **Environment Variables**, adicione as seguintes variáveis:
-   * `TURSO_DATABASE_URL`: URL do seu banco Turso (`libsql://...`)
-   * `TURSO_AUTH_TOKEN`: Token de autenticação gerado pelo Turso
-   * `JWT_SECRET`: Chave secreta de 32+ caracteres para assinatura dos cookies JWT
-4. Clique em **Deploy**. Sua aplicação estará online com certificado SSL automático e alta velocidade na Edge!
+1. Suba este projeto para seu repositório no GitHub.
+2. Acesse [vercel.com](https://vercel.com) e importe o repositório.
+3. Em **Environment Variables**, adicione:
+   * `JWT_SECRET`: Chave secreta de 32+ caracteres aleatórios gerada via crypto.
+   * `TURSO_DATABASE_URL` (opcional): URL do seu banco Turso (`libsql://...`).
+   * `TURSO_AUTH_TOKEN` (opcional): Token de autenticação gerado pelo Turso.
+   * `TMDB_API_KEY` (opcional): Sua chave da API TMDb obtida em themoviedb.org.
+4. Clique em **Deploy**.
