@@ -32,7 +32,10 @@ export async function middleware(req: NextRequest) {
   }
 
   // 2. Rotas públicas permitidas
-  const isPublicAuth = pathname === '/login' || pathname === '/api/auth/login';
+  const isPublicAuth =
+    pathname === '/login' ||
+    pathname === '/api/auth/login' ||
+    pathname === '/api/health';
 
   // 3. Extrai e valida o cookie de sessão com a chave JWT
   const sessionToken = req.cookies.get('session_token')?.value;

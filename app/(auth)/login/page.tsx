@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Tv, Lock, User, AlertCircle, ShieldAlert, Sparkles } from 'lucide-react';
+import { Tv, Lock, User, AlertCircle, ShieldAlert, Sparkles, Server } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -11,6 +11,23 @@ export default function LoginPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [isBlocked, setIsBlocked] = useState(false);
   const [remainingMinutes, setRemainingMinutes] = useState<number | null>(null);
+  const [savedServer, setSavedServer] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const server = localStorage.getItem('aguenatv_server_url');
+      if (server) {
+        setSavedServer(server);
+      }
+    }
+  }, []);
+
+  const handleChangeServer = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('aguenatv_server_url');
+      window.location.href = 'https://localhost/index.html';
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,8 +160,25 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {/* Servidor Conectado no App Mobile */}
+          {savedServer && (
+            <div className="mt-6 pt-3 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
+              <span className="truncate max-w-[190px] flex items-center gap-1.5" title={savedServer}>
+                <Server className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                <span className="text-neutral-400 truncate font-mono text-[10px]">{savedServer.replace(/^https?:\/\//, '')}</span>
+              </span>
+              <button
+                type="button"
+                onClick={handleChangeServer}
+                className="text-violet-400 hover:text-violet-300 underline font-semibold transition cursor-pointer text-[10px]"
+              >
+                Trocar Servidor
+              </button>
+            </div>
+          )}
+
           {/* Rodapé informativo discreto */}
-          <div className="mt-8 text-center border-t border-white/5 pt-4">
+          <div className={`${savedServer ? 'mt-3' : 'mt-8'} text-center border-t border-white/5 pt-4`}>
             <span className="text-[11px] text-neutral-500 flex items-center justify-center gap-1">
               <Sparkles className="w-3 h-3 text-violet-400" /> Acesso restrito a membros autorizados
             </span>

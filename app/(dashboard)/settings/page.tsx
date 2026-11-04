@@ -75,6 +75,23 @@ export default function SettingsPage() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Servidor configurado no aplicativo Android / Mobile
+  const [mobileServerUrl, setMobileServerUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('aguenatv_server_url');
+      if (saved) setMobileServerUrl(saved);
+    }
+  }, []);
+
+  const handleChangeMobileServer = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('aguenatv_server_url');
+      window.location.href = 'https://localhost/index.html';
+    }
+  };
+
   // 1. Carrega dados do usuário e listas salvas
   const loadInitialData = async () => {
     setLoading(true);
@@ -784,6 +801,35 @@ export default function SettingsPage() {
               <ChevronRight className="w-3.5 h-3.5 text-neutral-500" />
             </Link>
           )}
+        </section>
+      )}
+
+      {/* 4. SEÇÃO: SERVIDOR CONECTADO NO APP ANDROID / MOBILE */}
+      {mobileServerUrl && (
+        <section className="p-6 rounded-3xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+              <Server className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                Servidor do Aplicativo Mobile
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5 font-mono">
+                {mobileServerUrl}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleChangeMobileServer}
+            className="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-xs font-semibold transition flex items-center gap-2 w-fit cursor-pointer"
+          >
+            <RotateCw className="w-4 h-4" />
+            <span>Desconectar / Alterar Servidor</span>
+          </button>
         </section>
       )}
 

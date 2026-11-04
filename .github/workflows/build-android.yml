@@ -54,6 +54,8 @@ jobs:
 
       - name: Sincronizar Capacitor com Android
         run: npx cap sync android
+        env:
+          CAPACITOR_SERVER_URL: ${{ secrets.CAPACITOR_SERVER_URL }}
 
       - name: Dar permissão de execução ao Gradle Wrapper
         run: chmod +x android/gradlew

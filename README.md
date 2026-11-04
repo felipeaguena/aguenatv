@@ -65,26 +65,26 @@ No Android Studio, clique em **Build -> Build Bundle(s) / APK(s) -> Build APK(s)
 
 ---
 
-## 🔄 Como Funcionam as Atualizações do Aplicativo
+## 🔄 Como o Aplicativo Conecta ao Servidor e se Atualiza
 
-Quando você fizer novas modificações no sistema, há duas formas pelas quais o aplicativo se atualiza:
+O aplicativo Android conta com um **Launcher Inteligente e Resiliente** com suporte a conexões dinâmicas:
 
-### 1. Atualizações Instantâneas sem Reinstalar o APK (Live Web / OTA)
-Se você configurou a URL do seu servidor (na Oracle Cloud ou Vercel) no arquivo [`capacitor.config.ts`](file:///c:/Users/felipeaguena/Documents/iptv/capacitor.config.ts):
-```ts
-server: {
-  url: 'http://SEU_IP_ORACLE:3000', // ou sua URL na Vercel/Domínio
-  cleartext: true,
-}
-```
-* **Como funciona:** O aplicativo Android carrega dinamicamente a versão mais recente diretamente do seu servidor na nuvem, mantendo todos os recursos nativos (como download na memória interna e player offline).
-* **Vantagem:** **Toda vez que você fizer `git push` no GitHub e a Oracle Cloud ou Vercel atualizar, o aplicativo no seu celular é atualizado AUTOMATICAMENTE e NA HORA!** Você e seus usuários não precisam baixar um novo APK.
+### 1. Conexão Dinâmica Direta pelo Celular (Sem Recompilar o APK)
+Ao abrir o APK pela primeira vez no celular, o aplicativo apresenta uma tela de configuração simples e moderna:
+* Digite o endereço do seu servidor (ex: `http://129.148.x.x:3000` na Oracle Cloud, `https://seu-app.vercel.app` ou `http://192.168.x.x:3000` no Wi-Fi local).
+* O aplicativo testa a resposta do servidor em tempo real (via `/api/health`).
+* Uma vez conectado com sucesso, o endereço é gravado na memória do aparelho e as próximas inicializações entram direto no sistema.
+* **Troca de Servidor:** Você pode alterar o servidor a qualquer momento pelo botão **"Trocar Servidor"** no rodapé da tela de login ou nas Configurações (`/settings`).
 
-### 2. Atualizações de Recursos Nativos (Novo APK)
-Você só precisará gerar e instalar um novo arquivo `.apk` no celular quando:
-* Adicionar uma nova permissão nativa do Android no `AndroidManifest.xml` (ex: acesso a Bluetooth, câmera, etc.);
-* Atualizar a versão do motor do Capacitor ou adicionar novos plugins nativos de hardware.
-* Nesses casos, o **GitHub Actions** compilará o novo APK automaticamente na nuvem para você baixar e instalar por cima do app existente.
+### 2. Atualizações Instantâneas sem Reinstalar o APK (Live Web / OTA)
+* Como o aplicativo conecta dinamicamente ao seu servidor Next.js, **toda vez que você atualizar seu servidor (Oracle Cloud, Docker ou Vercel), o aplicativo no celular é atualizado AUTOMATICAMENTE e NA HORA!**
+* Não é necessário gerar ou instalar um novo APK para alterações de layout, novas funções de catálogo ou correções do player.
+
+### 3. URL Pré-fixada no Build (Opcional via GitHub Actions)
+Se desejar que o APK já venha de fábrica com a URL do seu servidor embutida:
+* Adicione o segredo `CAPACITOR_SERVER_URL` nas configurações do repositório no GitHub (**Settings -> Secrets and variables -> Actions**).
+* Exemplo de valor: `http://SEU_IP_ORACLE:3000` ou `https://seu-dominio.com`.
+* O GitHub Actions compilará o APK apontando diretamente para o seu servidor.
 
 ---
 
