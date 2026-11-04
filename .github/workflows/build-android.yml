@@ -9,6 +9,10 @@ on:
       - 'android/**'
       - 'capacitor.config.ts'
       - '.github/workflows/build-android.yml'
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'public/**'
 
 jobs:
   build-apk:
@@ -19,7 +23,7 @@ jobs:
       - name: Checkout do código
         uses: actions/checkout@v4
 
-      - name: Configurar Node.js
+      - name: Configurar Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -32,16 +36,20 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
-          JWT_SECRET: temporary-github-actions-build-secret-key-32chars!
+          JWT_SECRET: temporary-build-secret-key-32chars-for-ci-cd!
 
       - name: Configurar Java 17 (JDK)
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: 'temurin'
           java-version: '17'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Aceitar Licenças do Android SDK
+        run: |
+          yes | sdkmanager --licenses || true
 
       - name: Sincronizar Capacitor com Android
         run: npx cap sync android
@@ -52,7 +60,7 @@ jobs:
       - name: Compilar APK Debug
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Publicar APK como Artefato de Download
         uses: actions/upload-artifact@v4
