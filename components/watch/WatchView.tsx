@@ -22,7 +22,10 @@ import {
   Monitor,
   Cpu,
   Eye,
+  Download,
+  Check,
 } from 'lucide-react';
+import { downloadVideoForOffline, isNativeApp } from '@/lib/download-manager';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
 import { fetchIPTVApi } from '@/lib/iptv-client';
 import {
@@ -90,6 +93,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { isWatched, markWatched, removeWatched } = useWatched();
   const { saveProgress } = useContinueWatching();
+
+  // Estados de Download Offline (Capacitor / Celular)
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadDone, setDownloadDone] = useState(false);
 
   // 1. Efeito: Carrega Configuração do IPTV e Item do banco local Dexie
   useEffect(() => {
@@ -821,9 +828,61 @@ export default function WatchView({ type, id }: WatchViewProps) {
               </div>
             </div>
 
-            {/* Ações Rápidas de Reprodução Externa */}
+            {/* Ações Rápidas de Reprodução Externa e Download */}
             {streamUrl && (
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
+                {!isLive && (
+                  <button
+                    onClick={async () => {
+                      if (!streamUrl || isDownloading) return;
+                      setIsDownloading(true);
+                      try {
+                        await downloadVideoForOffline(
+                          {
+                            stream_id: String(currentActiveId || id),
+                            stream_type: streamType === 'series' ? 'series' : 'movie',
+                            title: playerTitle,
+                            poster_url: playerPoster,
+                            container_extension: item?.container_extension,
+                            season_num: selectedSeason ? Number(selectedSeason) : undefined,
+                            episode_num: activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined,
+                          },
+                          streamUrl
+                        );
+                        setDownloadDone(true);
+                        setTimeout(() => setDownloadDone(false), 5000);
+                      } catch (e: any) {
+                        alert(e.message || 'Erro ao realizar download.');
+                      } finally {
+                        setIsDownloading(false);
+                      }
+                    }}
+                    disabled={isDownloading}
+                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                      downloadDone
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
+                    }`}
+                    title={isNativeApp() ? 'Salvar na memória do celular para assistir offline' : 'Baixar vídeo'}
+                  >
+                    {isDownloading ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                        <span>Baixando...</span>
+                      </>
+                    ) : downloadDone ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Baixado Offline</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Baixar Offline</span>
+                      </>
+                    )}
+                  </button>
+                )}
                 <a
                   href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
                   className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"

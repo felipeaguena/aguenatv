@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AGUENATV</string>
+    <string name="title_activity_main">AGUENATV</string>
+    <string name="package_name">com.aguenatv.app</string>
+    <string name="custom_url_scheme">com.aguenatv.app</string>
+</resources>

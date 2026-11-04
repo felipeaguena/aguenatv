@@ -19,6 +19,7 @@ import {
   Settings,
   ChevronDown,
   User,
+  Download,
 } from 'lucide-react';
 import { searchStreams, ensureSearchDataLoaded } from '@/lib/search-index';
 import { BaseStreamItem, SessionUser } from '@/lib/types';
@@ -206,6 +207,7 @@ export default function Navbar() {
     { href: '/movies', label: 'Filmes', icon: Film },
     { href: '/series', label: 'Séries', icon: Video },
     { href: '/catalog', label: 'Catálogo', icon: List },
+    { href: '/offline', label: 'Baixados', icon: Download },
   ];
 
   // Links do menu gaveta mobile (navegação completa)
@@ -215,6 +217,7 @@ export default function Navbar() {
     { href: '/movies', label: 'Filmes', icon: Film },
     { href: '/series', label: 'Séries', icon: Video },
     { href: '/catalog', label: 'Catálogo', icon: List },
+    { href: '/offline', label: 'Vídeos Baixados', icon: Download },
     { href: '/favorites', label: 'Favoritos', icon: Heart },
     { href: '/settings', label: 'Configurações', icon: Settings },
   ];
@@ -441,6 +444,19 @@ export default function Navbar() {
                   >
                     <Heart className="w-4 h-4 text-rose-400 fill-rose-500/20" />
                     <span>Favoritos</span>
+                  </Link>
+
+                  <Link
+                    href="/offline"
+                    onClick={() => setIsProfileDropdownOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      pathname === '/offline'
+                        ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                        : 'text-neutral-300 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <Download className="w-4 h-4 text-violet-400" />
+                    <span>Vídeos Baixados (Offline)</span>
                   </Link>
 
                   <Link

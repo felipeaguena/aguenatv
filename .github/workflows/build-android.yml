@@ -1,0 +1,62 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - '.github/workflows/build-android.yml'
+
+jobs:
+  build-apk:
+    name: Compilar APK Android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Instalar Dependências
+        run: npm ci
+
+      - name: Build Next.js
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          JWT_SECRET: temporary-github-actions-build-secret-key-32chars!
+
+      - name: Configurar Java 17 (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Sincronizar Capacitor com Android
+        run: npx cap sync android
+
+      - name: Dar permissão de execução ao Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: Compilar APK Debug
+        run: |
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Publicar APK como Artefato de Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: aguenatv-android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

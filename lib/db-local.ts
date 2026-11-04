@@ -18,6 +18,7 @@ export class IPTVLocalDatabase extends Dexie {
   streams!: Table<LocalStream, number | string>;
   categories!: Table<LocalCategory, string>;
   settings!: Table<AppSetting, string>;
+  offline_downloads!: Table<any, string>;
 
   constructor() {
     super('IPTV_Miruro_LocalDB');
@@ -25,6 +26,9 @@ export class IPTVLocalDatabase extends Dexie {
       streams: '++id, stream_id, stream_type, category_id, title, name',
       categories: 'category_id, type, category_name',
       settings: 'key',
+    });
+    this.version(2).stores({
+      offline_downloads: 'id, stream_id, stream_type, title, downloaded_at',
     });
   }
 }

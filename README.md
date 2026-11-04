@@ -1,8 +1,8 @@
 # 🎬 AGUENATV - Player Inteligente e Privado
 
-Sistema moderno, ultra-otimizado e seguro de reprodução IPTV inspirado no Design System do **[Miruro](https://www.miruro.cx/)**, desenvolvido com **Next.js (App Router)**, **Tailwind CSS**, **HLS.js**, **Turso (libSQL/SQLite Serverless)** e **IndexedDB**.
+Sistema moderno, ultra-otimizado e seguro de reprodução IPTV inspirado no Design System do **[Miruro](https://www.miruro.cx/)**, desenvolvido com **Next.js (App Router)**, **Capacitor (Android)**, **Tailwind CSS**, **HLS.js**, **Turso (libSQL/SQLite Serverless)** e **IndexedDB**.
 
-Projetado para rodar com **alto desempenho** e **baixo consumo** na **Oracle Cloud (Always Free)**, **Vercel** ou **Docker**.
+Projetado para rodar com **alto desempenho** e **baixo consumo** na **Oracle Cloud (Always Free)**, **Vercel** ou como **Aplicativo Android Nativo**.
 
 ---
 
@@ -14,24 +14,77 @@ Projetado para rodar com **alto desempenho** e **baixo consumo** na **Oracle Clo
    * Carrossel de destaques dinâmico (*Hero Spotlight*).
    * Cards com proporção vertical 3:4, zoom suave no hover e badges de qualidade.
 
-2. **Segurança Reforçada (Security by Design):**
+2. **Aplicativo Android Nativo (Capacitor) & Modo Offline:**
+   * **Download Direto para a Memória do Celular:** Baixe filmes e episódios de séries para assistir no metrô, viagens ou sem conexão.
+   * **Página Dedicada de Baixados (`/offline`):** Lista todos os conteúdos salvos no armazenamento interno do celular com controle de tamanho em MB/GB e opção de exclusão.
+   * **Bypass Nativo de CORS e Mixed Content:** Aplicativo nativo conecta diretamente a servidores IPTV em HTTP ou HTTPS sem restrições do navegador.
+
+3. **Segurança Reforçada (Security by Design):**
    * **Página de Login Fechada:** Sem links de cadastro público. Acesso exclusivo para usuários administrados.
    * **Proteção Anti-Brute-Force:** Bloqueio automático de IP por **1 hora** após 3 tentativas consecutivas de senha incorreta.
    * **Criptografia Forte:** Hashes seguros gerados com **Bcrypt** e sessões gerenciadas em cookies `httpOnly` via **JWT (Jose)** com chave criptográfica aleatória.
    * **Mitigação de SSRF (Server-Side Request Forgery):** Validação estrita de URLs que bloqueia acessos a loopback (`127.0.0.1`), redes privadas (RFC 1918) e serviços de metadados de nuvem (`169.254.169.254`).
    * **Cabeçalhos de Segurança HTTP:** Proteção nativa contra Clickjacking (`X-Frame-Options: SAMEORIGIN`), MIME-sniffing (`X-Content-Type-Options: nosniff`), HSTS e políticas de permissões restritas.
 
-3. **Gerenciamento de Usuários (Painel Admin) & Configurações M3U:**
+4. **Gerenciamento de Usuários (Painel Admin) & Configurações M3U:**
    * Acesso restrito a administradores em `/admin/users`.
    * Criação, edição de dados/senhas e exclusão de contas com isolamento completo de histórico, favoritos e playlists.
 
-4. **Busca Relativa (Fuzzy Search) 100% no Frontend:**
+5. **Busca Relativa (Fuzzy Search) 100% no Frontend:**
    * Motor **MiniSearch** rodando na memória RAM do navegador com tolerância a erros de digitação e acentuação.
    * Respostas instantâneas em menos de 15ms sem onerar o servidor.
 
-5. **Consumo Zero de Servidor para Listas (Offline-First):**
+6. **Consumo Zero de Servidor para Listas (Offline-First):**
    * Listas IPTV armazenadas localmente no **IndexedDB** do navegador com **Dexie.js**.
    * O fluxo de vídeo é consumido **direto do cliente para o servidor IPTV**, sem intermediação desnecessária de banda.
+
+---
+
+## 📱 Aplicativo Android (Capacitor) & Como Gerar o APK
+
+O AGUENATV agora inclui integração completa com o **Capacitor**, gerando um aplicativo nativo para Android com suporte a armazenamento local e downloads.
+
+### Opção 1: Compilação Automática na Nuvem (GitHub Actions - Sem Instalar Nada no PC)
+Você não precisa instalar o Android Studio nem o SDK do Android no seu computador:
+1. Ao enviar alterações para a branch `main` no GitHub, o fluxo de trabalho do **GitHub Actions** compila o APK automaticamente.
+2. No seu repositório no GitHub, clique na aba **Actions**.
+3. Selecione a execução mais recente de **Build Android APK**.
+4. Na seção **Artifacts** no final da página, baixe o arquivo `aguenatv-android-apk.zip`.
+5. Extraia o `app-debug.apk` e envie para o seu celular Android para instalar diretamente!
+
+### Opção 2: Compilação Local com Android Studio
+Se você tiver o **Android Studio** instalado:
+```bash
+# 1. Compila os arquivos web e sincroniza o projeto nativo
+npm run cap:build
+
+# 2. Abre o projeto no Android Studio
+npm run cap:open
+```
+No Android Studio, clique em **Build -> Build Bundle(s) / APK(s) -> Build APK(s)** para gerar o arquivo `.apk`.
+
+---
+
+## 🔄 Como Funcionam as Atualizações do Aplicativo
+
+Quando você fizer novas modificações no sistema, há duas formas pelas quais o aplicativo se atualiza:
+
+### 1. Atualizações Instantâneas sem Reinstalar o APK (Live Web / OTA)
+Se você configurou a URL do seu servidor (na Oracle Cloud ou Vercel) no arquivo [`capacitor.config.ts`](file:///c:/Users/felipeaguena/Documents/iptv/capacitor.config.ts):
+```ts
+server: {
+  url: 'http://SEU_IP_ORACLE:3000', // ou sua URL na Vercel/Domínio
+  cleartext: true,
+}
+```
+* **Como funciona:** O aplicativo Android carrega dinamicamente a versão mais recente diretamente do seu servidor na nuvem, mantendo todos os recursos nativos (como download na memória interna e player offline).
+* **Vantagem:** **Toda vez que você fizer `git push` no GitHub e a Oracle Cloud ou Vercel atualizar, o aplicativo no seu celular é atualizado AUTOMATICAMENTE e NA HORA!** Você e seus usuários não precisam baixar um novo APK.
+
+### 2. Atualizações de Recursos Nativos (Novo APK)
+Você só precisará gerar e instalar um novo arquivo `.apk` no celular quando:
+* Adicionar uma nova permissão nativa do Android no `AndroidManifest.xml` (ex: acesso a Bluetooth, câmera, etc.);
+* Atualizar a versão do motor do Capacitor ou adicionar novos plugins nativos de hardware.
+* Nesses casos, o **GitHub Actions** compilará o novo APK automaticamente na nuvem para você baixar e instalar por cima do app existente.
 
 ---
 
@@ -106,18 +159,5 @@ O script cuidará de:
 * Gerar uma chave `JWT_SECRET` criptográfica de 64 caracteres no arquivo `.env`;
 * Construir e iniciar o contêiner em modo de produção otimizado com auto-reinício.
 
-Acesse no navegador:
+Acesse no navegador ou conecte seu aplicativo:
 `http://IP_PUBLICO_DA_ORACLE:3000`
-
----
-
-## 🚢 Deploy Alternativo na Vercel
-
-1. Suba este projeto para seu repositório no GitHub.
-2. Acesse [vercel.com](https://vercel.com) e importe o repositório.
-3. Em **Environment Variables**, adicione:
-   * `JWT_SECRET`: Chave secreta de 32+ caracteres aleatórios gerada via crypto.
-   * `TURSO_DATABASE_URL` (opcional): URL do seu banco Turso (`libsql://...`).
-   * `TURSO_AUTH_TOKEN` (opcional): Token de autenticação gerado pelo Turso.
-   * `TMDB_API_KEY` (opcional): Sua chave da API TMDb obtida em themoviedb.org.
-4. Clique em **Deploy**.
