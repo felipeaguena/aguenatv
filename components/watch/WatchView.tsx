@@ -109,6 +109,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [localPlayableUrl, setLocalPlayableUrl] = useState<string | null>(null);
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [isNative, setIsNative] = useState(false);
+
+  useEffect(() => {
+    setIsNative(isNativeApp());
+  }, []);
 
   // 1. Efeito: Carrega Configuração do IPTV e Item do banco local Dexie
   useEffect(() => {
@@ -925,7 +930,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
             {/* Ações Rápidas de Reprodução Externa e Download */}
             {(streamUrl || localPlayableUrl) && (
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                {!isLive && (
+                {!isLive && isNative && (
                   <button
                     onClick={async () => {
                       if (isDownloading) return;
