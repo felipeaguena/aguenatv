@@ -26,6 +26,7 @@ import { BaseStreamItem, SessionUser } from '@/lib/types';
 import { getInfoUrl, getWatchUrl } from '@/lib/routes';
 import { usePlayer } from '@/context/PlayerContext';
 import { clearUserLocalData } from '@/lib/db-local';
+import { isNativeApp } from '@/lib/download-manager';
 import { resetFavoritesCache } from '@/hooks/useFavorites';
 import { resetWatchedCache } from '@/hooks/useWatched';
 import { resetContinueCache } from '@/hooks/useContinueWatching';
@@ -47,9 +48,11 @@ export default function Navbar() {
   const searchRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const searchIdRef = useRef(0);
+  const [isNative, setIsNative] = useState(false);
 
-  // Busca dados do usuário logado
+  // Busca dados do usuário logado e detecta se está no app nativo
   useEffect(() => {
+    setIsNative(isNativeApp());
     fetch('/api/auth/me')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -207,7 +210,6 @@ export default function Navbar() {
     { href: '/movies', label: 'Filmes', icon: Film },
     { href: '/series', label: 'Séries', icon: Video },
     { href: '/catalog', label: 'Catálogo', icon: List },
-    { href: '/offline', label: 'Baixados', icon: Download },
   ];
 
   // Links do menu gaveta mobile (navegação completa)
@@ -217,10 +219,13 @@ export default function Navbar() {
     { href: '/movies', label: 'Filmes', icon: Film },
     { href: '/series', label: 'Séries', icon: Video },
     { href: '/catalog', label: 'Catálogo', icon: List },
-    { href: '/offline', label: 'Vídeos Baixados', icon: Download },
     { href: '/favorites', label: 'Favoritos', icon: Heart },
     { href: '/settings', label: 'Configurações', icon: Settings },
   ];
+
+  if (isNative) {
+    mobileNavLinks.push({ href: '/offline', label: 'Vídeos Baixados', icon: Download });
+  }
 
   if (currentUser?.role === 'admin') {
     mobileNavLinks.push({ href: '/admin/users', label: 'Usuários', icon: Users });
@@ -446,18 +451,20 @@ export default function Navbar() {
                     <span>Favoritos</span>
                   </Link>
 
-                  <Link
-                    href="/offline"
-                    onClick={() => setIsProfileDropdownOpen(false)}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
-                      pathname === '/offline'
-                        ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
-                        : 'text-neutral-300 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    <Download className="w-4 h-4 text-violet-400" />
-                    <span>Vídeos Baixados (Offline)</span>
-                  </Link>
+                  {isNative && (
+                    <Link
+                      href="/offline"
+                      onClick={() => setIsProfileDropdownOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                        pathname === '/offline'
+                          ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                          : 'text-neutral-300 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Download className="w-4 h-4 text-violet-400" />
+                      <span>Vídeos Baixados (Offline)</span>
+                    </Link>
+                  )}
 
                   <Link
                     href="/settings"

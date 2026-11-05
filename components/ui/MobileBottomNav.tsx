@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Sparkles, Tv, Film, Video, Download, Heart } from 'lucide-react';
+import { Sparkles, Tv, Film, Video, Heart } from 'lucide-react';
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
@@ -16,12 +16,6 @@ export default function MobileBottomNav() {
     { href: '/live', label: 'Ao Vivo', icon: Tv },
     { href: '/movies', label: 'Filmes', icon: Film },
     { href: '/series', label: 'Séries', icon: Video },
-    {
-      href: '/offline',
-      label: 'Baixados',
-      icon: Download,
-      highlight: true,
-    },
     { href: '/favorites', label: 'Favoritos', icon: Heart },
   ];
 
@@ -41,31 +35,18 @@ export default function MobileBottomNav() {
               href={item.href}
               className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 isActive
-                  ? item.highlight
-                    ? 'text-violet-400 bg-violet-600/20 border border-violet-500/30'
-                    : 'text-violet-400 bg-white/5'
-                  : item.highlight
-                  ? 'text-violet-300 hover:text-white'
+                  ? 'text-violet-400 bg-white/5'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              <div className="relative">
-                <Icon
-                  className={`w-5 h-5 transition-transform ${
-                    isActive ? 'scale-110' : 'scale-100'
-                  } ${item.highlight && !isActive ? 'text-violet-400' : ''}`}
-                />
-                {item.highlight && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
-                )}
-              </div>
+              <Icon
+                className={`w-5 h-5 transition-transform ${
+                  isActive ? 'scale-110' : 'scale-100'
+                }`}
+              />
               <span
-                className={`text-[10px] mt-0.5 font-bold tracking-tight truncate max-w-[58px] ${
-                  isActive
-                    ? 'text-white'
-                    : item.highlight
-                    ? 'text-violet-300'
-                    : 'text-neutral-400'
+                className={`text-[10px] mt-0.5 font-bold tracking-tight truncate max-w-[64px] ${
+                  isActive ? 'text-white' : 'text-neutral-400'
                 }`}
               >
                 {item.label}

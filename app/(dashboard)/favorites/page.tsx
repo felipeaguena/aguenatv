@@ -26,6 +26,7 @@ import {
   deleteGroupDownloads,
   getPlayableOfflineUrl,
   OfflineDownload,
+  isNativeApp,
 } from '@/lib/download-manager';
 import { usePlayer } from '@/context/PlayerContext';
 
@@ -39,6 +40,7 @@ function FavoritesContent() {
   const [groupedDownloads, setGroupedDownloads] = useState<GroupedDownloadItem[]>([]);
   const [loadingDownloads, setLoadingDownloads] = useState(false);
   const [expandedSeriesKey, setExpandedSeriesKey] = useState<string | null>(null);
+  const [isNative, setIsNative] = useState(false);
 
   const loadDownloads = async () => {
     setLoadingDownloads(true);
@@ -51,6 +53,7 @@ function FavoritesContent() {
   };
 
   useEffect(() => {
+    setIsNative(isNativeApp());
     loadDownloads();
   }, []);
 
@@ -223,14 +226,26 @@ function FavoritesContent() {
     return filteredItems.slice(start, start + PAGE_SIZE);
   }, [filteredItems, currentPage]);
 
-  const tabs = [
-    { id: 'all', label: 'Todos', icon: Heart, count: favorites.length },
-    { id: 'downloads', label: 'Baixados Offline', icon: HardDrive, count: totalDownloadsCount },
-    { id: 'completed', label: 'Concluídos', icon: CheckCircle2, count: totalCompletedAll },
-    { id: 'movie', label: 'Filmes', icon: Film, count: favorites.filter((f) => f.stream_type === 'movie').length },
-    { id: 'series', label: 'Séries', icon: Video, count: favorites.filter((f) => f.stream_type === 'series').length },
-    { id: 'live', label: 'TV ao Vivo', icon: Tv, count: favorites.filter((f) => f.stream_type === 'live').length },
-  ] as const;
+  const tabs = useMemo(() => {
+    const list: Array<{
+      id: 'all' | 'downloads' | 'completed' | 'movie' | 'series' | 'live';
+      label: string;
+      icon: any;
+      count: number;
+    }> = [
+      { id: 'all', label: 'Todos', icon: Heart, count: favorites.length },
+    ];
+    if (isNative || totalDownloadsCount > 0) {
+      list.push({ id: 'downloads', label: 'Baixados Offline', icon: HardDrive, count: totalDownloadsCount });
+    }
+    list.push(
+      { id: 'completed', label: 'Concluídos', icon: CheckCircle2, count: totalCompletedAll },
+      { id: 'movie', label: 'Filmes', icon: Film, count: favorites.filter((f) => f.stream_type === 'movie').length },
+      { id: 'series', label: 'Séries', icon: Video, count: favorites.filter((f) => f.stream_type === 'series').length },
+      { id: 'live', label: 'TV ao Vivo', icon: Tv, count: favorites.filter((f) => f.stream_type === 'live').length }
+    );
+    return list;
+  }, [favorites, isNative, totalDownloadsCount, totalCompletedAll]);
 
   const loading = loadingFavs || loadingWatched || (activeTab === 'downloads' && loadingDownloads);
 
@@ -281,7 +296,7 @@ function FavoritesContent() {
       </div>
 
       {/* Banner de Destaque para Conteúdos Baixados Offline */}
-      {activeTab !== 'downloads' && (
+      {(isNative || totalDownloadsCount > 0) && activeTab !== 'downloads' && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-violet-900/40 via-[#181926] to-[#12131c] border border-violet-500/30 shadow-xl">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-violet-600/30 text-violet-300 shrink-0">

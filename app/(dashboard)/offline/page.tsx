@@ -18,6 +18,7 @@ export default function OfflineDownloadsPage() {
   const { play } = usePlayer();
   const [downloads, setDownloads] = useState<OfflineDownload[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isNative, setIsNative] = useState(false);
 
   const loadDownloads = async () => {
     setLoading(true);
@@ -32,6 +33,7 @@ export default function OfflineDownloadsPage() {
   };
 
   useEffect(() => {
+    setIsNative(isNativeApp());
     loadDownloads();
   }, []);
 
@@ -78,9 +80,9 @@ export default function OfflineDownloadsPage() {
             Vídeos Baixados (Offline)
           </h1>
           <p className="text-sm text-neutral-400 mt-1">
-            {isNativeApp()
+            {isNative
               ? 'Vídeos salvos diretamente na memória do seu celular para assistir sem gastar internet.'
-              : 'Gerencie e reproduza conteúdos baixados para reprodução local.'}
+              : 'Esta página e os downloads para reprodução offline são exclusivos do aplicativo mobile.'}
           </p>
         </div>
 
@@ -102,9 +104,15 @@ export default function OfflineDownloadsPage() {
             <Download className="w-8 h-8 opacity-70" />
           </div>
           <h3 className="text-lg font-bold text-white mb-2">Nenhum vídeo baixado ainda</h3>
-          <p className="text-sm text-neutral-400 max-w-md mb-6">
-            Você pode clicar no botão <strong>"Baixar Offline"</strong> dentro de qualquer filme ou episódio de série para assistir no celular sem conexão.
-          </p>
+          {!isNative ? (
+            <p className="text-sm text-neutral-400 max-w-md mb-6">
+              O recurso de baixar filmes e episódios para assistir offline sem internet é uma função exclusiva do aplicativo mobile instalado no seu aparelho.
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-400 max-w-md mb-6">
+              Você pode clicar no botão de download dentro de qualquer filme ou episódio de série para assistir no celular sem gastar internet.
+            </p>
+          )}
           <div className="flex items-center gap-3">
             <Link
               href="/movies"
