@@ -86,17 +86,31 @@ export async function downloadVideoForOffline(
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Capacitor)
   if (isNativeApp()) {
     try {
-      // Garante permissões de escrita/leitura se necessário
-      const perm = await Filesystem.checkPermissions();
-      if (perm.publicStorage !== 'granted') {
-        await Filesystem.requestPermissions();
+      // Garante permissões se aplicável
+      try {
+        const perm = await Filesystem.checkPermissions();
+        if (perm.publicStorage && perm.publicStorage !== 'granted') {
+          await Filesystem.requestPermissions().catch(() => {});
+        }
+      } catch {}
+
+      // Garante que o diretório 'videos' existe antes de iniciar o download
+      try {
+        await Filesystem.mkdir({
+          path: 'videos',
+          directory: Directory.Data,
+          recursive: true,
+        });
+      } catch {
+        // Ignora se o diretório já existir
       }
+
+      const relativePath = `videos/${fileName}`;
 
       const downloadResult = await Filesystem.downloadFile({
         url: streamUrl,
-        path: `videos/${fileName}`,
+        path: relativePath,
         directory: Directory.Data,
-        recursive: true,
         progress: true,
       });
 
@@ -104,7 +118,7 @@ export async function downloadVideoForOffline(
       let fileSize = 0;
       try {
         const stat = await Filesystem.stat({
-          path: `videos/${fileName}`,
+          path: relativePath,
           directory: Directory.Data,
         });
         fileSize = stat.size || 0;
@@ -117,7 +131,7 @@ export async function downloadVideoForOffline(
         title: item.title,
         series_title: item.series_title,
         poster_url: item.poster_url,
-        file_path: downloadResult.path || `videos/${fileName}`,
+        file_path: downloadResult.path || relativePath,
         file_size: fileSize,
         downloaded_at: new Date().toISOString(),
         container_extension: extension,
@@ -253,6 +267,10 @@ export async function getGroupedOfflineDownloads(): Promise<GroupedDownloadItem[
 export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<string> {
   if (isNativeApp()) {
     try {
+      // Se o caminho já for absoluto do sistema de arquivos ou file://
+      if (download.file_path && (download.file_path.startsWith('/') || download.file_path.startsWith('file://'))) {
+        return Capacitor.convertFileSrc(download.file_path);
+      }
       const uriResult = await Filesystem.getUri({
         path: download.file_path,
         directory: Directory.Data,
@@ -276,8 +294,13 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
     const record = await localDB.offline_downloads.get(id);
     if (record && isNativeApp()) {
       try {
+        const filePath = record.file_path;
+        const relativePath = filePath.includes('videos/')
+          ? filePath.substring(filePath.indexOf('videos/'))
+          : filePath;
+
         await Filesystem.deleteFile({
-          path: record.file_path,
+          path: relativePath,
           directory: Directory.Data,
         });
       } catch (e) {
