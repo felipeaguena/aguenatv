@@ -289,7 +289,58 @@ export default function WatchView({ type, id }: WatchViewProps) {
           };
         });
       } catch (err) {
-        console.error('Erro ao buscar capítulos da série:', err);
+        console.warn('Erro ao buscar capítulos da série online (tentando offline):', err);
+        if (localDB?.offline_downloads) {
+          try {
+            const offlineItems = await localDB.offline_downloads
+              .where('stream_id')
+              .equals(String(id))
+              .toArray();
+            if (offlineItems.length > 0 && isMounted) {
+              const episodesMap: Record<string, SeriesEpisode[]> = {};
+              const seasonsList: SeriesSeason[] = [];
+
+              for (const off of offlineItems) {
+                const sNum = String(off.season_num || 1);
+                if (!episodesMap[sNum]) {
+                  episodesMap[sNum] = [];
+                  seasonsList.push({
+                    season_number: Number(sNum),
+                    name: `Temporada ${sNum}`,
+                    episode_count: 0,
+                  });
+                }
+                episodesMap[sNum].push({
+                  id: String(off.episode_id || off.id),
+                  episode_num: off.episode_num || 1,
+                  title: off.title,
+                  season: Number(sNum),
+                  container_extension: off.container_extension || 'mp4',
+                });
+              }
+
+              for (const s of seasonsList) {
+                s.episode_count = episodesMap[String(s.season_number)]?.length || 0;
+              }
+
+              const fallbackSeriesInfo: SeriesInfoResponse = {
+                seasons: seasonsList,
+                episodes: episodesMap,
+                info: {
+                  name: offlineItems[0].series_title || offlineItems[0].title,
+                  title: offlineItems[0].series_title || offlineItems[0].title,
+                  cover: offlineItems[0].poster_url,
+                },
+              };
+
+              setSeriesInfo(fallbackSeriesInfo);
+              if (!episodeParam) {
+                const sorted = buildSortedSeasonList(fallbackSeriesInfo);
+                setSelectedSeason(getDefaultSeason(sorted));
+              }
+            }
+          } catch {}
+        }
       } finally {
         if (isMounted) {
           setLoadingSeries(false);

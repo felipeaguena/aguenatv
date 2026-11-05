@@ -4,9 +4,16 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { localDB } from './db-local';
 
 export interface BackgroundDownloadPluginInterface {
-  startDownload(options: { title: string }): Promise<void>;
-  updateProgress(options: { progress: number; subtext: string }): Promise<void>;
-  stopDownload(options: { success: boolean; title: string }): Promise<void>;
+  startDownload(options: { id: string; url: string; title: string; fileName: string }): Promise<{ started: boolean; id: string }>;
+  cancelDownload(options: { id: string }): Promise<void>;
+  addListener(
+    eventName: 'progress',
+    listenerFunc: (data: { id: string; title: string; bytes: number; contentLength: number; percentage: number }) => void
+  ): Promise<any>;
+  addListener(
+    eventName: 'complete',
+    listenerFunc: (data: { id: string; title: string; path: string; size: number; success: boolean; error?: string }) => void
+  ): Promise<any>;
 }
 
 export const BackgroundDownload = registerPlugin<BackgroundDownloadPluginInterface>('BackgroundDownload');
@@ -15,6 +22,36 @@ export const BackgroundDownload = registerPlugin<BackgroundDownloadPluginInterfa
 export const activeDownloadsMap: Record<string, DownloadProgress> = {};
 export const activeDownloadTitles: Record<string, string> = {};
 export const PROGRESS_EVENT = 'aguenatv_download_progress';
+
+// Inicializa sincronização global nativa para que a UI receba eventos mesmo após reabrir o app
+if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+  try {
+    BackgroundDownload.addListener('progress', (data) => {
+      const progressData: DownloadProgress = {
+        bytesReceived: data.bytes,
+        totalBytes: data.contentLength,
+        percentage: data.percentage,
+      };
+      activeDownloadsMap[data.id] = progressData;
+      activeDownloadTitles[data.id] = data.title;
+      window.dispatchEvent(
+        new CustomEvent(PROGRESS_EVENT, {
+          detail: { id: data.id, title: data.title, progress: progressData },
+        })
+      );
+    }).catch(() => {});
+
+    BackgroundDownload.addListener('complete', (data) => {
+      delete activeDownloadsMap[data.id];
+      delete activeDownloadTitles[data.id];
+      window.dispatchEvent(
+        new CustomEvent(PROGRESS_EVENT, {
+          detail: { id: data.id, title: data.title, done: true, success: data.success },
+        })
+      );
+    }).catch(() => {});
+  } catch {}
+}
 
 export function getActiveDownloadProgress(id: string): DownloadProgress | undefined {
   return activeDownloadsMap[id];
@@ -114,62 +151,39 @@ export async function downloadVideoForOffline(
   );
   const fileName = `offline_${cleanId}.${extension}`;
 
-  // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Capacitor)
+  // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Foreground Service Nativo Resiliente)
   if (isNativeApp()) {
-    let listenerHandle: any = null;
+    // Pede permissão para notificações locais se necessário (Android 13+)
     try {
-      // Garante permissões se aplicável
-      try {
-        const perm = await Filesystem.checkPermissions();
-        if (perm.publicStorage && perm.publicStorage !== 'granted') {
-          await Filesystem.requestPermissions().catch(() => {});
-        }
-      } catch {}
-
-      // Pede permissão para notificações (Android 13+ requer POST_NOTIFICATIONS)
-      try {
-        const notifPerm = await LocalNotifications.checkPermissions();
-        if (notifPerm.display !== 'granted') {
-          await LocalNotifications.requestPermissions().catch(() => {});
-        }
-      } catch {}
-
-      // Garante que o diretório 'videos' existe antes de iniciar o download
-      try {
-        await Filesystem.mkdir({
-          path: 'videos',
-          directory: Directory.Data,
-          recursive: true,
-        });
-      } catch {
-        // Ignora se o diretório já existir
+      const notifPerm = await LocalNotifications.checkPermissions();
+      if (notifPerm.display !== 'granted') {
+        await LocalNotifications.requestPermissions().catch(() => {});
       }
+    } catch {}
 
-      const relativePath = `videos/${fileName}`;
+    return new Promise<OfflineDownload>(async (resolve, reject) => {
+      let progressSub: any = null;
+      let completeSub: any = null;
 
-      // Inicia Foreground Service nativo com WakeLock (mantém o download vivo em segundo plano / tela bloqueada)
+      const cleanup = async () => {
+        if (progressSub) {
+          try { await progressSub.remove(); } catch {}
+        }
+        if (completeSub) {
+          try { await completeSub.remove(); } catch {}
+        }
+        delete activeDownloadsMap[cleanId];
+        delete activeDownloadTitles[cleanId];
+      };
+
       try {
-        await BackgroundDownload.startDownload({ title: item.title });
-      } catch (svcErr) {
-        console.warn('[DownloadManager] Não foi possível iniciar ForegroundService:', svcErr);
-      }
-
-      // Registra listener de progresso com porcentagem em tempo real
-      let lastNotifUpdate = 0;
-      try {
-        listenerHandle = await Filesystem.addListener('progress', (status) => {
-          if (status.url && status.url !== streamUrl) {
-            return;
-          }
-
-          const total = status.contentLength || 0;
-          const current = status.bytes || 0;
-          const percentage = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+        progressSub = await BackgroundDownload.addListener('progress', (data: any) => {
+          if (data.id !== cleanId) return;
 
           const progressData: DownloadProgress = {
-            bytesReceived: current,
-            totalBytes: total,
-            percentage,
+            bytesReceived: data.bytes,
+            totalBytes: data.contentLength,
+            percentage: data.percentage,
           };
 
           activeDownloadsMap[cleanId] = progressData;
@@ -182,117 +196,71 @@ export async function downloadVideoForOffline(
           if (typeof window !== 'undefined') {
             window.dispatchEvent(
               new CustomEvent(PROGRESS_EVENT, {
-                detail: {
-                  id: cleanId,
-                  title: item.title,
-                  progress: progressData,
-                },
+                detail: { id: cleanId, title: item.title, progress: progressData },
               })
             );
           }
+        });
 
-          // Atualiza a notificação do Android com throttle de 1s para poupar CPU
-          const now = Date.now();
-          if (now - lastNotifUpdate > 1000 || percentage === 100) {
-            lastNotifUpdate = now;
-            const subtext =
-              total > 0
-                ? `${formatDownloadSize(current)} / ${formatDownloadSize(total)} (${percentage}%)`
-                : `${formatDownloadSize(current)}`;
-            BackgroundDownload.updateProgress({ progress: percentage, subtext }).catch(() => {});
+        completeSub = await BackgroundDownload.addListener('complete', async (data: any) => {
+          if (data.id !== cleanId) return;
+
+          await cleanup();
+
+          if (data.success) {
+            const record: OfflineDownload = {
+              id: cleanId,
+              stream_id: item.stream_id,
+              stream_type: item.stream_type,
+              title: item.title,
+              series_title: item.series_title,
+              poster_url: item.poster_url,
+              file_path: data.path || `videos/${fileName}`,
+              file_size: data.size || 0,
+              downloaded_at: new Date().toISOString(),
+              container_extension: extension,
+              season_num: item.season_num,
+              episode_num: item.episode_num,
+              episode_id: item.episode_id,
+            };
+
+            if (localDB?.offline_downloads) {
+              await localDB.offline_downloads.put(record).catch(() => {});
+            }
+
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(PROGRESS_EVENT, {
+                  detail: { id: cleanId, title: item.title, done: true, success: true },
+                })
+              );
+            }
+
+            resolve(record);
+          } else {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(PROGRESS_EVENT, {
+                  detail: { id: cleanId, title: item.title, done: true, success: false },
+                })
+              );
+            }
+            reject(new Error(data.error || 'Falha no download nativo.'));
           }
         });
-      } catch (errListener) {
-        console.warn('[DownloadManager] Não foi possível registrar listener de progresso:', errListener);
-      }
 
-      let downloadResult;
-      try {
-        downloadResult = await Filesystem.downloadFile({
+        // Inicia o serviço nativo com WakeLock + WifiLock e download HTTP resiliente com retries
+        await BackgroundDownload.startDownload({
+          id: cleanId,
           url: streamUrl,
-          path: relativePath,
-          directory: Directory.Data,
-          progress: true,
+          title: item.title,
+          fileName: fileName,
         });
-      } finally {
-        if (listenerHandle) {
-          try {
-            await listenerHandle.remove();
-          } catch {}
-        }
+      } catch (err: any) {
+        await cleanup();
+        reject(new Error(`Falha ao iniciar download em segundo plano: ${err.message || 'Erro desconhecido'}`));
       }
-
-      // Finaliza o serviço de download nativo com sucesso
-      delete activeDownloadsMap[cleanId];
-      delete activeDownloadTitles[cleanId];
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(PROGRESS_EVENT, {
-            detail: { id: cleanId, title: item.title, done: true, success: true },
-          })
-        );
-      }
-
-      try {
-        await BackgroundDownload.stopDownload({ success: true, title: item.title });
-      } catch {}
-
-      // Obtém o tamanho final do arquivo baixado
-      let fileSize = 0;
-      try {
-        const stat = await Filesystem.stat({
-          path: relativePath,
-          directory: Directory.Data,
-        });
-        fileSize = stat.size || 0;
-      } catch {}
-
-      const record: OfflineDownload = {
-        id: cleanId,
-        stream_id: item.stream_id,
-        stream_type: item.stream_type,
-        title: item.title,
-        series_title: item.series_title,
-        poster_url: item.poster_url,
-        file_path: downloadResult.path || relativePath,
-        file_size: fileSize,
-        downloaded_at: new Date().toISOString(),
-        container_extension: extension,
-        season_num: item.season_num,
-        episode_num: item.episode_num,
-        episode_id: item.episode_id,
-      };
-
-      if (localDB?.offline_downloads) {
-        await localDB.offline_downloads.put(record);
-      }
-
-      return record;
-    } catch (err: any) {
-      if (listenerHandle) {
-        try {
-          await listenerHandle.remove();
-        } catch {}
-      }
-      delete activeDownloadsMap[cleanId];
-      delete activeDownloadTitles[cleanId];
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent(PROGRESS_EVENT, {
-            detail: { id: cleanId, title: item.title, done: true, success: false },
-          })
-        );
-      }
-
-      try {
-        await BackgroundDownload.stopDownload({ success: false, title: item.title });
-      } catch {}
-
-      console.error('[DownloadManager] Erro ao baixar no aplicativo nativo:', err);
-      throw new Error(`Falha no download nativo: ${err.message || 'Erro desconhecido'}`);
-    }
+    });
   }
 
   // 2. FALLBACK PARA NAVEGADOR WEB (Download direto padrão)

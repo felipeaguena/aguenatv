@@ -15,7 +15,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 16px;
       position: relative;
       overflow-x: hidden;
     }
@@ -47,13 +47,13 @@
     /* Container Principal Glassmorphism */
     .card {
       width: 100%;
-      max-width: 420px;
-      background: rgba(18, 20, 29, 0.85);
+      max-width: 440px;
+      background: rgba(18, 20, 29, 0.9);
       border: 1px solid rgba(255, 255, 255, 0.1);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
       border-radius: 28px;
-      padding: 32px 24px;
+      padding: 28px 20px;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
       text-align: center;
       position: relative;
@@ -128,7 +128,7 @@
       font-size: 13px;
       color: #94a3b8;
       line-height: 1.5;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
     .target-badge {
@@ -164,39 +164,37 @@
     }
     .form-input {
       width: 100%;
-      background: #0b0c10;
+      background: rgba(255, 255, 255, 0.05);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 14px;
-      padding: 13px 16px;
+      padding: 14px 16px;
       font-size: 14px;
       color: #ffffff;
       outline: none;
       transition: all 0.2s ease;
+      font-family: inherit;
     }
     .form-input:focus {
       border-color: #8b5cf6;
-      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
-    }
-    .form-input::placeholder {
-      color: #475569;
-      font-size: 13px;
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
     }
 
     /* Botões */
     .btn {
       width: 100%;
-      padding: 14px 20px;
+      padding: 13px 18px;
       border-radius: 14px;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 700;
+      border: none;
       cursor: pointer;
+      transition: all 0.2s ease;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      transition: all 0.2s ease;
-      border: none;
-      outline: none;
+      text-decoration: none;
     }
     .btn-primary {
       background: linear-gradient(135deg, #8b5cf6, #6366f1);
@@ -206,6 +204,16 @@
     .btn-primary:active {
       transform: scale(0.98);
       filter: brightness(0.95);
+    }
+    .btn-offline {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.3));
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #6ee7b7;
+      box-shadow: 0 10px 20px -5px rgba(16, 185, 129, 0.3);
+    }
+    .btn-offline:active {
+      transform: scale(0.98);
+      background: rgba(16, 185, 129, 0.3);
     }
     .btn-secondary {
       background: rgba(255, 255, 255, 0.06);
@@ -220,31 +228,10 @@
       background: transparent;
       color: #94a3b8;
       font-size: 12px;
-      margin-top: 12px;
+      margin-top: 10px;
       padding: 8px;
       text-decoration: underline;
       cursor: pointer;
-    }
-
-    /* Caixa de Dicas / Informações */
-    .tips-box {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px dashed rgba(255, 255, 255, 0.12);
-      border-radius: 14px;
-      padding: 14px;
-      margin-top: 20px;
-      text-align: left;
-      font-size: 12px;
-      color: #94a3b8;
-      line-height: 1.6;
-    }
-    .tips-box strong {
-      color: #e2e8f0;
-      display: block;
-      margin-bottom: 6px;
-    }
-    .tips-item {
-      margin-bottom: 4px;
     }
 
     /* Mensagem de Erro */
@@ -258,9 +245,102 @@
       text-align: left;
       line-height: 1.5;
       margin-bottom: 16px;
+    }
+
+    /* Lista de Itens Offline */
+    .downloads-list {
+      max-height: 380px;
+      overflow-y: auto;
+      margin-top: 16px;
+      margin-bottom: 16px;
       display: flex;
-      align-items: flex-start;
+      flex-direction: column;
       gap: 10px;
+      text-align: left;
+      padding-right: 4px;
+    }
+    .download-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .download-card:hover, .download-card:active {
+      background: rgba(139, 92, 246, 0.15);
+      border-color: rgba(139, 92, 246, 0.4);
+    }
+    .download-thumb {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      background: #000;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    .download-info {
+      flex: 1;
+      min-width: 0;
+    }
+    .download-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .download-meta {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    /* Player Overlay */
+    .player-overlay {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+    }
+    .player-header {
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #fff;
+      z-index: 10;
+    }
+    .player-title {
+      font-size: 14px;
+      font-weight: 700;
+      truncate: true;
+      max-width: 80%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .player-close {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .player-video {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      background: #000;
     }
 
     .hidden {
@@ -272,7 +352,7 @@
   <div class="glow-bg-1"></div>
   <div class="glow-bg-2"></div>
 
-  <div class="card">
+  <div class="card" id="main-card">
     <!-- Cabeçalho do App -->
     <div class="logo-container">
       <div class="logo-icon">
@@ -290,25 +370,37 @@
       <h2 class="title" id="connecting-title">Conectando ao AGUENATV...</h2>
       <p class="subtitle" id="connecting-desc">Aguarde enquanto verificamos a conexão com o servidor.</p>
       <div class="target-badge hidden" id="connecting-badge"></div>
+
+      <button type="button" class="btn btn-offline hidden" id="btn-connecting-offline">
+        🍿 Assistir Vídeos Baixados (Offline)
+      </button>
     </div>
 
-    <!-- TELA 2: Erro de Conexão com Opções de Diagnóstico -->
+    <!-- TELA 2: Modo Offline / Avião (Vídeos Salvos) -->
+    <div id="state-offline" class="hidden">
+      <div style="font-size: 32px; margin-bottom: 8px;">✈️</div>
+      <h2 class="title">Modo Offline (Avião)</h2>
+      <p class="subtitle" id="offline-desc">Reproduza seus conteúdos salvos na memória do celular sem internet.</p>
+
+      <div class="downloads-list" id="downloads-list">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+
+      <button type="button" class="btn btn-secondary" id="btn-offline-retry">
+        🔄 Tentar Conectar com o Servidor
+      </button>
+    </div>
+
+    <!-- TELA 3: Erro de Conexão com Opções de Diagnóstico -->
     <div id="state-error" class="hidden">
-      <div style="font-size: 38px; margin-bottom: 12px;">⚠️</div>
+      <div style="font-size: 34px; margin-bottom: 10px;">⚠️</div>
       <h2 class="title">Servidor Indisponível</h2>
-      <p class="subtitle">Não foi possível estabelecer conexão com o servidor cadastrado:</p>
+      <p class="subtitle">Sem conexão no momento com o servidor:</p>
       <div class="target-badge" id="error-badge"></div>
 
-      <div class="alert-error">
-        <div>
-          <strong>Causas comuns:</strong>
-          <ul style="padding-left: 16px; margin-top: 4px;">
-            <li>O servidor está desligado ou reiniciando;</li>
-            <li>As portas 80, 443 ou 3000 estão bloqueadas no firewall;</li>
-            <li>No PC local via Wi-Fi, use o IP da sua máquina em vez de localhost.</li>
-          </ul>
-        </div>
-      </div>
+      <button type="button" class="btn btn-offline" id="btn-error-offline" style="margin-bottom: 12px;">
+        🍿 Assistir Vídeos Baixados (Offline)
+      </button>
 
       <button type="button" class="btn btn-primary" id="btn-retry">
         🔄 Tentar Novamente
@@ -316,15 +408,15 @@
       <button type="button" class="btn btn-secondary" id="btn-change-server">
         ⚙️ Alterar Endereço do Servidor
       </button>
-      <button type="button" class="btn-text" id="btn-force-open">
+      <button type="button" class="btn btn-text" id="btn-force-open">
         Abrir endereço mesmo assim &rarr;
       </button>
     </div>
 
-    <!-- TELA 3: Configuração Inicial / Manual do Servidor -->
+    <!-- TELA 4: Configuração Manual do Servidor -->
     <div id="state-config" class="hidden">
       <h2 class="title">Configurar Servidor</h2>
-      <p class="subtitle">Informe o endereço onde seu servidor AGUENATV está rodando para conectar o aplicativo.</p>
+      <p class="subtitle">Informe o endereço do servidor AGUENATV.</p>
 
       <div id="config-alert" class="alert-error hidden">
         <span id="config-alert-msg">Endereço inválido</span>
@@ -340,9 +432,6 @@
               class="form-input"
               placeholder="Ex: http://163.176.207.140"
               autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              spellcheck="false"
               required
             />
           </div>
@@ -352,191 +441,268 @@
           Conectar ao Servidor
         </button>
       </form>
-
-      <div class="tips-box">
-        <strong>💡 Exemplos de configuração:</strong>
-        <div class="tips-item">🌐 <b>Oracle Cloud:</b> <code>http://IP_DA_VM:3000</code></div>
-        <div class="tips-item">⚡ <b>Vercel:</b> <code>https://seu-projeto.vercel.app</code></div>
-        <div class="tips-item">💻 <b>PC Local:</b> <code>http://192.168.x.x:3000</code> (mesmo Wi-Fi)</div>
-      </div>
+      <button type="button" class="btn btn-secondary" id="btn-config-offline" style="margin-top: 12px;">
+        🍿 Assistir Vídeos Baixados
+      </button>
     </div>
+  </div>
+
+  <!-- Player de Vídeo Offline Integrado -->
+  <div id="player-overlay" class="player-overlay hidden">
+    <div class="player-header">
+      <span class="player-title" id="player-title">Reproduzindo</span>
+      <button type="button" class="player-close" id="player-close">✕ Fechar</button>
+    </div>
+    <video id="offline-video" class="player-video" controls playsinline autoplay></video>
   </div>
 
   <script>
     (function () {
       const STORAGE_KEY = 'aguenatv_server_url';
+      const DEFAULT_SERVER = 'http://163.176.207.140';
 
-      // Elementos de tela
       const stateConnecting = document.getElementById('state-connecting');
+      const stateOffline = document.getElementById('state-offline');
       const stateError = document.getElementById('state-error');
       const stateConfig = document.getElementById('state-config');
 
-      const connectingTitle = document.getElementById('connecting-title');
-      const connectingDesc = document.getElementById('connecting-desc');
       const connectingBadge = document.getElementById('connecting-badge');
       const errorBadge = document.getElementById('error-badge');
+      const btnConnectingOffline = document.getElementById('btn-connecting-offline');
+      const btnErrorOffline = document.getElementById('btn-error-offline');
+      const btnConfigOffline = document.getElementById('btn-config-offline');
+      const btnOfflineRetry = document.getElementById('btn-offline-retry');
+
+      const downloadsList = document.getElementById('downloads-list');
+      const offlineDesc = document.getElementById('offline-desc');
+
+      const playerOverlay = document.getElementById('player-overlay');
+      const playerTitle = document.getElementById('player-title');
+      const playerClose = document.getElementById('player-close');
+      const offlineVideo = document.getElementById('offline-video');
 
       const serverForm = document.getElementById('server-form');
       const serverInput = document.getElementById('server-input');
       const btnSubmit = document.getElementById('btn-submit');
       const configAlert = document.getElementById('config-alert');
       const configAlertMsg = document.getElementById('config-alert-msg');
-
       const btnRetry = document.getElementById('btn-retry');
       const btnChangeServer = document.getElementById('btn-change-server');
       const btnForceOpen = document.getElementById('btn-force-open');
 
       function showScreen(screen) {
         stateConnecting.classList.add('hidden');
+        stateOffline.classList.add('hidden');
         stateError.classList.add('hidden');
         stateConfig.classList.add('hidden');
 
         if (screen === 'connecting') stateConnecting.classList.remove('hidden');
+        if (screen === 'offline') stateOffline.classList.remove('hidden');
         if (screen === 'error') stateError.classList.remove('hidden');
         if (screen === 'config') stateConfig.classList.remove('hidden');
       }
 
       function cleanUrl(input) {
         if (!input) return '';
-        let url = input.trim();
-        // Remove barras finais
-        url = url.replace(/\/+$/, '');
-        // Se não tiver protocolo, adiciona http://
-        if (!/^https?:\/\//i.test(url)) {
-          url = 'http://' + url;
-        }
+        let url = input.trim().replace(/\/+$/, '');
+        if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
         return url;
       }
 
-      // Testa a conectividade com o servidor
-      async function testServerConnection(url, timeoutMs = 4000) {
+      // Lê downloads offline diretamente do IndexedDB local do app
+      function getOfflineDownloadsFromDB() {
+        return new Promise((resolve) => {
+          try {
+            const req = indexedDB.open('AGUENATV_LOCAL_DB');
+            req.onsuccess = (e) => {
+              const db = e.target.result;
+              if (!db.objectStoreNames.contains('offline_downloads')) {
+                resolve([]);
+                return;
+              }
+              const tx = db.transaction('offline_downloads', 'readonly');
+              const store = tx.objectStore('offline_downloads');
+              const getReq = store.getAll();
+              getReq.onsuccess = () => resolve(getReq.result || []);
+              getReq.onerror = () => resolve([]);
+            };
+            req.onerror = () => resolve([]);
+          } catch {
+            resolve([]);
+          }
+        });
+      }
+
+      function formatSize(bytes) {
+        if (!bytes) return '';
+        const mb = bytes / (1024 * 1024);
+        if (mb >= 1024) return (mb / 1024).toFixed(1) + ' GB';
+        return Math.round(mb) + ' MB';
+      }
+
+      async function openOfflineScreen() {
+        showScreen('offline');
+        downloadsList.innerHTML = '<div style="text-align:center; padding: 20px; font-size:12px; color:#94a3b8;">Carregando vídeos salvos...</div>';
+
+        const items = await getOfflineDownloadsFromDB();
+        if (items.length === 0) {
+          downloadsList.innerHTML = `
+            <div style="text-align:center; padding: 30px 10px; color:#94a3b8; font-size:12px;">
+              <p style="font-weight:bold; color:#fff; margin-bottom:4px;">Nenhum vídeo salvo offline.</p>
+              <p>Conecte-se à internet para baixar filmes ou episódios de séries.</p>
+            </div>
+          `;
+          return;
+        }
+
+        offlineDesc.innerText = `${items.length} vídeo(s) disponíveis para assistir sem internet.`;
+        downloadsList.innerHTML = '';
+
+        items.forEach((item) => {
+          const div = document.createElement('div');
+          div.className = 'download-card';
+
+          const imgSrc = item.poster_url || 'placeholder.svg';
+          const sizeText = formatSize(item.file_size);
+
+          div.innerHTML = `
+            <img class="download-thumb" src="${imgSrc}" onerror="this.src='placeholder.svg'" />
+            <div class="download-info">
+              <div class="download-title">${item.title}</div>
+              <div class="download-meta">${item.stream_type === 'series' ? 'Série' : 'Filme'}${sizeText ? ' • ' + sizeText : ''}</div>
+            </div>
+            <div style="font-size:18px; color:#a78bfa;">▶</div>
+          `;
+
+          div.addEventListener('click', () => {
+            playOfflineVideo(item);
+          });
+
+          downloadsList.appendChild(div);
+        });
+      }
+
+      function playOfflineVideo(item) {
+        let src = item.file_path;
+        if (window.Capacitor && window.Capacitor.convertFileSrc) {
+          src = window.Capacitor.convertFileSrc(item.file_path);
+        }
+
+        playerTitle.innerText = item.title;
+        offlineVideo.src = src;
+        playerOverlay.classList.remove('hidden');
+        offlineVideo.play().catch(() => {});
+      }
+
+      playerClose.addEventListener('click', () => {
+        offlineVideo.pause();
+        offlineVideo.src = '';
+        playerOverlay.classList.add('hidden');
+      });
+
+      // Testa conectividade HTTP
+      async function testServerConnection(url, timeoutMs = 3500) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
-          // Tenta endpoint de healthcheck
-          const res = await fetch(`${url}/api/health`, {
-            method: 'GET',
-            mode: 'cors',
-            signal: controller.signal,
-          });
+          await fetch(`${url}/api/health`, { method: 'GET', signal: controller.signal });
           clearTimeout(timeoutId);
-          // Qualquer resposta HTTP (200, 401, etc) significa que o servidor está vivo
           return true;
-        } catch (err) {
+        } catch {
           clearTimeout(timeoutId);
-
-          // Fallback: tenta uma requisição direta ao login/favicon com no-cors
           try {
-            const fallbackController = new AbortController();
-            const fallbackTimeout = setTimeout(() => fallbackController.abort(), 2500);
-            await fetch(`${url}/login`, {
-              method: 'GET',
-              mode: 'no-cors',
-              signal: fallbackController.signal,
-            });
-            clearTimeout(fallbackTimeout);
+            const fCtrl = new AbortController();
+            const fT = setTimeout(() => fCtrl.abort(), 2000);
+            await fetch(`${url}/login`, { method: 'GET', mode: 'no-cors', signal: fCtrl.signal });
+            clearTimeout(fT);
             return true;
-          } catch (fallbackErr) {
+          } catch {
             return false;
           }
         }
       }
 
-      // Tenta conectar ao servidor salvo
       async function tryConnect(serverUrl) {
         showScreen('connecting');
-        connectingTitle.innerText = 'Conectando ao AGUENATV...';
-        connectingDesc.innerText = 'Testando resposta do servidor...';
         connectingBadge.innerText = serverUrl;
         connectingBadge.classList.remove('hidden');
+
+        // Mostra botão de modo offline após 1.5s de espera
+        setTimeout(() => {
+          btnConnectingOffline.classList.remove('hidden');
+        }, 1200);
+
+        // Se o navegador já indicar que está offline (Modo Avião)
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          const items = await getOfflineDownloadsFromDB();
+          if (items.length > 0) {
+            openOfflineScreen();
+            return;
+          }
+        }
 
         const isOnline = await testServerConnection(serverUrl);
 
         if (isOnline) {
-          connectingTitle.innerText = 'Conectado!';
-          connectingDesc.innerText = 'Abrindo o portal AGUENATV...';
           localStorage.setItem(STORAGE_KEY, serverUrl);
           setTimeout(() => {
             window.location.replace(serverUrl);
-          }, 350);
+          }, 200);
         } else {
           errorBadge.innerText = serverUrl;
           showScreen('error');
         }
       }
 
-      // Inicialização: define o servidor padrão na nuvem Oracle Cloud se nada tiver sido salvo ainda
-      const DEFAULT_SERVER = 'http://163.176.207.140';
-      const savedServer = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
+      btnConnectingOffline.addEventListener('click', openOfflineScreen);
+      btnErrorOffline.addEventListener('click', openOfflineScreen);
+      btnConfigOffline.addEventListener('click', openOfflineScreen);
 
-      if (savedServer && savedServer.trim() !== '') {
-        tryConnect(cleanUrl(savedServer));
-      } else {
-        // NENHUM servidor salvo
-        // NÃO faz reload em loop! Mostra a tela de configuração
+      btnOfflineRetry.addEventListener('click', () => {
+        const saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
+        tryConnect(cleanUrl(saved));
+      });
+
+      btnRetry.addEventListener('click', () => {
+        const saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
+        tryConnect(cleanUrl(saved));
+      });
+
+      btnChangeServer.addEventListener('click', () => {
+        serverInput.value = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
         showScreen('config');
         serverInput.focus();
-      }
+      });
 
-      // Evento: Submissão do formulário de configuração
+      btnForceOpen.addEventListener('click', () => {
+        const url = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
+        window.location.replace(cleanUrl(url));
+      });
+
       serverForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         configAlert.classList.add('hidden');
-
-        const rawVal = serverInput.value;
-        const normalized = cleanUrl(rawVal);
-
-        if (!normalized || normalized === 'http://' || normalized === 'https://') {
-          configAlertMsg.innerText = 'Por favor, digite um endereço IP ou URL válido.';
-          configAlert.classList.remove('hidden');
-          return;
-        }
+        const normalized = cleanUrl(serverInput.value);
 
         btnSubmit.disabled = true;
-        btnSubmit.innerText = 'Verificando conexão...';
+        btnSubmit.innerText = 'Verificando...';
 
-        const isReachable = await testServerConnection(normalized, 5000);
-
-        if (isReachable) {
+        const isOk = await testServerConnection(normalized, 4000);
+        if (isOk) {
           localStorage.setItem(STORAGE_KEY, normalized);
-          btnSubmit.innerText = 'Conectado! Redirecionando...';
-          setTimeout(() => {
-            window.location.replace(normalized);
-          }, 400);
+          window.location.replace(normalized);
         } else {
           btnSubmit.disabled = false;
           btnSubmit.innerText = 'Conectar ao Servidor';
-          configAlertMsg.innerText = `Não foi possível conectar a ${normalized}. Verifique se o servidor está iniciado e acessível na mesma rede.`;
+          configAlertMsg.innerText = `Servidor inacessível em ${normalized}.`;
           configAlert.classList.remove('hidden');
         }
       });
 
-      // Evento: Tentar novamente
-      btnRetry.addEventListener('click', () => {
-        const url = localStorage.getItem(STORAGE_KEY);
-        if (url) {
-          tryConnect(url);
-        } else {
-          showScreen('config');
-        }
-      });
-
-      // Evento: Alterar servidor
-      btnChangeServer.addEventListener('click', () => {
-        const url = localStorage.getItem(STORAGE_KEY) || '';
-        serverInput.value = url;
-        showScreen('config');
-        serverInput.focus();
-      });
-
-      // Evento: Forçar abertura sem validação
-      btnForceOpen.addEventListener('click', () => {
-        const url = localStorage.getItem(STORAGE_KEY);
-        if (url) {
-          window.location.replace(url);
-        }
-      });
+      // Inicialização
+      const savedServer = localStorage.getItem(STORAGE_KEY) || DEFAULT_SERVER;
+      tryConnect(cleanUrl(savedServer));
     })();
   </script>
 </body>

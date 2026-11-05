@@ -153,6 +153,25 @@ export default function InfoView({ type, id }: InfoViewProps) {
           found = await localDB.streams.where('stream_id').equals(String(id)).first();
         }
 
+        // 4. Fallback de emergência Modo Offline: busca nos downloads offline locais
+        if (!found && localDB?.offline_downloads) {
+          const offItem = await localDB.offline_downloads
+            .where('stream_id')
+            .equals(String(id))
+            .first();
+
+          if (offItem) {
+            found = {
+              stream_id: String(offItem.stream_id),
+              stream_type: offItem.stream_type,
+              name: offItem.series_title || offItem.title,
+              title: offItem.series_title || offItem.title,
+              stream_icon: offItem.poster_url,
+              category_name: 'Baixados Offline',
+            } as any;
+          }
+        }
+
         const savedCfg = await getSavedIPTVConfig();
 
         if (!isMounted) return;
@@ -206,7 +225,55 @@ export default function InfoView({ type, id }: InfoViewProps) {
                 setSelectedSeason(getDefaultSeason(sorted));
               }
             } catch (err) {
-              console.error('Erro ao carregar capítulos da série:', err);
+              console.warn('Erro ao carregar capítulos da série online (tentando dados offline):', err);
+              // Fallback Modo Offline: Carrega episódios salvos no banco local de downloads
+              if (localDB?.offline_downloads) {
+                const offlineItems = await localDB.offline_downloads
+                  .where('stream_id')
+                  .equals(String(found.stream_id))
+                  .toArray();
+
+                if (offlineItems.length > 0 && isMounted) {
+                  const episodesMap: Record<string, SeriesEpisode[]> = {};
+                  const seasonsList: SeriesSeason[] = [];
+
+                  for (const off of offlineItems) {
+                    const sNum = String(off.season_num || 1);
+                    if (!episodesMap[sNum]) {
+                      episodesMap[sNum] = [];
+                      seasonsList.push({
+                        season_number: Number(sNum),
+                        name: `Temporada ${sNum}`,
+                        episode_count: 0,
+                      });
+                    }
+                    episodesMap[sNum].push({
+                      id: String(off.episode_id || off.id),
+                      episode_num: off.episode_num || 1,
+                      title: off.title,
+                      season: Number(sNum),
+                      container_extension: off.container_extension || 'mp4',
+                    });
+                  }
+
+                  for (const s of seasonsList) {
+                    s.episode_count = episodesMap[String(s.season_number)]?.length || 0;
+                  }
+
+                  const fallbackSeriesInfo: SeriesInfoResponse = {
+                    seasons: seasonsList,
+                    episodes: episodesMap,
+                    info: {
+                      name: found.title || found.name,
+                      title: found.title || found.name,
+                      cover: found.stream_icon,
+                    },
+                  };
+
+                  setSeriesInfo(fallbackSeriesInfo);
+                  setSelectedSeason(String(seasonsList[0]?.season_number || 1));
+                }
+              }
             } finally {
               if (isMounted) setLoadingSeries(false);
             }

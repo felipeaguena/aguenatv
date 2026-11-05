@@ -7,13 +7,27 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 public class DownloadForegroundService extends Service {
+    private static final String TAG = "DownloadFGService";
+
     public static final String CHANNEL_ID = "aguenatv_downloads_channel";
     public static final String CHANNEL_NAME = "Downloads AGUENATV";
     public static final String COMPLETE_CHANNEL_ID = "aguenatv_complete_channel";
@@ -21,19 +35,38 @@ public class DownloadForegroundService extends Service {
 
     public static final int NOTIFICATION_ID = 9901;
 
-    public static final String ACTION_START = "com.aguenatv.app.START_DOWNLOAD";
-    public static final String ACTION_PROGRESS = "com.aguenatv.app.UPDATE_PROGRESS";
-    public static final String ACTION_STOP = "com.aguenatv.app.STOP_DOWNLOAD";
+    public static final String ACTION_START_DOWNLOAD = "com.aguenatv.app.START_DOWNLOAD";
+    public static final String ACTION_CANCEL_DOWNLOAD = "com.aguenatv.app.CANCEL_DOWNLOAD";
 
+    public static final String EXTRA_ID = "extra_id";
+    public static final String EXTRA_URL = "extra_url";
     public static final String EXTRA_TITLE = "extra_title";
-    public static final String EXTRA_PROGRESS = "extra_progress";
-    public static final String EXTRA_SUBTEXT = "extra_subtext";
-    public static final String EXTRA_SUCCESS = "extra_success";
+    public static final String EXTRA_FILE_NAME = "extra_file_name";
 
     private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
     private NotificationManager notificationManager;
     private NotificationCompat.Builder notificationBuilder;
-    private String currentTitle = "Vídeo";
+
+    private final ExecutorService executorService = Executors.newFixedThreadPool(2);
+    private final ConcurrentHashMap<String, DownloadTask> activeTasks = new ConcurrentHashMap<>();
+
+    private static class DownloadTask {
+        String id;
+        String url;
+        String title;
+        String fileName;
+        AtomicBoolean isCancelled = new AtomicBoolean(false);
+        long bytesDownloaded = 0;
+        long totalBytes = 0;
+
+        DownloadTask(String id, String url, String title, String fileName) {
+            this.id = id;
+            this.url = url;
+            this.title = title;
+            this.fileName = fileName;
+        }
+    }
 
     @Override
     public void onCreate() {
@@ -44,28 +77,38 @@ public class DownloadForegroundService extends Service {
         try {
             PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (powerManager != null) {
+                // PARTIAL_WAKE_LOCK mantém a CPU 100% ativa mesmo com tela apagada
                 wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aguenatv:download_wakelock");
                 wakeLock.setReferenceCounted(false);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            Log.e(TAG, "Erro ao criar WakeLock", e);
+        }
+
+        try {
+            WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager != null) {
+                // WifiLock impede que o Android coloque o chip Wi-Fi em modo economia de energia
+                wifiLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "aguenatv:wifi_lock");
+                wifiLock.setReferenceCounted(false);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao criar WifiLock", e);
         }
     }
 
     private void createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notificationManager != null) {
-            // Canal em andamento (silencioso para não apitar a cada atualização de %)
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
             );
-            channel.setDescription("Notificações de progresso de downloads em segundo plano");
+            channel.setDescription("Notificações de progresso contínuo de downloads em segundo plano");
             channel.enableVibration(false);
             channel.setShowBadge(false);
             notificationManager.createNotificationChannel(channel);
 
-            // Canal para notificação de conclusão (com som e alerta)
             NotificationChannel completeChannel = new NotificationChannel(
                 COMPLETE_CHANNEL_ID,
                 COMPLETE_CHANNEL_NAME,
@@ -83,34 +126,241 @@ public class DownloadForegroundService extends Service {
         if (intent == null) return START_NOT_STICKY;
 
         String action = intent.getAction();
-        if (ACTION_START.equals(action)) {
+        if (ACTION_START_DOWNLOAD.equals(action)) {
+            String id = intent.getStringExtra(EXTRA_ID);
+            String url = intent.getStringExtra(EXTRA_URL);
             String title = intent.getStringExtra(EXTRA_TITLE);
-            if (title != null && !title.isEmpty()) {
-                currentTitle = title;
+            String fileName = intent.getStringExtra(EXTRA_FILE_NAME);
+
+            if (id != null && url != null && fileName != null) {
+                startNativeDownload(id, url, title != null ? title : "Vídeo", fileName);
             }
-            startForegroundWithNotification(currentTitle, 0, "Iniciando download...");
-        } else if (ACTION_PROGRESS.equals(action)) {
-            int progress = intent.getIntExtra(EXTRA_PROGRESS, 0);
-            String subtext = intent.getStringExtra(EXTRA_SUBTEXT);
-            updateNotificationProgress(progress, subtext);
-        } else if (ACTION_STOP.equals(action)) {
-            boolean success = intent.getBooleanExtra(EXTRA_SUCCESS, true);
-            String title = intent.getStringExtra(EXTRA_TITLE);
-            if (title != null && !title.isEmpty()) {
-                currentTitle = title;
+        } else if (ACTION_CANCEL_DOWNLOAD.equals(action)) {
+            String id = intent.getStringExtra(EXTRA_ID);
+            if (id != null) {
+                DownloadTask task = activeTasks.get(id);
+                if (task != null) {
+                    task.isCancelled.set(true);
+                }
             }
-            stopDownloadService(success);
         }
 
         return START_NOT_STICKY;
     }
 
-    private void startForegroundWithNotification(String title, int progress, String subtext) {
-        if (wakeLock != null && !wakeLock.isHeld()) {
-            // Mantém a CPU ativa mesmo com tela apagada por até 60 minutos contínuos
-            wakeLock.acquire(60 * 60 * 1000L);
+    private synchronized void acquireLocks() {
+        try {
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(2 * 60 * 60 * 1000L); // 2 horas máximo
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao adquirir WakeLock", e);
         }
 
+        try {
+            if (wifiLock != null && !wifiLock.isHeld()) {
+                wifiLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Erro ao adquirir WifiLock", e);
+        }
+    }
+
+    private synchronized void releaseLocksIfIdle() {
+        if (activeTasks.isEmpty()) {
+            try {
+                if (wakeLock != null && wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
+            } catch (Exception ignored) {}
+
+            try {
+                if (wifiLock != null && wifiLock.isHeld()) {
+                    wifiLock.release();
+                }
+            } catch (Exception ignored) {}
+
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
+        }
+    }
+
+    private void startNativeDownload(String id, String urlStr, String title, String fileName) {
+        acquireLocks();
+
+        DownloadTask task = new DownloadTask(id, urlStr, title, fileName);
+        activeTasks.put(id, task);
+
+        // Inicializa Foreground Notification
+        updateForegroundNotification(task, 0, "Iniciando download...");
+
+        executorService.execute(() -> runDownloadLoop(task));
+    }
+
+    private void runDownloadLoop(DownloadTask task) {
+        File videosDir = new File(getFilesDir(), "videos");
+        if (!videosDir.exists()) {
+            videosDir.mkdirs();
+        }
+
+        File targetFile = new File(videosDir, task.fileName);
+        File tempFile = new File(videosDir, task.fileName + ".tmp");
+
+        int maxRetries = 10;
+        int currentRetry = 0;
+        boolean downloadCompleted = false;
+        long lastNotificationTime = 0;
+
+        Log.i(TAG, "Iniciando download nativo resiliente para: " + task.title + " em: " + tempFile.getAbsolutePath());
+
+        while (!task.isCancelled.get() && currentRetry < maxRetries && !downloadCompleted) {
+            HttpURLConnection conn = null;
+            InputStream inputStream = null;
+            FileOutputStream outputStream = null;
+
+            try {
+                long existingLength = tempFile.exists() ? tempFile.length() : 0;
+                task.bytesDownloaded = existingLength;
+
+                URL url = new URL(task.url);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(30000); // 30 segundos para conectar
+                conn.setReadTimeout(60000);    // 60 segundos de leitura
+
+                // Permite retomada (Resumable Download) usando HTTP Range
+                if (existingLength > 0) {
+                    conn.setRequestProperty("Range", "bytes=" + existingLength + "-");
+                    Log.i(TAG, "Retomando download a partir do byte: " + existingLength);
+                }
+
+                conn.connect();
+
+                int responseCode = conn.getResponseCode();
+                boolean isResume = (responseCode == HttpURLConnection.HTTP_PARTIAL); // 206
+                boolean isOk = (responseCode == HttpURLConnection.HTTP_OK);          // 200
+
+                if (!isOk && !isResume) {
+                    throw new Exception("HTTP status inválido: " + responseCode);
+                }
+
+                long contentLength = conn.getContentLengthLong();
+                if (contentLength > 0) {
+                    task.totalBytes = isResume ? (existingLength + contentLength) : contentLength;
+                } else if (task.totalBytes <= 0) {
+                    task.totalBytes = 0;
+                }
+
+                inputStream = conn.getInputStream();
+                // Append mode se estiver retomando
+                outputStream = new FileOutputStream(tempFile, isResume);
+
+                byte[] buffer = new byte[64 * 1024]; // Buffer de 64 KB para alta velocidade
+                int bytesRead;
+
+                while (!task.isCancelled.get() && (bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                    task.bytesDownloaded += bytesRead;
+
+                    long now = System.currentTimeMillis();
+                    // Atualiza notificação e envia evento para a UI a cada 800ms
+                    if (now - lastNotificationTime > 800 || (task.totalBytes > 0 && task.bytesDownloaded >= task.totalBytes)) {
+                        lastNotificationTime = now;
+                        int percentage = task.totalBytes > 0
+                            ? (int) Math.min(100, (task.bytesDownloaded * 100) / task.totalBytes)
+                            : 0;
+
+                        String subtext = formatBytes(task.bytesDownloaded)
+                            + (task.totalBytes > 0 ? " / " + formatBytes(task.totalBytes) : "")
+                            + " (" + percentage + "%)";
+
+                        updateForegroundNotification(task, percentage, subtext);
+
+                        BackgroundDownloadPlugin.emitProgress(
+                            task.id,
+                            task.title,
+                            task.bytesDownloaded,
+                            task.totalBytes,
+                            percentage
+                        );
+                    }
+                }
+
+                outputStream.flush();
+
+                if (task.isCancelled.get()) {
+                    Log.i(TAG, "Download cancelado pelo usuário: " + task.title);
+                    break;
+                }
+
+                // Verifica se baixou todo o arquivo
+                if (task.totalBytes <= 0 || task.bytesDownloaded >= task.totalBytes) {
+                    downloadCompleted = true;
+                }
+
+            } catch (Exception e) {
+                currentRetry++;
+                Log.w(TAG, "Falha de conexão durante o download (" + currentRetry + "/" + maxRetries + "): " + e.getMessage());
+
+                if (task.isCancelled.get()) break;
+
+                try {
+                    // Espera 2 segundos antes de tentar reconectar e retomar
+                    Thread.sleep(2000);
+                } catch (InterruptedException ignored) {}
+            } finally {
+                try {
+                    if (outputStream != null) outputStream.close();
+                } catch (Exception ignored) {}
+                try {
+                    if (inputStream != null) inputStream.close();
+                } catch (Exception ignored) {}
+                try {
+                    if (conn != null) conn.disconnect();
+                } catch (Exception ignored) {}
+            }
+        }
+
+        activeTasks.remove(task.id);
+
+        if (downloadCompleted && !task.isCancelled.get()) {
+            // Renomeia o arquivo temporário para o destino final
+            if (targetFile.exists()) {
+                targetFile.delete();
+            }
+            tempFile.renameTo(targetFile);
+
+            Log.i(TAG, "Download concluído com sucesso: " + targetFile.getAbsolutePath());
+
+            notifyCompletion(task.title, true);
+            BackgroundDownloadPlugin.emitComplete(
+                task.id,
+                task.title,
+                targetFile.getAbsolutePath(),
+                targetFile.length(),
+                true,
+                null
+            );
+        } else {
+            if (task.isCancelled.get()) {
+                tempFile.delete();
+                BackgroundDownloadPlugin.emitComplete(task.id, task.title, "", 0, false, "Download cancelado");
+            } else {
+                notifyCompletion(task.title, false);
+                BackgroundDownloadPlugin.emitComplete(
+                    task.id,
+                    task.title,
+                    "",
+                    0,
+                    false,
+                    "Falha ao concluir download após " + maxRetries + " tentativas."
+                );
+            }
+        }
+
+        releaseLocksIfIdle();
+    }
+
+    private void updateForegroundNotification(DownloadTask task, int progress, String subtext) {
         Intent appIntent = new Intent(this, MainActivity.class);
         appIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent pendingIntent = PendingIntent.getActivity(
@@ -120,13 +370,18 @@ public class DownloadForegroundService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
+        int count = activeTasks.size();
+        String title = count > 1
+            ? "AGUENATV: Baixando (" + count + " vídeos)"
+            : "AGUENATV: Baixando " + task.title;
+
         notificationBuilder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("AGUENATV: Baixando para ver offline")
-            .setContentText(title + (subtext != null ? " • " + subtext : ""))
+            .setContentTitle(title)
+            .setContentText(task.title + " • " + subtext)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setProgress(100, progress, progress == 0)
+            .setProgress(100, progress, progress <= 0)
             .setContentIntent(pendingIntent);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -136,62 +391,59 @@ public class DownloadForegroundService extends Service {
         }
     }
 
-    private void updateNotificationProgress(int progress, String subtext) {
-        if (notificationBuilder != null && notificationManager != null) {
-            notificationBuilder.setProgress(100, progress, false);
-            if (subtext != null && !subtext.isEmpty()) {
-                notificationBuilder.setContentText(currentTitle + " • " + subtext);
-            }
-            notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
-        }
-    }
+    private void notifyCompletion(String title, boolean success) {
+        if (notificationManager == null) return;
 
-    private void stopDownloadService(boolean success) {
-        if (wakeLock != null && wakeLock.isHeld()) {
-            try {
-                wakeLock.release();
-            } catch (Exception ignored) {}
-        }
+        Intent appIntent = new Intent(this, MainActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            appIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+        );
 
-        stopForeground(STOP_FOREGROUND_REMOVE);
-
-        if (success && notificationManager != null) {
-            Intent appIntent = new Intent(this, MainActivity.class);
-            PendingIntent pendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                appIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
-            );
-
+        if (success) {
             NotificationCompat.Builder completeBuilder = new NotificationCompat.Builder(this, COMPLETE_CHANNEL_ID)
                 .setContentTitle("AGUENATV: Download Concluído! 🍿")
-                .setContentText(currentTitle + " já está salvo para assistir offline.")
+                .setContentText(title + " já está pronto para assistir offline.")
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent);
 
             notificationManager.notify((int) System.currentTimeMillis(), completeBuilder.build());
-        } else if (!success && notificationManager != null) {
+        } else {
             NotificationCompat.Builder failBuilder = new NotificationCompat.Builder(this, COMPLETE_CHANNEL_ID)
                 .setContentTitle("AGUENATV: Falha no Download")
-                .setContentText("Não foi possível concluir o download de: " + currentTitle)
+                .setContentText("Não foi possível concluir o download de: " + title)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH);
 
             notificationManager.notify((int) System.currentTimeMillis(), failBuilder.build());
         }
+    }
 
-        stopSelf();
+    private String formatBytes(long bytes) {
+        if (bytes <= 0) return "0 MB";
+        double mb = bytes / (1024.0 * 1024.0);
+        if (mb >= 1024) {
+            return String.format(java.util.Locale.US, "%.1f GB", mb / 1024.0);
+        }
+        return String.format(java.util.Locale.US, "%.0f MB", mb);
     }
 
     @Override
     public void onDestroy() {
+        executorService.shutdownNow();
         if (wakeLock != null && wakeLock.isHeld()) {
             try {
                 wakeLock.release();
+            } catch (Exception ignored) {}
+        }
+        if (wifiLock != null && wifiLock.isHeld()) {
+            try {
+                wifiLock.release();
             } catch (Exception ignored) {}
         }
         super.onDestroy();

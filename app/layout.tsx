@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ServiceWorkerRegistration } from '@/components/ui/ServiceWorkerRegistration';
 
 export const metadata: Metadata = {
   title: 'AGUENATV | Reprodução Inteligente e Privada',
@@ -18,7 +19,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" className="h-full bg-[#0b0c10] text-[#f8fafc] dark">
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ServiceWorkerRegistration />
+        {children}
+      </body>
     </html>
   );
 }

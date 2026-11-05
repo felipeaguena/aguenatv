@@ -10,16 +10,16 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.2';
+  let latestVersion = '0.2.3';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
+    'Suporte completo e navegação resiliente em Modo Offline e Modo Avião',
+    'Carregamento de títulos, séries e episódios salvos diretamente da memória mesmo sem conexão',
+    'Novo motor de download nativo em segundo plano com WakeLock e WifiLock (continua com tela bloqueada ou em outros apps)',
+    'Retomada automática de downloads (HTTP Range) com até 10 tentativas para eliminar quedas de rede',
+    'Portal de emergência com player offline integrado no fallback local do APK',
     'Barra de progresso visual em tempo real com porcentagem (%) durante downloads',
     'Notificações push locais com progresso e alerta sonoro/vibração de conclusão',
-    'Download em segundo plano contínuo mesmo com tela do celular bloqueada ou em outro app (Foreground Service & WakeLock)',
-    'Novo card flutuante com progresso detalhado de downloads ativos',
-    'Novo ícone oficial do aplicativo AGUENATV instalado no celular e nova tela de splash temática',
-    'Download em lote de temporadas completas ou episódios individuais de séries',
-    'Detecção automática de modo offline com reprodução direta da memória sem internet',
   ];
 
   try {
