@@ -421,6 +421,30 @@ export default function InfoView({ type, id }: InfoViewProps) {
     });
   }, [item?.title, item?.name, enrichedMetadata]);
 
+  // Tipos e helpers de download offline (declarados antes dos retornos antecipados para respeitar as Regras dos Hooks)
+  const streamType = (item?.stream_type || (type === 'series' ? 'series' : 'movie')) as StreamType;
+  const isSeries = (streamType as string) === 'series' || type === 'series';
+  const isMovie = (streamType as string) === 'movie' || (streamType as string) === 'movies' || type === 'movie' || type === 'movies';
+
+  const currentSeasonDownloadedCount = useMemo(() => {
+    if (!isSeries || !item) return 0;
+    return currentSeasonEpisodes.filter((ep) => {
+      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+      return !!downloadedMap[id];
+    }).length;
+  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadedMap]);
+
+  const isSeasonFullyDownloaded =
+    currentSeasonEpisodes.length > 0 && currentSeasonDownloadedCount === currentSeasonEpisodes.length;
+
+  const isSeasonDownloading = useMemo(() => {
+    if (!isSeries || !item) return false;
+    return currentSeasonEpisodes.some((ep) => {
+      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+      return !!downloadingIds[id];
+    });
+  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadingIds]);
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3">
@@ -447,9 +471,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
     );
   }
 
-  const streamType = (item.stream_type || (type === 'series' ? 'series' : 'movie')) as StreamType;
-  const isSeries = (streamType as string) === 'series' || type === 'series';
-  const isMovie = (streamType as string) === 'movie' || (streamType as string) === 'movies' || type === 'movie' || type === 'movies';
   const favorited = isFavorite(item.stream_id, streamType);
   const watched = isWatched(item.stream_id, streamType);
 
@@ -526,24 +547,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
     }
   };
 
-  const currentSeasonDownloadedCount = useMemo(() => {
-    if (!isSeries || !item) return 0;
-    return currentSeasonEpisodes.filter((ep) => {
-      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-      return !!downloadedMap[id];
-    }).length;
-  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadedMap]);
-
-  const isSeasonFullyDownloaded =
-    currentSeasonEpisodes.length > 0 && currentSeasonDownloadedCount === currentSeasonEpisodes.length;
-
-  const isSeasonDownloading = useMemo(() => {
-    if (!isSeries || !item) return false;
-    return currentSeasonEpisodes.some((ep) => {
-      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-      return !!downloadingIds[id];
-    });
-  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadingIds]);
 
   const handleToggleSeasonDownload = async () => {
     if (!item || !config?.server_url) {

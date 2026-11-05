@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect, useMemo, Suspense } from 'react';
-import { Tv } from 'lucide-react';
+import { Tv, RotateCw } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
 import MediaCard from '@/components/media/MediaCard';
 import Pagination from '@/components/ui/Pagination';
 import CategorySelector from '@/components/ui/CategorySelector';
+import SyncModal from '@/components/ui/SyncModal';
 import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 const PAGE_SIZE = 50;
@@ -14,6 +15,7 @@ function LiveTVContent() {
   const [channels, setChannels] = useState<BaseStreamItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   const {
     selectedCat,
@@ -113,8 +115,19 @@ function LiveTVContent() {
           <p>Carregando canais...</p>
         </div>
       ) : paginatedChannels.length === 0 ? (
-        <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center text-xs text-neutral-400">
-          Nenhum canal encontrado nesta categoria ou filtro.
+        <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center text-xs text-neutral-400 space-y-4 shadow-xl">
+          <p>{channels.length === 0 ? 'Nenhum canal sincronizado no dispositivo.' : 'Nenhum canal encontrado nesta categoria ou filtro.'}</p>
+          {channels.length === 0 && (
+            <div>
+              <button
+                onClick={() => setIsSyncModalOpen(true)}
+                className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold transition shadow-lg shadow-violet-600/30 cursor-pointer inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" />
+                Sincronizar Canais Agora
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -132,6 +145,15 @@ function LiveTVContent() {
           />
         </>
       )}
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onSyncComplete={() => {
+          setIsSyncModalOpen(false);
+          window.location.reload();
+        }}
+      />
     </div>
   );
 }

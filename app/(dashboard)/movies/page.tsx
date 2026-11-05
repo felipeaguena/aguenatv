@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect, useMemo, Suspense } from 'react';
-import { Film } from 'lucide-react';
+import { Film, RotateCw } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
 import MediaCard from '@/components/media/MediaCard';
 import Pagination from '@/components/ui/Pagination';
 import CategorySelector from '@/components/ui/CategorySelector';
+import SyncModal from '@/components/ui/SyncModal';
 import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 const PAGE_SIZE = 50;
@@ -14,6 +15,7 @@ function MoviesContent() {
   const [movies, setMovies] = useState<BaseStreamItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
 
   const {
     selectedCat,
@@ -111,8 +113,19 @@ function MoviesContent() {
           <p>Carregando filmes...</p>
         </div>
       ) : paginatedMovies.length === 0 ? (
-        <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center text-xs text-neutral-400">
-          Nenhum filme encontrado nesta categoria.
+        <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center text-xs text-neutral-400 space-y-4 shadow-xl">
+          <p>{movies.length === 0 ? 'Nenhum filme sincronizado no dispositivo.' : 'Nenhum filme encontrado nesta categoria ou busca.'}</p>
+          {movies.length === 0 && (
+            <div>
+              <button
+                onClick={() => setIsSyncModalOpen(true)}
+                className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold transition shadow-lg shadow-violet-600/30 cursor-pointer inline-flex items-center gap-2"
+              >
+                <RotateCw className="w-4 h-4" />
+                Sincronizar Filmes Agora
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -130,6 +143,15 @@ function MoviesContent() {
           />
         </>
       )}
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        onSyncComplete={() => {
+          setIsSyncModalOpen(false);
+          window.location.reload();
+        }}
+      />
     </div>
   );
 }

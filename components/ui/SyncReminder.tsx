@@ -20,8 +20,14 @@ export default function SyncReminder() {
       if (!localDB) return;
       try {
         const streamCount = await localDB.streams.count();
-        // Só exibe o lembrete se o usuário já tiver dados sincronizados anteriormente
-        if (streamCount === 0) return;
+        // Se ainda não houver nenhum conteúdo sincronizado, sugere sincronizar imediatamente
+        if (streamCount === 0) {
+          setLastSyncText('Nenhum canal ou título sincronizado');
+          timer = setTimeout(() => {
+            setShowReminder(true);
+          }, 2000);
+          return;
+        }
 
         // Verifica se faz mais de 24 horas desde a última sincronização
         const needed = await isSyncNeeded(24);
