@@ -57,9 +57,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Login bem-sucedido: redireciona para a aplicação privada
-      router.push('/');
-      router.refresh();
+      // Login bem-sucedido: redireciona para a aplicação privada com carregamento completo de cookies
+      window.location.href = '/';
     } catch {
       setErrorMsg('Falha na conexão com o servidor');
       setLoading(false);

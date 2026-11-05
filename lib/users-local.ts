@@ -59,7 +59,16 @@ export async function saveLocalUsers(users: LocalUserRecord[]): Promise<void> {
 export async function findLocalUserByUsername(username: string): Promise<LocalUserRecord | null> {
   const users = await getLocalUsers();
   const clean = username.toLowerCase().trim();
-  return users.find((u) => u.username.toLowerCase().trim() === clean) || null;
+  const found = users.find((u) => u.username.toLowerCase().trim() === clean);
+  if (found) return found;
+
+  // Permitir que o usuário acesse digitando "admin" como apelido para o administrador
+  if (clean === 'admin') {
+    const adminUser = users.find((u) => u.role === 'admin' && u.is_active);
+    if (adminUser) return adminUser;
+  }
+
+  return null;
 }
 
 export async function findLocalUserById(id: string): Promise<LocalUserRecord | null> {

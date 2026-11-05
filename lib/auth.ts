@@ -1,5 +1,5 @@
 import { SignJWT, jwtVerify } from 'jose';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { SessionUser, UserRole } from './types';
 
 export function getSecretKey(): Uint8Array {
@@ -33,8 +33,20 @@ export async function createSession(user: {
     .sign(secretKey);
 
   const cookieStore = await cookies();
-  // Em produção, o cookie deve ser sempre Secure por padrão para evitar interceptação
-  const isSecure = process.env.NODE_ENV === 'production' && process.env.ALLOW_INSECURE_HTTP !== 'true';
+  let isHttps = false;
+  try {
+    const headersList = await headers();
+    const proto = headersList.get('x-forwarded-proto');
+    const referer = headersList.get('referer') || '';
+    const origin = headersList.get('origin') || '';
+    isHttps = proto === 'https' || referer.startsWith('https://') || origin.startsWith('https://');
+  } catch {
+    isHttps = false;
+  }
+
+  // Em conexões HTTP por IP (como http://163.176.207.140), navegadores e WebViews
+  // rejeitam e descartam cookies com a flag 'Secure', bloqueando o login.
+  const isSecure = isHttps && process.env.ALLOW_INSECURE_HTTP !== 'true';
 
   cookieStore.set('session_token', token, {
     httpOnly: true,
