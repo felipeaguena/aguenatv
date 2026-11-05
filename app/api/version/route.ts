@@ -10,9 +10,11 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.0';
+  let latestVersion = '0.2.1';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
+    'Novo ícone oficial do aplicativo AGUENATV instalado no celular e nova tela de splash temática',
+    'Ocultado o item "Baixados" da barra inferior no mobile/tablet para manter a navegação limpa',
     'Novo botão de download de filmes na página de informações (ao lado de Concluído)',
     'Download em lote de temporadas completas ou episódios individuais de séries',
     'Exclusão de vídeos baixados com 1 clique para liberar espaço na memória do celular',
