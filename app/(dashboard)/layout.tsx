@@ -5,6 +5,7 @@ import Navbar from '@/components/ui/Navbar';
 import FloatingPlayer from '@/components/player/FloatingPlayer';
 import SyncReminder from '@/components/ui/SyncReminder';
 import UpdateAlertModal from '@/components/ui/UpdateAlertModal';
+import MobileBottomNav from '@/components/ui/MobileBottomNav';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -25,6 +26,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <FloatingPlayer />
         <SyncReminder />
         <UpdateAlertModal />
+        <Suspense fallback={null}>
+          <MobileBottomNav />
+        </Suspense>
       </div>
     </PlayerProvider>
   );

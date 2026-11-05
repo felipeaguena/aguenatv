@@ -280,6 +280,30 @@ function FavoritesContent() {
         </div>
       </div>
 
+      {/* Banner de Destaque para Conteúdos Baixados Offline */}
+      {activeTab !== 'downloads' && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-violet-900/40 via-[#181926] to-[#12131c] border border-violet-500/30 shadow-xl">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-violet-600/30 text-violet-300 shrink-0">
+              <Download className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-white text-sm">Gerenciador de Títulos Baixados Offline</p>
+              <p className="text-xs text-neutral-400">
+                Acesse todos os filmes e episódios salvos na memória do aparelho para assistir sem internet.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('downloads')}
+            className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-violet-600/30 cursor-pointer shrink-0"
+          >
+            <HardDrive className="w-4 h-4" />
+            <span>Ver Baixados ({totalDownloadsCount})</span>
+          </button>
+        </div>
+      )}
+
       {/* Barra de Filtros e Busca */}
       <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         {/* Abas */}

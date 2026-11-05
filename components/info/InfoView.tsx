@@ -447,9 +447,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
     );
   }
 
-  const streamType = item.stream_type as StreamType;
-  const isSeries = streamType === 'series';
-  const isMovie = streamType === 'movie';
+  const streamType = (item.stream_type || (type === 'series' ? 'series' : 'movie')) as StreamType;
+  const isSeries = (streamType as string) === 'series' || type === 'series';
+  const isMovie = (streamType as string) === 'movie' || (streamType as string) === 'movies' || type === 'movie' || type === 'movies';
   const favorited = isFavorite(item.stream_id, streamType);
   const watched = isWatched(item.stream_id, streamType);
 
@@ -978,22 +978,22 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         : 'Baixar filme para assistir offline'
                     }
                     aria-label={isMovieDownloaded ? 'Excluir Filme Baixado' : 'Baixar Filme'}
-                    className={`w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-4 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                    className={`px-4 py-3 rounded-2xl md:px-5 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 shadow-lg ${
                       isMovieDownloaded
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300'
+                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300 shadow-emerald-500/10'
                         : isMovieDownloading
-                        ? 'bg-violet-600/20 border-violet-500/40 text-violet-300 animate-pulse'
-                        : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-violet-600/20 hover:border-violet-500/40 hover:text-white'
+                        ? 'bg-violet-600/30 border-violet-500/40 text-violet-300 animate-pulse shadow-violet-600/20'
+                        : 'bg-violet-600/20 hover:bg-violet-600/30 border-violet-500/40 text-violet-200 hover:text-white shadow-violet-600/10'
                     }`}
                   >
                     {isMovieDownloading ? (
-                      <div className="w-5 h-5 md:w-4 md:h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
                     ) : isMovieDownloaded ? (
-                      <HardDrive className="w-5 h-5 md:w-4 md:h-4 text-emerald-400" />
+                      <HardDrive className="w-4 h-4 text-emerald-400" />
                     ) : (
-                      <Download className="w-5 h-5 md:w-4 md:h-4 text-violet-400" />
+                      <Download className="w-4 h-4 text-violet-400" />
                     )}
-                    <span className="hidden md:inline">
+                    <span className="font-bold">
                       {isMovieDownloading
                         ? 'Baixando...'
                         : isMovieDownloaded
@@ -1014,22 +1014,22 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         : `Baixar todos os episódios da temporada ${selectedSeason} para assistir offline`
                     }
                     aria-label={isSeasonFullyDownloaded ? 'Excluir Temporada' : 'Baixar Temporada'}
-                    className={`w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-4 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                    className={`px-4 py-3 rounded-2xl md:px-5 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 shadow-lg ${
                       isSeasonFullyDownloaded
-                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300'
+                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300 shadow-emerald-500/10'
                         : isSeasonDownloading
-                        ? 'bg-violet-600/20 border-violet-500/40 text-violet-300 animate-pulse'
-                        : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-violet-600/20 hover:border-violet-500/40 hover:text-white'
+                        ? 'bg-violet-600/30 border-violet-500/40 text-violet-300 animate-pulse shadow-violet-600/20'
+                        : 'bg-violet-600/20 hover:bg-violet-600/30 border-violet-500/40 text-violet-200 hover:text-white shadow-violet-600/10'
                     }`}
                   >
                     {isSeasonDownloading ? (
-                      <div className="w-5 h-5 md:w-4 md:h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                      <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
                     ) : isSeasonFullyDownloaded ? (
-                      <HardDrive className="w-5 h-5 md:w-4 md:h-4 text-emerald-400" />
+                      <HardDrive className="w-4 h-4 text-emerald-400" />
                     ) : (
-                      <Download className="w-5 h-5 md:w-4 md:h-4 text-violet-400" />
+                      <Download className="w-4 h-4 text-violet-400" />
                     )}
-                    <span className="hidden md:inline">
+                    <span className="font-bold">
                       {isSeasonDownloading
                         ? 'Baixando...'
                         : isSeasonFullyDownloaded
@@ -1037,6 +1037,94 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         : `Baixar Temp. ${selectedSeason} (${currentSeasonDownloadedCount}/${currentSeasonEpisodes.length})`}
                     </span>
                   </button>
+                )}
+              </div>
+
+              {/* Destaque Visual de Download no Celular / Tablet */}
+              <div className="w-full pt-2">
+                {isMovie && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-violet-950/40 border border-violet-500/30 text-xs shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-violet-600/30 text-violet-300 shrink-0">
+                        <Download className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-white text-sm">Assistir este filme offline</p>
+                        <p className="text-[11px] text-neutral-400">
+                          {isMovieDownloaded
+                            ? 'O filme já está salvo na memória interna do celular.'
+                            : 'Salve na memória do celular para assistir sem consumir internet.'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleToggleMovieDownload}
+                      disabled={isMovieDownloading}
+                      className={`px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer shrink-0 flex items-center justify-center gap-2 ${
+                        isMovieDownloaded
+                          ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40'
+                          : 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/30'
+                      }`}
+                    >
+                      {isMovieDownloading ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Baixando filme...</span>
+                        </>
+                      ) : isMovieDownloaded ? (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir Download do Celular</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Baixar Filme Agora</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+                {isSeries && (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-violet-950/40 border border-violet-500/30 text-xs shadow-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-violet-600/30 text-violet-300 shrink-0">
+                        <Download className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-white text-sm">Baixar Temporada {selectedSeason} para ver offline</p>
+                        <p className="text-[11px] text-neutral-400">
+                          {currentSeasonDownloadedCount} de {currentSeasonEpisodes.length} episódios já salvos na memória do aparelho.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleToggleSeasonDownload}
+                      disabled={isSeasonDownloading}
+                      className={`px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer shrink-0 flex items-center justify-center gap-2 ${
+                        isSeasonFullyDownloaded
+                          ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40'
+                          : 'bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-600/30'
+                      }`}
+                    >
+                      {isSeasonDownloading ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Baixando episódios...</span>
+                        </>
+                      ) : isSeasonFullyDownloaded ? (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir Temporada do Celular</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Baixar Todos ({currentSeasonEpisodes.length} eps)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -1311,10 +1399,42 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         <span className="uppercase font-mono text-[9px] px-1.5 py-0.2 rounded bg-white/5 text-neutral-400">
                           {ep.container_extension || 'mp4'}
                         </span>
+
+                        {/* Botão de Download explícito com texto em cada episódio */}
+                        {(() => {
+                          const epDownloadId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+                          const isEpDownloaded = !!downloadedMap[epDownloadId];
+                          const isEpDownloading = !!downloadingIds[epDownloadId];
+
+                          return (
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleEpisodeDownload(ep, e)}
+                              disabled={isEpDownloading}
+                              className={`ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition shadow-sm cursor-pointer ${
+                                isEpDownloaded
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
+                                  : isEpDownloading
+                                  ? 'bg-violet-600/30 text-violet-300 border-violet-500/40 animate-pulse'
+                                  : 'bg-violet-600/20 hover:bg-violet-600/35 text-violet-200 border-violet-500/30 hover:text-white'
+                              }`}
+                              title={isEpDownloaded ? 'Excluir episódio baixado para liberar espaço' : 'Baixar episódio para assistir offline'}
+                            >
+                              {isEpDownloading ? (
+                                <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                              ) : isEpDownloaded ? (
+                                <Trash2 className="w-3 h-3 text-rose-400" />
+                              ) : (
+                                <Download className="w-3 h-3 text-violet-400" />
+                              )}
+                              <span>{isEpDownloading ? 'Baixando...' : isEpDownloaded ? 'Excluir' : 'Baixar Ep'}</span>
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
 
-                    {/* Botões de Ação do Episódio (Download & Assistido) */}
+                    {/* Botões de Ação do Episódio no Topo da Imagem (Download & Assistido) */}
                     <div className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5">
                       {/* Botão de Download do Episódio */}
                       {(() => {
@@ -1327,12 +1447,12 @@ export default function InfoView({ type, id }: InfoViewProps) {
                             type="button"
                             onClick={(e) => handleToggleEpisodeDownload(ep, e)}
                             disabled={isEpDownloading}
-                            className={`p-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 shadow-md ${
+                            className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 shadow-md ${
                               isEpDownloaded
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-rose-500/20 hover:border-rose-500/40 hover:text-rose-300'
+                                ? 'bg-emerald-500/25 text-emerald-300 border-emerald-500/50 hover:bg-rose-500/25 hover:border-rose-500/50 hover:text-rose-300'
                                 : isEpDownloading
-                                ? 'bg-violet-600/30 text-violet-300 border-violet-500/40 animate-pulse'
-                                : 'bg-black/60 text-neutral-400 border-white/10 hover:text-white hover:border-violet-500/40 hover:bg-white/10'
+                                ? 'bg-violet-600/40 text-violet-300 border-violet-500/50 animate-pulse'
+                                : 'bg-black/70 text-neutral-300 border-white/20 hover:text-white hover:border-violet-500/50 hover:bg-violet-600/20'
                             }`}
                             title={
                               isEpDownloaded
@@ -1342,11 +1462,11 @@ export default function InfoView({ type, id }: InfoViewProps) {
                             aria-label={isEpDownloaded ? 'Excluir Episódio Baixado' : 'Baixar Episódio'}
                           >
                             {isEpDownloading ? (
-                              <div className="w-3.5 h-3.5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                              <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
                             ) : isEpDownloaded ? (
-                              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                              <HardDrive className="w-4 h-4 text-emerald-400" />
                             ) : (
-                              <Download className="w-3.5 h-3.5" />
+                              <Download className="w-4 h-4 text-violet-400" />
                             )}
                           </button>
                         );
