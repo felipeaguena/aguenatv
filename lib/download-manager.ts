@@ -3,10 +3,11 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { localDB } from './db-local';
 
 export interface OfflineDownload {
-  id: string; // ex: movie_123 ou series_456_e1
+  id: string; // ex: movie_123 ou series_456_s1_e2
   stream_id: string | number;
   stream_type: 'movie' | 'series';
   title: string;
+  series_title?: string;
   poster_url?: string;
   file_path: string;
   file_size?: number;
@@ -14,6 +15,18 @@ export interface OfflineDownload {
   container_extension: string;
   season_num?: number;
   episode_num?: number;
+  episode_id?: string | number;
+}
+
+export interface GroupedDownloadItem {
+  stream_id: string | number;
+  stream_type: 'movie' | 'series';
+  title: string;
+  poster_url?: string;
+  total_size: number;
+  items_count: number;
+  episodes: OfflineDownload[];
+  last_downloaded_at: string;
 }
 
 export interface DownloadProgress {
@@ -27,6 +40,23 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * Gera um ID único padronizado para o download
+ */
+export function buildDownloadId(
+  streamType: 'movie' | 'series',
+  streamId: string | number,
+  seasonNum?: number | string,
+  episodeNum?: number | string
+): string {
+  if (streamType === 'movie') {
+    return `movie_${streamId}`;
+  }
+  const s = seasonNum !== undefined ? `_s${seasonNum}` : '';
+  const e = episodeNum !== undefined ? `_e${episodeNum}` : '';
+  return `series_${streamId}${s}${e}`;
+}
+
+/**
  * Inicia o download de um vídeo (filme ou episódio de série) para a memória do celular
  */
 export async function downloadVideoForOffline(
@@ -34,16 +64,23 @@ export async function downloadVideoForOffline(
     stream_id: string | number;
     stream_type: 'movie' | 'series';
     title: string;
+    series_title?: string;
     poster_url?: string;
     container_extension?: string;
     season_num?: number;
     episode_num?: number;
+    episode_id?: string | number;
   },
   streamUrl: string,
   onProgress?: (progress: DownloadProgress) => void
 ): Promise<OfflineDownload> {
   const extension = item.container_extension || 'mp4';
-  const cleanId = `${item.stream_type}_${item.stream_id}${item.episode_num ? `_e${item.episode_num}` : ''}`;
+  const cleanId = buildDownloadId(
+    item.stream_type,
+    item.stream_id,
+    item.season_num,
+    item.episode_num ?? item.episode_id
+  );
   const fileName = `offline_${cleanId}.${extension}`;
 
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Capacitor)
@@ -78,6 +115,7 @@ export async function downloadVideoForOffline(
         stream_id: item.stream_id,
         stream_type: item.stream_type,
         title: item.title,
+        series_title: item.series_title,
         poster_url: item.poster_url,
         file_path: downloadResult.path || `videos/${fileName}`,
         file_size: fileSize,
@@ -85,6 +123,7 @@ export async function downloadVideoForOffline(
         container_extension: extension,
         season_num: item.season_num,
         episode_num: item.episode_num,
+        episode_id: item.episode_id,
       };
 
       if (localDB?.offline_downloads) {
@@ -114,13 +153,19 @@ export async function downloadVideoForOffline(
       stream_id: item.stream_id,
       stream_type: item.stream_type,
       title: item.title,
+      series_title: item.series_title,
       poster_url: item.poster_url,
       file_path: streamUrl,
       downloaded_at: new Date().toISOString(),
       container_extension: extension,
       season_num: item.season_num,
       episode_num: item.episode_num,
+      episode_id: item.episode_id,
     };
+
+    if (localDB?.offline_downloads) {
+      await localDB.offline_downloads.put(record);
+    }
 
     return record;
   } catch (webErr: any) {
@@ -138,6 +183,68 @@ export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * Verifica se um item específico já foi baixado
+ */
+export async function checkIsDownloaded(id: string): Promise<boolean> {
+  if (!localDB?.offline_downloads) return false;
+  try {
+    const found = await localDB.offline_downloads.get(id);
+    return !!found;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Retorna itens baixados agrupados por Título / Série (ideal para a aba Favoritos)
+ */
+export async function getGroupedOfflineDownloads(): Promise<GroupedDownloadItem[]> {
+  const all = await getOfflineDownloadsList();
+  const map = new Map<string, GroupedDownloadItem>();
+
+  for (const item of all) {
+    const groupKey = `${item.stream_type}_${item.stream_id}`;
+    const mainTitle = item.series_title || (item.stream_type === 'series' ? item.title.split(' - ')[0] : item.title);
+
+    if (!map.has(groupKey)) {
+      map.set(groupKey, {
+        stream_id: item.stream_id,
+        stream_type: item.stream_type,
+        title: mainTitle,
+        poster_url: item.poster_url,
+        total_size: item.file_size || 0,
+        items_count: 1,
+        episodes: [item],
+        last_downloaded_at: item.downloaded_at,
+      });
+    } else {
+      const existing = map.get(groupKey)!;
+      existing.total_size += item.file_size || 0;
+      existing.items_count += 1;
+      existing.episodes.push(item);
+      if (new Date(item.downloaded_at) > new Date(existing.last_downloaded_at)) {
+        existing.last_downloaded_at = item.downloaded_at;
+      }
+    }
+  }
+
+  // Ordena episódios de cada série por temporada e episódio
+  for (const group of map.values()) {
+    if (group.stream_type === 'series') {
+      group.episodes.sort((a, b) => {
+        const sDiff = (a.season_num || 0) - (b.season_num || 0);
+        if (sDiff !== 0) return sDiff;
+        return (a.episode_num || 0) - (b.episode_num || 0);
+      });
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.last_downloaded_at).getTime() - new Date(a.last_downloaded_at).getTime()
+  );
 }
 
 /**
@@ -180,5 +287,25 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
     await localDB.offline_downloads.delete(id);
   } catch (err) {
     console.error('[DownloadManager] Erro ao excluir vídeo offline:', err);
+  }
+}
+
+/**
+ * Exclui todos os downloads de uma série ou filme completo
+ */
+export async function deleteGroupDownloads(streamType: 'movie' | 'series', streamId: string | number): Promise<void> {
+  if (!localDB?.offline_downloads) return;
+  try {
+    const items = await localDB.offline_downloads
+      .where('stream_id')
+      .equals(streamId)
+      .filter((i) => i.stream_type === streamType)
+      .toArray();
+
+    for (const item of items) {
+      await deleteOfflineDownload(item.id);
+    }
+  } catch (err) {
+    console.error('[DownloadManager] Erro ao excluir grupo de downloads:', err);
   }
 }

@@ -35,6 +35,7 @@ import {
 import { IPTVPlaylist, BaseStreamItem, SessionUser } from '@/lib/types';
 import { initSearchIndex } from '@/lib/search-index';
 import { fetchIPTVApi } from '@/lib/iptv-client';
+import UpdateAlertModal from '@/components/ui/UpdateAlertModal';
 
 export default function SettingsPage() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
@@ -77,6 +78,7 @@ export default function SettingsPage() {
 
   // Servidor configurado no aplicativo Android / Mobile
   const [mobileServerUrl, setMobileServerUrl] = useState<string | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -833,6 +835,35 @@ export default function SettingsPage() {
         </section>
       )}
 
+      {/* 5. SEÇÃO: ATUALIZAÇÕES DO APLICATIVO */}
+      <section className="p-6 rounded-3xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+            <Sparkles className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              Versão do AGUENATV
+              <span className="px-2 py-0.5 rounded text-[10px] font-extrabold font-mono bg-white/5 border border-white/10 text-violet-300">
+                v0.2.0
+              </span>
+            </h3>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Verifique novidades ou baixe o APK de atualização mais recente no GitHub.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsUpdateModalOpen(true)}
+          className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs transition flex items-center gap-2 w-fit cursor-pointer shadow-lg shadow-violet-600/30"
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Verificar Atualizações</span>
+        </button>
+      </section>
+
       {/* MODAL: ADICIONAR NOVA LISTA M3U */}
       {isAddOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
@@ -1092,6 +1123,13 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Modal de Atualizações do Sistema */}
+      <UpdateAlertModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        manualCheck={true}
+      />
     </div>
   );
 }

@@ -35,7 +35,8 @@ export async function middleware(req: NextRequest) {
   const isPublicAuth =
     pathname === '/login' ||
     pathname === '/api/auth/login' ||
-    pathname === '/api/health';
+    pathname === '/api/health' ||
+    pathname === '/api/version';
 
   // 3. Extrai e valida o cookie de sessão com a chave JWT
   const sessionToken = req.cookies.get('session_token')?.value;

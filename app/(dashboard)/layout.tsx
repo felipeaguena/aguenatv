@@ -4,6 +4,7 @@ import { PlayerProvider } from '@/context/PlayerContext';
 import Navbar from '@/components/ui/Navbar';
 import FloatingPlayer from '@/components/player/FloatingPlayer';
 import SyncReminder from '@/components/ui/SyncReminder';
+import UpdateAlertModal from '@/components/ui/UpdateAlertModal';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -23,6 +24,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </Suspense>
         <FloatingPlayer />
         <SyncReminder />
+        <UpdateAlertModal />
       </div>
     </PlayerProvider>
   );

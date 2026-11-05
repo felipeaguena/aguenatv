@@ -24,8 +24,17 @@ import {
   Eye,
   Download,
   Check,
+  Trash2,
 } from 'lucide-react';
-import { downloadVideoForOffline, isNativeApp } from '@/lib/download-manager';
+import {
+  downloadVideoForOffline,
+  isNativeApp,
+  buildDownloadId,
+  checkIsDownloaded,
+  getPlayableOfflineUrl,
+  deleteOfflineDownload,
+  OfflineDownload,
+} from '@/lib/download-manager';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
 import { fetchIPTVApi } from '@/lib/iptv-client';
 import {
@@ -97,6 +106,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // Estados de Download Offline (Capacitor / Celular)
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
+  const [localPlayableUrl, setLocalPlayableUrl] = useState<string | null>(null);
+  const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
 
   // 1. Efeito: Carrega Configuração do IPTV e Item do banco local Dexie
   useEffect(() => {
@@ -162,6 +174,79 @@ export default function WatchView({ type, id }: WatchViewProps) {
       isMounted = false;
     };
   }, [currentStreamId, type]);
+
+  // 1b. Efeito: Verifica se o vídeo ou episódio atual está salvo offline na memória do celular
+  useEffect(() => {
+    let isMounted = true;
+    async function checkOffline() {
+      try {
+        const epNum = activeEpisode?.episode_num ?? (episodeParam ? Number(episodeParam) : undefined);
+        const epId = activeEpisode?.id ?? (episodeParam || undefined);
+        const sNum = selectedSeason || seasonParam || '1';
+
+        let offlineRec: OfflineDownload | undefined;
+        if (localDB?.offline_downloads) {
+          if (type === 'movies' || type === 'movie' || item?.stream_type === 'movie') {
+            const downId = buildDownloadId('movie', currentStreamId);
+            offlineRec = await localDB.offline_downloads.get(downId);
+            if (!offlineRec) {
+              offlineRec = await localDB.offline_downloads
+                .where('stream_id')
+                .equals(currentStreamId)
+                .filter((i) => i.stream_type === 'movie')
+                .first();
+            }
+          } else if (type === 'series' || item?.stream_type === 'series') {
+            const downId = buildDownloadId('series', currentStreamId, sNum, epNum ?? epId);
+            offlineRec = await localDB.offline_downloads.get(downId);
+            if (!offlineRec) {
+              offlineRec = await localDB.offline_downloads
+                .where('stream_id')
+                .equals(currentStreamId)
+                .filter(
+                  (i) =>
+                    i.stream_type === 'series' &&
+                    (String(i.episode_id) === String(epId) || Number(i.episode_num) === Number(epNum))
+                )
+                .first();
+            }
+          }
+        }
+
+        if (!isMounted) return;
+
+        if (offlineRec) {
+          setIsCurrentDownloaded(true);
+          const playable = await getPlayableOfflineUrl(offlineRec);
+          if (isMounted) {
+            setLocalPlayableUrl(playable);
+            setIsOfflineMode(true);
+            if (!item) {
+              setItem({
+                stream_id: String(offlineRec.stream_id),
+                name: offlineRec.title,
+                title: offlineRec.title,
+                stream_type: offlineRec.stream_type,
+                stream_icon: offlineRec.poster_url,
+                category_name: 'Download Offline',
+              });
+            }
+          }
+        } else {
+          setIsCurrentDownloaded(false);
+          setLocalPlayableUrl(null);
+          setIsOfflineMode(false);
+        }
+      } catch (err) {
+        console.warn('Erro ao verificar status offline:', err);
+      }
+    }
+
+    checkOffline();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentStreamId, type, selectedSeason, seasonParam, activeEpisode, episodeParam, item]);
 
   // 2. Efeito: Se for série, busca os detalhes completos, temporadas e episódios via API do IPTV
   useEffect(() => {
@@ -463,6 +548,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return { streamUrl: url, playerTitle: title, playerPoster: poster, currentActiveId: activeId };
   }, [config, cleanHost, item, isLive, isMovie, isSeries, activeEpisode, id, enrichedMetadata, seasonEpisodesMeta, selectedSeason]);
 
+  const finalPlayUrl = localPlayableUrl || streamUrl;
+
   // Metadados do episódio atualmente em reprodução
   const currentEpMeta = useMemo(() => {
     if (!isSeries || !activeEpisode) return null;
@@ -637,7 +724,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     );
   }
 
-  if (!config) {
+  if (!config && !localPlayableUrl) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center space-y-4">
         <h2 className="text-xl font-bold text-white">Configuração IPTV Não Encontrada</h2>
@@ -654,7 +741,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     );
   }
 
-  if (!item && !seriesInfo) {
+  if (!item && !seriesInfo && !localPlayableUrl) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center space-y-4">
         <h2 className="text-xl font-bold text-white">Canal ou Série Indisponível</h2>
@@ -775,9 +862,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
                 <p className="text-xs text-neutral-400 font-medium">Carregando episódios da série...</p>
               </div>
-            ) : streamUrl ? (
+            ) : finalPlayUrl ? (
               <VideoPlayer
-                streamUrl={streamUrl}
+                streamUrl={finalPlayUrl}
                 title={playerTitle}
                 streamId={currentActiveId}
                 streamType={streamType}
@@ -799,6 +886,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
           <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs w-full min-w-0">
             {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-neutral-300 text-[11px] w-full sm:w-auto">
+              {isOfflineMode && (
+                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Modo Offline (Armazenamento Local)</span>
+                </div>
+              )}
+
               {/* Duração */}
               <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
                 <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
@@ -829,12 +923,34 @@ export default function WatchView({ type, id }: WatchViewProps) {
             </div>
 
             {/* Ações Rápidas de Reprodução Externa e Download */}
-            {streamUrl && (
+            {(streamUrl || localPlayableUrl) && (
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
                 {!isLive && (
                   <button
                     onClick={async () => {
-                      if (!streamUrl || isDownloading) return;
+                      if (isDownloading) return;
+
+                      const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
+                      const epId = activeEpisode?.id;
+                      const sNum = selectedSeason ? Number(selectedSeason) : undefined;
+                      const downId = buildDownloadId(
+                        streamType === 'series' ? 'series' : 'movie',
+                        currentActiveId || id,
+                        sNum,
+                        epNum ?? epId
+                      );
+
+                      if (isCurrentDownloaded) {
+                        if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
+                          await deleteOfflineDownload(downId);
+                          setIsCurrentDownloaded(false);
+                          setLocalPlayableUrl(null);
+                          setIsOfflineMode(false);
+                        }
+                        return;
+                      }
+
+                      if (!streamUrl) return;
                       setIsDownloading(true);
                       try {
                         await downloadVideoForOffline(
@@ -842,13 +958,16 @@ export default function WatchView({ type, id }: WatchViewProps) {
                             stream_id: String(currentActiveId || id),
                             stream_type: streamType === 'series' ? 'series' : 'movie',
                             title: playerTitle,
+                            series_title: item?.title || item?.name,
                             poster_url: playerPoster,
                             container_extension: item?.container_extension,
-                            season_num: selectedSeason ? Number(selectedSeason) : undefined,
-                            episode_num: activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined,
+                            season_num: sNum,
+                            episode_num: epNum,
+                            episode_id: epId,
                           },
                           streamUrl
                         );
+                        setIsCurrentDownloaded(true);
                         setDownloadDone(true);
                         setTimeout(() => setDownloadDone(false), 5000);
                       } catch (e: any) {
@@ -859,16 +978,29 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     }}
                     disabled={isDownloading}
                     className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-                      downloadDone
+                      isCurrentDownloaded
+                        ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
+                        : downloadDone
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                         : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
                     }`}
-                    title={isNativeApp() ? 'Salvar na memória do celular para assistir offline' : 'Baixar vídeo'}
+                    title={
+                      isCurrentDownloaded
+                        ? 'Excluir da memória do celular para liberar espaço'
+                        : isNativeApp()
+                        ? 'Salvar na memória do celular para assistir offline'
+                        : 'Baixar vídeo'
+                    }
                   >
                     {isDownloading ? (
                       <>
                         <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
                         <span>Baixando...</span>
+                      </>
+                    ) : isCurrentDownloaded ? (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Excluir do Celular</span>
                       </>
                     ) : downloadDone ? (
                       <>
@@ -883,22 +1015,26 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     )}
                   </button>
                 )}
-                <a
-                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
-                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
-                  title="Abrir diretamente no VLC Player"
-                >
-                  <span>▶</span> VLC
-                </a>
-                <a
-                  href={streamUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
-                  title="Abrir o link direto em nova aba"
-                >
-                  Link Direto
-                </a>
+                {streamUrl && (
+                  <>
+                    <a
+                      href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
+                      title="Abrir diretamente no VLC Player"
+                    >
+                      <span>▶</span> VLC
+                    </a>
+                    <a
+                      href={streamUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
+                      title="Abrir o link direto em nova aba"
+                    >
+                      Link Direto
+                    </a>
+                  </>
+                )}
               </div>
             )}
           </div>
