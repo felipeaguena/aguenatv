@@ -35,6 +35,15 @@ export default function OfflineDownloadsPage() {
   useEffect(() => {
     setIsNative(isNativeApp());
     loadDownloads();
+
+    const handleProgress = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.done) {
+        loadDownloads();
+      }
+    };
+    window.addEventListener('aguenatv_download_progress', handleProgress);
+    return () => window.removeEventListener('aguenatv_download_progress', handleProgress);
   }, []);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {

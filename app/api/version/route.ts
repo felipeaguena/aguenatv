@@ -10,17 +10,16 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.1';
+  let latestVersion = '0.2.2';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
+    'Barra de progresso visual em tempo real com porcentagem (%) durante downloads',
+    'Notificações push locais com progresso e alerta sonoro/vibração de conclusão',
+    'Download em segundo plano contínuo mesmo com tela do celular bloqueada ou em outro app (Foreground Service & WakeLock)',
+    'Novo card flutuante com progresso detalhado de downloads ativos',
     'Novo ícone oficial do aplicativo AGUENATV instalado no celular e nova tela de splash temática',
-    'Ocultado o item "Baixados" da barra inferior no mobile/tablet para manter a navegação limpa',
-    'Novo botão de download de filmes na página de informações (ao lado de Concluído)',
     'Download em lote de temporadas completas ou episódios individuais de séries',
-    'Exclusão de vídeos baixados com 1 clique para liberar espaço na memória do celular',
-    'Nova aba "Baixados Offline" em Favoritos com gerenciamento completo por título',
     'Detecção automática de modo offline com reprodução direta da memória sem internet',
-    'Build Release assinado com certificado dedicado para evitar alertas do Play Protect',
   ];
 
   try {

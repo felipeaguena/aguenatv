@@ -1,6 +1,37 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { localDB } from './db-local';
+
+export interface BackgroundDownloadPluginInterface {
+  startDownload(options: { title: string }): Promise<void>;
+  updateProgress(options: { progress: number; subtext: string }): Promise<void>;
+  stopDownload(options: { success: boolean; title: string }): Promise<void>;
+}
+
+export const BackgroundDownload = registerPlugin<BackgroundDownloadPluginInterface>('BackgroundDownload');
+
+// Gerenciamento de progresso reativo e global
+export const activeDownloadsMap: Record<string, DownloadProgress> = {};
+export const activeDownloadTitles: Record<string, string> = {};
+export const PROGRESS_EVENT = 'aguenatv_download_progress';
+
+export function getActiveDownloadProgress(id: string): DownloadProgress | undefined {
+  return activeDownloadsMap[id];
+}
+
+export function getAllActiveDownloads(): Record<string, DownloadProgress> {
+  return { ...activeDownloadsMap };
+}
+
+export function formatDownloadSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '0 MB';
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)} GB`;
+  }
+  return `${Math.round(mb)} MB`;
+}
 
 export interface OfflineDownload {
   id: string; // ex: movie_123 ou series_456_s1_e2
@@ -85,12 +116,21 @@ export async function downloadVideoForOffline(
 
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Capacitor)
   if (isNativeApp()) {
+    let listenerHandle: any = null;
     try {
       // Garante permissões se aplicável
       try {
         const perm = await Filesystem.checkPermissions();
         if (perm.publicStorage && perm.publicStorage !== 'granted') {
           await Filesystem.requestPermissions().catch(() => {});
+        }
+      } catch {}
+
+      // Pede permissão para notificações (Android 13+ requer POST_NOTIFICATIONS)
+      try {
+        const notifPerm = await LocalNotifications.checkPermissions();
+        if (notifPerm.display !== 'granted') {
+          await LocalNotifications.requestPermissions().catch(() => {});
         }
       } catch {}
 
@@ -107,12 +147,96 @@ export async function downloadVideoForOffline(
 
       const relativePath = `videos/${fileName}`;
 
-      const downloadResult = await Filesystem.downloadFile({
-        url: streamUrl,
-        path: relativePath,
-        directory: Directory.Data,
-        progress: true,
-      });
+      // Inicia Foreground Service nativo com WakeLock (mantém o download vivo em segundo plano / tela bloqueada)
+      try {
+        await BackgroundDownload.startDownload({ title: item.title });
+      } catch (svcErr) {
+        console.warn('[DownloadManager] Não foi possível iniciar ForegroundService:', svcErr);
+      }
+
+      // Registra listener de progresso com porcentagem em tempo real
+      let lastNotifUpdate = 0;
+      try {
+        listenerHandle = await Filesystem.addListener('progress', (status) => {
+          if (status.url && status.url !== streamUrl) {
+            return;
+          }
+
+          const total = status.contentLength || 0;
+          const current = status.bytes || 0;
+          const percentage = total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+
+          const progressData: DownloadProgress = {
+            bytesReceived: current,
+            totalBytes: total,
+            percentage,
+          };
+
+          activeDownloadsMap[cleanId] = progressData;
+          activeDownloadTitles[cleanId] = item.title;
+
+          if (onProgress) {
+            onProgress(progressData);
+          }
+
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent(PROGRESS_EVENT, {
+                detail: {
+                  id: cleanId,
+                  title: item.title,
+                  progress: progressData,
+                },
+              })
+            );
+          }
+
+          // Atualiza a notificação do Android com throttle de 1s para poupar CPU
+          const now = Date.now();
+          if (now - lastNotifUpdate > 1000 || percentage === 100) {
+            lastNotifUpdate = now;
+            const subtext =
+              total > 0
+                ? `${formatDownloadSize(current)} / ${formatDownloadSize(total)} (${percentage}%)`
+                : `${formatDownloadSize(current)}`;
+            BackgroundDownload.updateProgress({ progress: percentage, subtext }).catch(() => {});
+          }
+        });
+      } catch (errListener) {
+        console.warn('[DownloadManager] Não foi possível registrar listener de progresso:', errListener);
+      }
+
+      let downloadResult;
+      try {
+        downloadResult = await Filesystem.downloadFile({
+          url: streamUrl,
+          path: relativePath,
+          directory: Directory.Data,
+          progress: true,
+        });
+      } finally {
+        if (listenerHandle) {
+          try {
+            await listenerHandle.remove();
+          } catch {}
+        }
+      }
+
+      // Finaliza o serviço de download nativo com sucesso
+      delete activeDownloadsMap[cleanId];
+      delete activeDownloadTitles[cleanId];
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(PROGRESS_EVENT, {
+            detail: { id: cleanId, title: item.title, done: true, success: true },
+          })
+        );
+      }
+
+      try {
+        await BackgroundDownload.stopDownload({ success: true, title: item.title });
+      } catch {}
 
       // Obtém o tamanho final do arquivo baixado
       let fileSize = 0;
@@ -146,6 +270,26 @@ export async function downloadVideoForOffline(
 
       return record;
     } catch (err: any) {
+      if (listenerHandle) {
+        try {
+          await listenerHandle.remove();
+        } catch {}
+      }
+      delete activeDownloadsMap[cleanId];
+      delete activeDownloadTitles[cleanId];
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(PROGRESS_EVENT, {
+            detail: { id: cleanId, title: item.title, done: true, success: false },
+          })
+        );
+      }
+
+      try {
+        await BackgroundDownload.stopDownload({ success: false, title: item.title });
+      } catch {}
+
       console.error('[DownloadManager] Erro ao baixar no aplicativo nativo:', err);
       throw new Error(`Falha no download nativo: ${err.message || 'Erro desconhecido'}`);
     }
