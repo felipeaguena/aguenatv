@@ -327,7 +327,14 @@ export default function VideoPlayer({
       const video = videoRef.current;
       if (!video) return;
 
-      if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
+      if (
+        e.code === 'Space' ||
+        e.key === ' ' ||
+        e.keyCode === 32 ||
+        e.key === 'MediaPlayPause' ||
+        e.key === 'MediaPlay' ||
+        e.key === 'MediaPause'
+      ) {
         e.preventDefault();
         e.stopPropagation();
         if (e.stopImmediatePropagation) {
@@ -354,17 +361,30 @@ export default function VideoPlayer({
           setIsPaused(true);
           showFeedback('pause', 'Pausado');
         }
-      } else if (e.key === 'ArrowLeft') {
+      } else if (e.key === 'ArrowLeft' || e.key === 'MediaRewind') {
         e.preventDefault();
         e.stopPropagation();
         video.currentTime = Math.max(0, video.currentTime - 10);
         showFeedback('rewind', '-10s');
-      } else if (e.key === 'ArrowRight') {
+      } else if (e.key === 'ArrowRight' || e.key === 'MediaFastForward') {
         e.preventDefault();
         e.stopPropagation();
         const maxDur = video.duration || video.currentTime + 10;
         video.currentTime = Math.min(maxDur, video.currentTime + 10);
         showFeedback('forward', '+10s');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        const nextVol = Math.min(1, (video.volume || 0) + 0.1);
+        video.volume = nextVol;
+        if (video.muted) video.muted = false;
+        showFeedback('unmute', `Volume ${Math.round(nextVol * 100)}%`);
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        const nextVol = Math.max(0, (video.volume || 0) - 0.1);
+        video.volume = nextVol;
+        showFeedback(nextVol === 0 ? 'mute' : 'unmute', `Volume ${Math.round(nextVol * 100)}%`);
       } else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
         e.stopPropagation();

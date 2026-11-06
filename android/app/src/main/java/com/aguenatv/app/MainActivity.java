@@ -6,6 +6,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.ViewGroup;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -25,6 +26,10 @@ public class MainActivity extends BridgeActivity {
     private static final String DEFAULT_SERVER_URL = "http://163.176.207.140";
     private SwipeRefreshLayout swipeRefreshLayout;
 
+    public boolean isTvApp() {
+        return "com.aguenatv.tv".equals(getPackageName());
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BackgroundDownloadPlugin.class);
@@ -39,11 +44,27 @@ public class MainActivity extends BridgeActivity {
                 settings.setAllowFileAccess(true);
                 settings.setAllowContentAccess(true);
 
+                if (isTvApp()) {
+                    // Configurações exclusivas para Android TV e Tablet
+                    webView.setFocusable(true);
+                    webView.setFocusableInTouchMode(true);
+                    webView.requestFocus();
+                    webView.post(() -> {
+                        String currentUrl = webView.getUrl();
+                        if (currentUrl == null || currentUrl.endsWith("/80") || currentUrl.endsWith(":80/") || currentUrl.equals("http://163.176.207.140") || currentUrl.equals("http://163.176.207.140/")) {
+                            webView.loadUrl("http://163.176.207.140/tv");
+                        }
+                    });
+                }
+
                 // Configura cliente customizado para recursos locais sem interceptar navegação normal
                 setupCustomWebViewClient(webView);
 
                 // Configura Pull-to-Refresh nativo com SwipeRefreshLayout
                 setupSwipeRefresh(webView);
+                if (isTvApp() && swipeRefreshLayout != null) {
+                    swipeRefreshLayout.setEnabled(false);
+                }
 
                 // Listener para eventos de carregamento e desativação do spinner
                 getBridge().addWebViewListener(new WebViewListener() {
@@ -51,11 +72,15 @@ public class MainActivity extends BridgeActivity {
                     public void onPageLoaded(WebView view) {
                         if (swipeRefreshLayout != null) {
                             swipeRefreshLayout.setRefreshing(false);
-                            String url = view.getUrl();
-                            if (url != null && url.contains("/watch")) {
+                            if (isTvApp()) {
                                 swipeRefreshLayout.setEnabled(false);
                             } else {
-                                swipeRefreshLayout.setEnabled(true);
+                                String url = view.getUrl();
+                                if (url != null && url.contains("/watch")) {
+                                    swipeRefreshLayout.setEnabled(false);
+                                } else {
+                                    swipeRefreshLayout.setEnabled(true);
+                                }
                             }
                         }
                     }
@@ -223,6 +248,30 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         } catch (Exception ignored) {}
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (isTvApp()) {
+            int keyCode = event.getKeyCode();
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+                keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+                keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+                keyCode == KeyEvent.KEYCODE_ENTER ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ||
+                keyCode == KeyEvent.KEYCODE_MEDIA_REWIND) {
+                WebView webView = getBridge().getWebView();
+                if (webView != null && !webView.hasFocus()) {
+                    webView.requestFocus();
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private boolean isNetworkConnected() {

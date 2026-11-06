@@ -515,6 +515,18 @@ export default function Navbar() {
                     </div>
                   </Link>
 
+                  <Link
+                    href="/tv"
+                    onClick={() => setIsProfileDropdownOpen(false)}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white hover:bg-white/5 transition-all"
+                  >
+                    <Tv className="w-4 h-4 text-violet-400" />
+                    <div className="flex-1 flex items-center justify-between">
+                      <span>Modo TV & Tablet</span>
+                      <span className="text-[10px] text-violet-400 font-bold">Widescreen</span>
+                    </div>
+                  </Link>
+
                   {currentUser?.role === 'admin' && (
                     <Link
                       href="/admin/users"

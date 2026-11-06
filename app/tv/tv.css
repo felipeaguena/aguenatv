@@ -1,0 +1,54 @@
+/* =========================================================================
+   ESTILOS EXCLUSIVOS DO MODO ANDROID TV & TABLET (ESCOPO .tv-root)
+   Garante 0% de interferência na versão mobile de celulares
+   ========================================================================= */
+
+@keyframes tv-pulse-glow-scoped {
+  0%, 100% {
+    box-shadow: 0 0 22px rgba(139, 92, 246, 0.75), 0 0 6px rgba(139, 92, 246, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 38px rgba(139, 92, 246, 1), 0 0 16px rgba(167, 139, 250, 0.8);
+  }
+}
+
+.tv-root {
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: #08090d;
+  color: #f8fafc;
+}
+
+/* Foco D-Pad Neon com zoom e realce violeta */
+.tv-root :focus-visible,
+.tv-root .tv-focused,
+.tv-root [data-tv-focusable="true"]:focus,
+.tv-root button:focus,
+.tv-root a:focus {
+  outline: 3px solid #8b5cf6 !important;
+  outline-offset: 4px !important;
+  transform: scale(1.06) !important;
+  animation: tv-pulse-glow-scoped 2s infinite ease-in-out !important;
+  z-index: 40 !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease !important;
+}
+
+/* Em telas com controle remoto, desativa hover sticky */
+.tv-root .tv-card:hover {
+  transform: none;
+}
+
+.tv-root .tv-card:focus,
+.tv-root .tv-card:focus-visible {
+  transform: scale(1.08) !important;
+  border-color: #8b5cf6 !important;
+}
+
+/* Oculta scrollbars feias na TV mantendo rolagem suave */
+.tv-root .tv-scroll-row {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tv-root .tv-scroll-row::-webkit-scrollbar {
+  display: none;
+}
