@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -110,9 +110,42 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(false);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [isNative, setIsNative] = useState(false);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [playerHeight, setPlayerHeight] = useState<number | null>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
 
   useEffect(() => {
     setIsNative(isNativeApp());
+  }, []);
+
+  useEffect(() => {
+    const checkSize = () => {
+      const desktop = typeof window !== 'undefined' && window.innerWidth >= 1024;
+      setIsDesktop(desktop);
+      if (playerContainerRef.current) {
+        const rect = playerContainerRef.current.getBoundingClientRect();
+        if (rect.height > 0) {
+          setPlayerHeight(Math.round(rect.height));
+        }
+      }
+    };
+
+    checkSize();
+
+    const el = playerContainerRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver(() => {
+      checkSize();
+    });
+
+    ro.observe(el);
+    window.addEventListener('resize', checkSize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', checkSize);
+    };
   }, []);
 
   // 1. Efeito: Carrega Configuração do IPTV e Item do banco local Dexie
@@ -911,7 +944,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-stretch">
         {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+        <div ref={playerContainerRef} className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -938,8 +971,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
           </div>
 
         {/* Lado Direito: Dinâmica Diferenciada para Séries vs Ao Vivo / Filmes */}
-        <div className="lg:col-span-4 xl:col-span-4 min-w-0 w-full h-[460px] lg:h-full min-h-0">
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full min-h-0 max-w-full overflow-hidden">
+        <div
+          className="lg:col-span-4 xl:col-span-4 min-w-0 w-full"
+          style={{
+            height: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
+            maxHeight: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
+          }}
+        >
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full min-h-0 max-h-full max-w-full overflow-hidden">
             {/* ======================================================== */}
             {/* CENÁRIO 1: SÉRIES (Capítulos com Seletor de Temporada)     */}
             {/* ======================================================== */}
@@ -1063,14 +1102,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                         <div
                           key={`ep_${ep.id}`}
                           onClick={() => handleSelectEpisode(ep)}
-                          className={`p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group ${
+                          className={`p-1.5 sm:p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group shrink-0 ${
                             isCurrent
                               ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
                               : 'hover:bg-white/5 text-neutral-300 hover:text-white'
                           }`}
                         >
                           {/* Miniatura do Episódio com Badge de Número */}
-                          <div className="w-14 h-10 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
+                          <div className="w-12 h-9 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
                             <ImageWithFallback
                               src={epThumb}
                               alt={formattedEpTitle}
@@ -1185,7 +1224,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                         <div
                           key={`side_${channel.id || channel.stream_id}`}
                           onClick={() => handleSwitchStream(channel)}
-                          className={`p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group ${
+                          className={`p-1.5 sm:p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group shrink-0 ${
                             isCurrent
                               ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
                               : 'hover:bg-white/5 text-neutral-300 hover:text-white'
