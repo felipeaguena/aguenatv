@@ -14,7 +14,10 @@ import {
   VolumeX,
   Copy,
   Check,
+  Sun,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { useWatched } from '@/hooks/useWatched';
 import { StreamType } from '@/lib/types';
 
@@ -68,8 +71,179 @@ export default function VideoPlayer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [buffering, setBuffering] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [isPaused, setIsPaused] = useState(!autoPlay);
   const [retryKey, setRetryKey] = useState(0);
+
+  // Estados de controle de tela cheia com rotação automática para paisagem (Landscape)
+  const lockLandscape = useCallback(async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await ScreenOrientation.lock({ orientation: 'landscape' });
+        return;
+      }
+    } catch (e) {
+      console.warn('[ScreenOrientation] Erro ao travar em paisagem:', e);
+    }
+
+    try {
+      if (typeof window !== 'undefined' && window.screen?.orientation && typeof (window.screen.orientation as any).lock === 'function') {
+        await (window.screen.orientation as any).lock('landscape');
+      }
+    } catch (e) {}
+  }, []);
+
+  const unlockOrientation = useCallback(async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await ScreenOrientation.unlock();
+        return;
+      }
+    } catch (e) {
+      console.warn('[ScreenOrientation] Erro ao destravar orientação:', e);
+    }
+
+    try {
+      if (typeof window !== 'undefined' && window.screen?.orientation && typeof (window.screen.orientation as any).unlock === 'function') {
+        (window.screen.orientation as any).unlock();
+      }
+    } catch (e) {}
+  }, []);
+
+  // Monitora alterações de tela cheia no documento e no elemento de vídeo
+  useEffect(() => {
+    const video = videoRef.current;
+
+    const handleFullscreenChange = () => {
+      const isFs = Boolean(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (video as any)?.webkitDisplayingFullscreen
+      );
+
+      if (isFs) {
+        lockLandscape();
+      } else {
+        unlockOrientation();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+
+    if (video) {
+      video.addEventListener('webkitbeginfullscreen', lockLandscape);
+      video.addEventListener('webkitendfullscreen', unlockOrientation);
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      if (video) {
+        video.removeEventListener('webkitbeginfullscreen', lockLandscape);
+        video.removeEventListener('webkitendfullscreen', unlockOrientation);
+      }
+      unlockOrientation();
+    };
+  }, [lockLandscape, unlockOrientation]);
+
+  // Controles de Brilho e Volume por Gestos Touch no Player
+  const [brightness, setBrightness] = useState<number>(100);
+  const [touchFeedback, setTouchFeedback] = useState<{
+    type: 'brightness' | 'volume';
+    value: number;
+  } | null>(null);
+  const touchFeedbackTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const touchStateRef = useRef<{
+    startX: number;
+    startY: number;
+    mode: 'brightness' | 'volume' | null;
+    startVal: number;
+    isMoving: boolean;
+  }>({
+    startX: 0,
+    startY: 0,
+    mode: null,
+    startVal: 0,
+    isMoving: false,
+  });
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const relativeX = touch.clientX - rect.left;
+    const isLeft = relativeX < rect.width / 2;
+
+    const video = videoRef.current;
+    const currentVol = video ? Math.round(video.volume * 100) : 100;
+
+    touchStateRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      mode: isLeft ? 'brightness' : 'volume',
+      startVal: isLeft ? brightness : currentVol,
+      isMoving: false,
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStateRef.current.mode || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const deltaY = touchStateRef.current.startY - touch.clientY; // Positivo ao arrastar para cima
+    const deltaX = Math.abs(touch.clientX - touchStateRef.current.startX);
+
+    if (Math.abs(deltaY) < 8 && deltaX < 8) return;
+    if (Math.abs(deltaY) < deltaX && !touchStateRef.current.isMoving) return;
+
+    touchStateRef.current.isMoving = true;
+
+    // Sensibilidade: 65% da altura da tela equivale a 100% de variação
+    const sensitivity = (deltaY / (rect.height * 0.65)) * 100;
+
+    if (touchFeedbackTimer.current) clearTimeout(touchFeedbackTimer.current);
+
+    if (touchStateRef.current.mode === 'brightness') {
+      const nextBrightness = Math.min(
+        100,
+        Math.max(15, Math.round(touchStateRef.current.startVal + sensitivity))
+      );
+      setBrightness(nextBrightness);
+      setTouchFeedback({ type: 'brightness', value: nextBrightness });
+    } else {
+      const nextVol = Math.min(
+        100,
+        Math.max(0, Math.round(touchStateRef.current.startVal + sensitivity))
+      );
+      const video = videoRef.current;
+      if (video) {
+        video.volume = nextVol / 100;
+        if (nextVol > 0 && video.muted) {
+          video.muted = false;
+        }
+      }
+      setTouchFeedback({ type: 'volume', value: nextVol });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStateRef.current.mode = null;
+    touchStateRef.current.isMoving = false;
+    if (touchFeedbackTimer.current) clearTimeout(touchFeedbackTimer.current);
+    touchFeedbackTimer.current = setTimeout(() => {
+      setTouchFeedback(null);
+    }, 750);
+  };
 
   // Estados de feedback visual temporário (HUD para atalhos)
   const [feedbackBadge, setFeedbackBadge] = useState<{
@@ -99,7 +273,7 @@ export default function VideoPlayer({
     });
   }, [streamUrl]);
 
-  // Alternância de Tela Cheia (Fullscreen) - IDÊNTICA ao botão nativo do player de vídeo (alvo direto no elemento <video>)
+  // Alternância de Tela Cheia (Fullscreen) - IDÊNTICA ao botão nativo do player de vídeo
   const handleToggleFullscreen = useCallback((e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
@@ -115,6 +289,7 @@ export default function VideoPlayer({
       Boolean((video as any).webkitDisplayingFullscreen);
 
     if (!isFullscreen) {
+      lockLandscape();
       if (video.requestFullscreen) {
         video.requestFullscreen().catch(() => {});
       } else if ((video as any).webkitRequestFullscreen) {
@@ -125,6 +300,7 @@ export default function VideoPlayer({
         (video as any).mozRequestFullScreen();
       }
     } else {
+      unlockOrientation();
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       } else if ((document as any).webkitExitFullscreen) {
@@ -135,10 +311,12 @@ export default function VideoPlayer({
         (video as any).webkitExitFullscreen();
       }
     }
-  }, []);
+  }, [lockLandscape, unlockOrientation]);
 
-  // Atalhos de teclado globais no player: Espaço (play/pause), Setas (seek 10s), M (mute), F (fullscreen)
+  // Atalhos de teclado globais no player com CAPTURE e DEBOUNCE para evitar duplo disparo nativo do Space
   useEffect(() => {
+    const lastSpacePressRef = { current: 0 };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -149,26 +327,47 @@ export default function VideoPlayer({
       const video = videoRef.current;
       if (!video) return;
 
-      if (e.code === 'Space' || e.key === ' ') {
+      if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
         e.preventDefault();
+        e.stopPropagation();
+        if (e.stopImmediatePropagation) {
+          e.stopImmediatePropagation();
+        }
+
+        const now = Date.now();
+        if (now - lastSpacePressRef.current < 250) {
+          return;
+        }
+        lastSpacePressRef.current = now;
+
         if (video.paused) {
-          video.play().catch(() => {});
-          showFeedback('play', 'Reproduzir');
+          video.play()
+            .then(() => {
+              setIsPaused(false);
+              showFeedback('play', 'Reproduzir');
+            })
+            .catch(() => {
+              setIsPaused(true);
+            });
         } else {
           video.pause();
+          setIsPaused(true);
           showFeedback('pause', 'Pausado');
         }
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
+        e.stopPropagation();
         video.currentTime = Math.max(0, video.currentTime - 10);
         showFeedback('rewind', '-10s');
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
+        e.stopPropagation();
         const maxDur = video.duration || video.currentTime + 10;
         video.currentTime = Math.min(maxDur, video.currentTime + 10);
         showFeedback('forward', '+10s');
       } else if (e.key === 'm' || e.key === 'M') {
         e.preventDefault();
+        e.stopPropagation();
         video.muted = !video.muted;
         if (video.muted) {
           showFeedback('mute', 'Mudo');
@@ -177,13 +376,14 @@ export default function VideoPlayer({
         }
       } else if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
+        e.stopPropagation();
         handleToggleFullscreen();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, { capture: true });
       if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     };
   }, [handleToggleFullscreen, showFeedback]);
@@ -271,7 +471,7 @@ export default function VideoPlayer({
     setError(null);
     setLoading(true);
     setBuffering(false);
-    setIsPaused(false);
+    setIsPaused(!autoPlay);
     hasMarkedRef.current = false;
     hasRestoredRef.current = false;
     lastSavedTimeRef.current = 0;
@@ -387,6 +587,8 @@ export default function VideoPlayer({
         video.play().catch(() => {
           setIsPaused(true);
         });
+      } else if (!autoPlay) {
+        setIsPaused(true);
       }
     };
 
@@ -484,6 +686,8 @@ export default function VideoPlayer({
           video.play().catch(() => {
             setIsPaused(true);
           });
+        } else {
+          setIsPaused(true);
         }
       });
 
@@ -551,6 +755,8 @@ export default function VideoPlayer({
         video.play().catch(() => {
           setIsPaused(true);
         });
+      } else {
+        setIsPaused(true);
       }
     }
 
@@ -598,6 +804,10 @@ export default function VideoPlayer({
     <div
       ref={containerRef}
       onDoubleClick={handleToggleFullscreen}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       className="relative w-full h-full bg-black rounded-2xl overflow-hidden flex items-center justify-center group select-none"
     >
       {/* 1. Backdrop / Poster se o vídeo ainda não começou */}
@@ -762,15 +972,63 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* 7. Tag de Vídeo HTML5 com Suporte a Controles e Poster */}
+      {/* 7. Camada de Ajuste de Brilho Dinâmico (Dimmer) */}
+      {brightness < 100 && (
+        <div
+          className="absolute inset-0 bg-black pointer-events-none z-5 transition-opacity"
+          style={{ opacity: ((100 - brightness) / 100) * 0.85 }}
+        />
+      )}
+
+      {/* 8. HUD de Gestos Touch (Brilho no lado esquerdo, Volume no lado direito) */}
+      {touchFeedback && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40 animate-in fade-in zoom-in-95 duration-100">
+          <div className="flex flex-col items-center gap-2.5 px-6 py-4 rounded-3xl bg-black/85 border border-white/20 backdrop-blur-xl shadow-2xl min-w-[140px]">
+            {touchFeedback.type === 'brightness' ? (
+              <Sun className="w-8 h-8 text-amber-400 animate-pulse" />
+            ) : touchFeedback.value === 0 ? (
+              <VolumeX className="w-8 h-8 text-rose-400" />
+            ) : (
+              <Volume2 className="w-8 h-8 text-violet-400" />
+            )}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
+                {touchFeedback.type === 'brightness' ? 'Brilho' : 'Volume'}
+              </span>
+              <span className="text-sm font-extrabold text-white">
+                {touchFeedback.value}%
+              </span>
+            </div>
+            <div className="w-24 h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-75 rounded-full ${
+                  touchFeedback.type === 'brightness' ? 'bg-amber-400' : 'bg-violet-500'
+                }`}
+                style={{ width: `${touchFeedback.value}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. Tag de Vídeo HTML5 com Suporte a Controles, Teclado e Filtro de Brilho */}
       <video
         ref={videoRef}
         controls
         playsInline
         poster={posterUrl}
         preload="auto"
+        onKeyDown={(e) => {
+          if (e.code === 'Space' || e.key === ' ' || e.keyCode === 32) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
         onDoubleClick={handleToggleFullscreen}
         className="w-full h-full object-contain z-1"
+        style={{
+          filter: brightness < 100 ? `brightness(${brightness}%)` : undefined,
+        }}
       />
     </div>
   );

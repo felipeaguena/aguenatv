@@ -12,6 +12,8 @@ import {
   Film,
   Layers,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Search,
   Clock,
   Sparkles,
@@ -805,6 +807,106 @@ export default function WatchView({ type, id }: WatchViewProps) {
     router.replace(getWatchUrl('series', id, ep.id, selectedSeason));
   }, [id, router, selectedSeason]);
 
+  // Lista de episódios sem filtro de busca para navegação sequencial entre capítulos
+  const allCurrentSeasonEpisodes: SeriesEpisode[] = useMemo(() => {
+    return getEpisodesForSeason(seriesInfo, selectedSeason);
+  }, [seriesInfo, selectedSeason]);
+
+  const activeEpisodeIndex = useMemo(() => {
+    if (!activeEpisode || !allCurrentSeasonEpisodes.length) return -1;
+    return allCurrentSeasonEpisodes.findIndex((ep) => String(ep.id) === String(activeEpisode.id));
+  }, [activeEpisode, allCurrentSeasonEpisodes]);
+
+  const currentSeasonIndex = useMemo(() => {
+    return seasonList.findIndex((s) => String(s.season_number) === String(selectedSeason));
+  }, [seasonList, selectedSeason]);
+
+  const canGoPrev = useMemo(() => {
+    if (isSeries) {
+      if (activeEpisodeIndex > 0) return true;
+      if (currentSeasonIndex > 0) {
+        const prevSeasonNum = String(seasonList[currentSeasonIndex - 1].season_number);
+        const prevEps = getEpisodesForSeason(seriesInfo, prevSeasonNum);
+        return prevEps.length > 0;
+      }
+      return false;
+    }
+    if (filteredRelated.length > 1) {
+      const idx = filteredRelated.findIndex((i) => String(i.stream_id) === String(currentStreamId));
+      return idx > 0;
+    }
+    return false;
+  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, seasonList, seriesInfo, filteredRelated, currentStreamId]);
+
+  const canGoNext = useMemo(() => {
+    if (isSeries) {
+      if (activeEpisodeIndex >= 0 && activeEpisodeIndex < allCurrentSeasonEpisodes.length - 1) return true;
+      if (currentSeasonIndex >= 0 && currentSeasonIndex < seasonList.length - 1) {
+        const nextSeasonNum = String(seasonList[currentSeasonIndex + 1].season_number);
+        const nextEps = getEpisodesForSeason(seriesInfo, nextSeasonNum);
+        return nextEps.length > 0;
+      }
+      return false;
+    }
+    if (filteredRelated.length > 1) {
+      const idx = filteredRelated.findIndex((i) => String(i.stream_id) === String(currentStreamId));
+      return idx >= 0 && idx < filteredRelated.length - 1;
+    }
+    return false;
+  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes.length, currentSeasonIndex, seasonList, seriesInfo, filteredRelated, currentStreamId]);
+
+  const handlePrevChapter = useCallback(() => {
+    if (isSeries) {
+      if (activeEpisodeIndex > 0) {
+        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex - 1]);
+      } else if (currentSeasonIndex > 0) {
+        const prevSeason = seasonList[currentSeasonIndex - 1];
+        const prevSeasonNum = String(prevSeason.season_number);
+        const prevEps = getEpisodesForSeason(seriesInfo, prevSeasonNum);
+        if (prevEps.length > 0) {
+          const lastEp = prevEps[prevEps.length - 1];
+          setSelectedSeason(prevSeasonNum);
+          setActiveEpisode(lastEp);
+          router.replace(getWatchUrl('series', id, lastEp.id, prevSeasonNum));
+        }
+      }
+      return;
+    }
+
+    if (filteredRelated.length > 1) {
+      const idx = filteredRelated.findIndex((i) => String(i.stream_id) === String(currentStreamId));
+      if (idx > 0) {
+        handleSwitchStream(filteredRelated[idx - 1]);
+      }
+    }
+  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, allCurrentSeasonEpisodes, handleSelectEpisode, seasonList, seriesInfo, id, router, filteredRelated, currentStreamId, handleSwitchStream]);
+
+  const handleNextChapter = useCallback(() => {
+    if (isSeries) {
+      if (activeEpisodeIndex >= 0 && activeEpisodeIndex < allCurrentSeasonEpisodes.length - 1) {
+        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex + 1]);
+      } else if (currentSeasonIndex >= 0 && currentSeasonIndex < seasonList.length - 1) {
+        const nextSeason = seasonList[currentSeasonIndex + 1];
+        const nextSeasonNum = String(nextSeason.season_number);
+        const nextEps = getEpisodesForSeason(seriesInfo, nextSeasonNum);
+        if (nextEps.length > 0) {
+          const firstEp = nextEps[0];
+          setSelectedSeason(nextSeasonNum);
+          setActiveEpisode(firstEp);
+          router.replace(getWatchUrl('series', id, firstEp.id, nextSeasonNum));
+        }
+      }
+      return;
+    }
+
+    if (filteredRelated.length > 1) {
+      const idx = filteredRelated.findIndex((i) => String(i.stream_id) === String(currentStreamId));
+      if (idx >= 0 && idx < filteredRelated.length - 1) {
+        handleSwitchStream(filteredRelated[idx + 1]);
+      }
+    }
+  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, id, router, filteredRelated, currentStreamId, handleSwitchStream]);
+
   // =========================================================================
   // 3. RETORNOS CONDICIONAIS DE RENDERIZAÇÃO (SEGUROS - APÓS TODOS OS HOOKS)
   // =========================================================================
@@ -950,8 +1052,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-start">
-        {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div ref={playerContainerRef} className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative self-start">
+        {/* Lado Esquerdo: Player de Vídeo Cinema + Controles de Capítulos na mesma primeira div */}
+        <div className="lg:col-span-8 xl:col-span-8 flex flex-col gap-3 min-w-0 self-start">
+          <div
+            ref={playerContainerRef}
+            className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative"
+          >
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -976,6 +1082,51 @@ export default function WatchView({ type, id }: WatchViewProps) {
               </div>
             )}
           </div>
+
+          {/* Botões de Capítulo Anterior e Próximo na parte inferior da mesma div */}
+          <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
+            <button
+              type="button"
+              onClick={handlePrevChapter}
+              disabled={!canGoPrev}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
+                canGoPrev
+                  ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
+                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
+              }`}
+              title={canGoPrev ? 'Voltar para o capítulo anterior' : 'Não há capítulo anterior'}
+            >
+              <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
+              <span className="truncate">Capítulo Anterior</span>
+            </button>
+
+            {isSeries && activeEpisode && (
+              <div className="hidden sm:flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
+                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
+                  Capítulo Atual
+                </span>
+                <span className="text-xs font-bold text-violet-300 truncate w-full">
+                  {formatEpisodeTitle(activeEpisode.episode_num, selectedSeason, activeEpisode.title)}
+                </span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleNextChapter}
+              disabled={!canGoNext}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
+                canGoNext
+                  ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
+                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
+              }`}
+              title={canGoNext ? 'Ir para o próximo capítulo' : 'Não há próximo capítulo'}
+            >
+              <span className="truncate">Próximo Capítulo</span>
+              <ChevronRight className="w-4 h-4 text-white shrink-0" />
+            </button>
+          </div>
+        </div>
 
 
         {/* Lado Direito: Segunda Div com altura relativa ao player de video na primeira div (sem h-full) */}
