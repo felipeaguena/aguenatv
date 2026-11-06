@@ -108,11 +108,21 @@ function LiveTVContent() {
         </h2>
       </div>
 
-      {/* Grid de Canais (Limitado aos 50 da página) */}
+      {/* Grid de Canais Widescreen 16:9 com Luz Ambiente */}
       {loading ? (
-        <div className="p-20 text-center text-xs text-neutral-400 space-y-2">
-          <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p>Carregando canais...</p>
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 sm:gap-4 lg:gap-5">
+          {Array.from({ length: 15 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex flex-col rounded-2xl overflow-hidden bg-[#13141b] border border-white/5 animate-pulse"
+            >
+              <div className="aspect-video w-full bg-white/5" />
+              <div className="p-3 space-y-2">
+                <div className="h-3 bg-white/10 rounded w-3/4" />
+                <div className="h-2.5 bg-white/5 rounded w-1/2" />
+              </div>
+            </div>
+          ))}
         </div>
       ) : paginatedChannels.length === 0 ? (
         <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center text-xs text-neutral-400 space-y-4 shadow-xl">
@@ -131,7 +141,7 @@ function LiveTVContent() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 sm:gap-4 lg:gap-5">
             {paginatedChannels.map((ch) => (
               <MediaCard key={`ch_${ch.id}`} item={ch} />
             ))}

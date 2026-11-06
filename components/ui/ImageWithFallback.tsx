@@ -8,6 +8,7 @@ interface ImageWithFallbackProps {
   fallbackClassName?: string;
   isSmallThumb?: boolean;
   loading?: 'lazy' | 'eager';
+  customFallback?: React.ReactNode;
 }
 
 export default function ImageWithFallback({
@@ -17,6 +18,7 @@ export default function ImageWithFallback({
   fallbackClassName = '',
   isSmallThumb = false,
   loading = 'lazy',
+  customFallback,
 }: ImageWithFallbackProps) {
   const [hasError, setHasError] = useState(false);
 
@@ -32,6 +34,15 @@ export default function ImageWithFallback({
 
   // Se não houver src ou ocorrer erro no carregamento da imagem
   if (!cleanSrc || hasError) {
+    if (customFallback) {
+      return (
+        <div
+          className={`w-full h-full flex items-center justify-center select-none ${fallbackClassName}`}
+        >
+          {customFallback}
+        </div>
+      );
+    }
     if (isSmallThumb) {
       return (
         <div

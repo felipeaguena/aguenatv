@@ -821,15 +821,45 @@ export default function InfoView({ type, id }: InfoViewProps) {
         {/* Conteúdo Principal do Resumo com padding-top ampliado no mobile */}
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-10 pt-48 sm:pt-56 md:pt-0 w-full z-10">
           <div className="flex flex-col md:flex-row items-start md:items-end gap-6 sm:gap-8">
-            {/* Poster Vertical 3:4 (oculto no mobile pois a imagem principal já compõe o background, visível no desktop) */}
-            <div className="hidden md:block w-48 sm:w-56 aspect-[3/4] rounded-3xl overflow-hidden bg-black border-2 border-white/10 shadow-2xl shrink-0 relative group">
-              <ImageWithFallback
-                src={posterImage}
-                alt={item.title}
-                className="w-full h-full object-cover"
-              />
+            {/* Poster Vertical para Filmes/Séries ou Widescreen 16:9 com Luz Ambiente para Canais de TV */}
+            <div
+              className={`hidden md:block ${
+                streamType === 'live'
+                  ? 'w-64 sm:w-72 aspect-video'
+                  : 'w-48 sm:w-56 aspect-[3/4]'
+              } rounded-3xl overflow-hidden bg-black border-2 border-white/10 shadow-2xl shrink-0 relative group`}
+            >
+              {streamType === 'live' ? (
+                <>
+                  {posterImage && (
+                    <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
+                      <img
+                        src={posterImage}
+                        alt=""
+                        aria-hidden="true"
+                        className="w-full h-full object-cover scale-150 blur-2xl opacity-35 saturate-150"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0e1017] via-[#0e1017]/70 to-[#0e1017]/35" />
+                    </div>
+                  )}
+                  <div className="relative z-10 w-full h-full flex items-center justify-center p-6">
+                    <ImageWithFallback
+                      src={posterImage}
+                      alt={item.title}
+                      className="w-auto h-auto max-w-full max-h-full object-contain drop-shadow-[0_4px_16px_rgba(0,0,0,0.85)]"
+                      fallbackClassName="bg-transparent border-0"
+                    />
+                  </div>
+                </>
+              ) : (
+                <ImageWithFallback
+                  src={posterImage}
+                  alt={item.title}
+                  className="w-full h-full object-cover"
+                />
+              )}
 
-              {watched && (
+              {watched && streamType !== 'live' && (
                 <div className="absolute top-3 right-3 bg-neutral-950/90 text-emerald-400 p-1.5 rounded-full border border-emerald-500/40 shadow-lg">
                   <CheckCircle2 className="w-4 h-4 fill-emerald-500/20" />
                 </div>
@@ -842,14 +872,39 @@ export default function InfoView({ type, id }: InfoViewProps) {
               <div className="order-1 md:order-2 space-y-2">
                 {/* Thumbnail Menor em cima do título no mobile */}
                 <div className="md:hidden mb-3">
-                  <div className="w-20 sm:w-24 aspect-[3/4] rounded-2xl overflow-hidden bg-black/80 border border-white/20 shadow-2xl relative group">
-                    <ImageWithFallback
-                      src={posterImage}
-                      alt={item.title || item.name}
-                      className="w-full h-full object-cover"
-                      isSmallThumb={true}
-                    />
-                    {watched && (
+                  <div
+                    className={`${
+                      streamType === 'live'
+                        ? 'w-28 sm:w-32 aspect-video'
+                        : 'w-20 sm:w-24 aspect-[3/4]'
+                    } rounded-2xl overflow-hidden bg-black/80 border border-white/20 shadow-2xl relative group`}
+                  >
+                    {streamType === 'live' ? (
+                      <div className="w-full h-full flex items-center justify-center p-2 relative">
+                        {posterImage && (
+                          <img
+                            src={posterImage}
+                            alt=""
+                            aria-hidden="true"
+                            className="absolute inset-0 w-full h-full object-cover blur-xl opacity-35"
+                          />
+                        )}
+                        <ImageWithFallback
+                          src={posterImage}
+                          alt={item.title || item.name}
+                          className="relative z-10 w-auto h-auto max-w-full max-h-full object-contain"
+                          isSmallThumb={true}
+                        />
+                      </div>
+                    ) : (
+                      <ImageWithFallback
+                        src={posterImage}
+                        alt={item.title || item.name}
+                        className="w-full h-full object-cover"
+                        isSmallThumb={true}
+                      />
+                    )}
+                    {watched && streamType !== 'live' && (
                       <div className="absolute top-1.5 right-1.5 bg-neutral-950/90 text-emerald-400 p-1 rounded-full border border-emerald-500/40 shadow-lg">
                         <CheckCircle2 className="w-3 h-3 fill-emerald-500/20" />
                       </div>
@@ -1582,7 +1637,13 @@ export default function InfoView({ type, id }: InfoViewProps) {
             </span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <div
+            className={
+              streamType === 'live'
+                ? 'grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3.5 sm:gap-4 lg:gap-5'
+                : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4'
+            }
+          >
             {related.slice(0, 12).map((rel) => (
               <MediaCard key={`rel_${rel.stream_type}_${rel.stream_id || rel.id}`} item={rel} />
             ))}

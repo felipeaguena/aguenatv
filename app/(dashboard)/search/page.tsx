@@ -102,21 +102,21 @@ function NetflixCategoryCarousel({
           {top10.map((item) => (
             <div
               key={`${item.stream_type}_${item.stream_id}`}
-              className="w-40 sm:w-48 shrink-0"
+              className={group.type === 'live' ? 'w-56 sm:w-64 shrink-0' : 'w-40 sm:w-48 shrink-0'}
             >
               <MediaCard item={item} />
             </div>
           ))}
 
           {/* Card Final: Mais Resultados nesta Categoria */}
-          <div className="w-40 sm:w-48 shrink-0 flex">
+          <div className={group.type === 'live' ? 'w-56 sm:w-64 shrink-0 flex' : 'w-40 sm:w-48 shrink-0 flex'}>
             <button
               onClick={() =>
                 router.push(
                   `/catalog?category=${group.id}&type=${group.type}&q=${encodeURIComponent(query)}`
                 )
               }
-              className="w-full min-h-[260px] sm:min-h-[300px] rounded-2xl bg-[#13141b]/80 hover:bg-violet-950/40 border border-white/10 hover:border-violet-500/50 p-4 flex flex-col items-center justify-center text-center gap-3 transition-all group/btn cursor-pointer shadow-lg"
+              className={`w-full ${group.type === 'live' ? 'min-h-[170px] sm:min-h-[190px]' : 'min-h-[260px] sm:min-h-[300px]'} rounded-2xl bg-[#13141b]/80 hover:bg-violet-950/40 border border-white/10 hover:border-violet-500/50 p-4 flex flex-col items-center justify-center text-center gap-3 transition-all group/btn cursor-pointer shadow-lg`}
             >
               <div className="w-12 h-12 rounded-2xl bg-violet-600/20 group-hover/btn:bg-violet-600 text-violet-400 group-hover/btn:text-white flex items-center justify-center transition-all shadow-md">
                 <ArrowRight className="w-5 h-5 group-hover/btn:translate-x-0.5 transition-transform" />
