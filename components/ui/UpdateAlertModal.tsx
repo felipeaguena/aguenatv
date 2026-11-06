@@ -5,6 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { AppVersionInfo } from '@/app/api/version/route';
 import { BackgroundDownload } from '@/lib/download-manager';
+import { useTv } from '@/context/TvContext';
 
 const FALLBACK_VERSION = '0.2.6';
 
@@ -44,6 +45,7 @@ export default function UpdateAlertModal({
   const [installedVersion, setInstalledVersion] = useState<string>(FALLBACK_VERSION);
   const [hasUpdate, setHasUpdate] = useState(false);
   const [checking, setChecking] = useState(false);
+  const { isTv } = useTv();
 
   // Estados de download nativo do APK com barra de progresso
   const [isDownloading, setIsDownloading] = useState(false);
@@ -107,8 +109,11 @@ export default function UpdateAlertModal({
     checkVersion(manualCheck);
   }, [manualCheck]);
 
-  const cleanLatest = versionInfo?.latestVersion?.replace(/^v/i, '') || '0.2.5';
-  const directApkUrl = `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release.apk`;
+  const cleanLatest = versionInfo?.latestVersion?.replace(/^v/i, '') || '0.3.0';
+  const versionSlug = cleanLatest.replace(/\./g, '-');
+  const directApkUrl = isTv
+    ? `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release-${versionSlug}-android-tv.apk`
+    : `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release-${versionSlug}-mobile.apk`;
   const releasesPageUrl = `https://github.com/felipeaguena/aguenatv/releases#release-v${cleanLatest}`;
 
   // Executa a instalação automática com barra de progresso no APK
@@ -161,7 +166,9 @@ export default function UpdateAlertModal({
         id: updateDownloadId,
         url: directApkUrl,
         title: `Atualização AGUENATV v${cleanLatest}`,
-        fileName: `AGUENATV-v${cleanLatest}.apk`,
+        fileName: isTv
+          ? `AGUENATV-release-${versionSlug}-android-tv.apk`
+          : `AGUENATV-release-${versionSlug}-mobile.apk`,
       });
     } catch (err: any) {
       console.error('Erro ao baixar atualização:', err);

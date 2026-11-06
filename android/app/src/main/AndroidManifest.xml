@@ -32,6 +32,11 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
 
+        <!-- Identificador de Perfil de Dispositivo Alvo (tv ou mobile) -->
+        <meta-data
+            android:name="com.aguenatv.app.TARGET_DEVICE"
+            android:value="tv" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"

@@ -47,6 +47,14 @@ public class MainActivity extends BridgeActivity {
                 webView.setFocusableInTouchMode(true);
                 webView.requestFocus();
 
+                // Identifica se é perfil TV e customiza User-Agent para detecção automática no frontend
+                if (isTelevisionDevice()) {
+                    String defaultUa = settings.getUserAgentString();
+                    if (defaultUa != null && !defaultUa.contains("AndroidTV")) {
+                        settings.setUserAgentString(defaultUa + " AGUENATV/TV (AndroidTV; SmartTV; Large Screen)");
+                    }
+                }
+
                 // Configura cliente customizado para recursos locais sem interceptar navegação normal
                 setupCustomWebViewClient(webView);
 
@@ -63,7 +71,7 @@ public class MainActivity extends BridgeActivity {
                             if (url != null && url.contains("/watch")) {
                                 swipeRefreshLayout.setEnabled(false);
                             } else {
-                                swipeRefreshLayout.setEnabled(true);
+                                swipeRefreshLayout.setEnabled(!isTelevisionDevice());
                             }
                         }
                     }
@@ -240,6 +248,18 @@ public class MainActivity extends BridgeActivity {
     }
 
     public boolean isTelevisionDevice() {
+        try {
+            android.os.Bundle meta = getPackageManager().getApplicationInfo(getPackageName(), android.content.pm.PackageManager.GET_META_DATA).metaData;
+            if (meta != null) {
+                String target = meta.getString("com.aguenatv.app.TARGET_DEVICE");
+                if ("tv".equalsIgnoreCase(target)) {
+                    return true;
+                } else if ("mobile".equalsIgnoreCase(target)) {
+                    return false;
+                }
+            }
+        } catch (Exception ignored) {}
+
         try {
             UiModeManager uiModeManager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
             if (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {

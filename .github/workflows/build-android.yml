@@ -69,24 +69,42 @@ jobs:
             keytool -genkeypair -v -keystore android/aguenatv-release.jks -alias aguenatv -keyalg RSA -keysize 2048 -validity 10000 -storepass aguenatv2026 -keypass aguenatv2026 -dname "CN=AGUENATV, OU=App, O=Aguena, L=Sao Paulo, ST=SP, C=BR"
           fi
 
-      - name: Compilar APKs Release e Debug
+      - name: Compilar APK Android TV
         run: |
+          sed -i 's/"com.aguenatv.app.TARGET_DEVICE" android:value="[^"]*"/"com.aguenatv.app.TARGET_DEVICE" android:value="tv"/' android/app/src/main/AndroidManifest.xml
           cd android
-          ./gradlew assembleRelease assembleDebug --no-daemon --stacktrace
-
-      - name: Renomear e Preparar APKs
-        run: |
+          ./gradlew clean assembleRelease assembleDebug --no-daemon --stacktrace
+          cd ..
           mkdir -p build-apks
           VERSION=$(node -p "require('./package.json').version")
+          VERSION_SLUG=$(echo "$VERSION" | tr '.' '-')
           if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
-            cp android/app/build/outputs/apk/release/app-release.apk build-apks/AGUENATV-v${VERSION}-release.apk
+            cp android/app/build/outputs/apk/release/app-release.apk build-apks/AGUENATV-release-${VERSION_SLUG}-android-tv.apk
             cp android/app/build/outputs/apk/release/app-release.apk build-apks/AGUENATV-release.apk
           elif [ -f android/app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk build-apks/AGUENATV-release-${VERSION_SLUG}-android-tv.apk
             cp android/app/build/outputs/apk/release/app-release-unsigned.apk build-apks/AGUENATV-release.apk
           fi
           if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
-            cp android/app/build/outputs/apk/debug/app-debug.apk build-apks/AGUENATV-v${VERSION}-debug.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk build-apks/AGUENATV-debug-${VERSION_SLUG}-android-tv.apk
             cp android/app/build/outputs/apk/debug/app-debug.apk build-apks/AGUENATV-debug.apk
+          fi
+
+      - name: Compilar APK Mobile (Celular e Tablet)
+        run: |
+          sed -i 's/"com.aguenatv.app.TARGET_DEVICE" android:value="[^"]*"/"com.aguenatv.app.TARGET_DEVICE" android:value="mobile"/' android/app/src/main/AndroidManifest.xml
+          cd android
+          ./gradlew clean assembleRelease assembleDebug --no-daemon --stacktrace
+          cd ..
+          VERSION=$(node -p "require('./package.json').version")
+          VERSION_SLUG=$(echo "$VERSION" | tr '.' '-')
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk build-apks/AGUENATV-release-${VERSION_SLUG}-mobile.apk
+          elif [ -f android/app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release-unsigned.apk build-apks/AGUENATV-release-${VERSION_SLUG}-mobile.apk
+          fi
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk build-apks/AGUENATV-debug-${VERSION_SLUG}-mobile.apk
           fi
 
       - name: Publicar APKs como Artefato de Download
@@ -100,7 +118,9 @@ jobs:
         id: pkg_version
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          VERSION_SLUG=$(echo "$VERSION" | tr '.' '-')
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
+          echo "version_slug=$VERSION_SLUG" >> $GITHUB_OUTPUT
 
       - name: Publicar Release no GitHub
         uses: softprops/action-gh-release@v2
@@ -115,9 +135,15 @@ jobs:
             - 🎮 **Controles de Reprodução no Controle Remoto**: Play/Pause no botão central e tecla Play, retroceder/avançar 10s nas setas laterais, e ajuste de volume nas setas verticais.
             - 🖼️ **Launcher Banner 16:9 Oficial**: Ícone e banner dedicados para a tela inicial do Android TV e Google TV (Leanback launcher).
             - ⚙️ **Alternador de Modo TV**: Alternância rápida entre interface mobile e TV nas configurações e no menu de perfil.
-            - 🔒 **APK Híbrido Release Assinado**: Compatível tanto com smartphones Android quanto com televisores e TV Boxes na mesma instalação.
+            - 📱 **Build Específico para Celular**: Layout touch tradicional, barra inferior dock e gestos pull-to-refresh preservados.
+
+            ---
+
+            ### 📦 Qual APK baixar?
+            - 📺 **`AGUENATV-release-${{ steps.pkg_version.outputs.version_slug }}-android-tv.apk`**: Para instalar na Smart TV, TV Box, Fire TV Stick ou Mi Box.
+            - 📱 **`AGUENATV-release-${{ steps.pkg_version.outputs.version_slug }}-mobile.apk`**: Para instalar no Celular ou Tablet Android.
+            - 🛠️ **`AGUENATV-debug-*.apk`**: Versões de teste e desenvolvimento.
           files: |
-            build-apks/AGUENATV-release.apk
-            build-apks/AGUENATV-debug.apk
+            build-apks/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
