@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Sparkles, Tv, Film, Video, RotateCw, Heart, Layers, ArrowRight } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
@@ -42,6 +42,17 @@ export default function HomePage() {
   const [recentSeries, setRecentSeries] = useState<BaseStreamItem[]>([]);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [hasData, setHasData] = useState(true);
+
+  // Últimos 12 títulos adicionados aos favoritos, ordenados pelos mais recentes
+  const recentFavorites = useMemo(() => {
+    return [...favorites]
+      .sort((a, b) => {
+        const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return timeB - timeA;
+      })
+      .slice(0, 12);
+  }, [favorites]);
 
   const loadLocalData = async () => {
     if (!localDB) return;
@@ -129,7 +140,7 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* 3. Meus Favoritos (se houver) - Grid de 5 colunas */}
+      {/* 3. Meus Favoritos (se houver) - Grid de 6 colunas no desktop com os últimos 12 títulos */}
       {mounted && favorites.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
           <div className="flex items-center justify-between">
@@ -146,10 +157,10 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
-            {favorites.slice(0, 10).map((fav) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-6 gap-4 sm:gap-5">
+            {recentFavorites.map((fav) => (
               <MediaCard
-                key={`fav_${fav.id}`}
+                key={`fav_${fav.id || fav.stream_id}`}
                 item={{
                   id: fav.stream_id,
                   stream_id: fav.stream_id,
