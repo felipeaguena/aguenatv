@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, Suspense } from 'react';
 import { Film, RotateCw } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
+import { getSortScore, isRecentlyAdded, parseAddedTimestamp } from '@/lib/stream-utils';
 import MediaCard from '@/components/media/MediaCard';
 import Pagination from '@/components/ui/Pagination';
 import CategorySelector from '@/components/ui/CategorySelector';
@@ -10,15 +11,6 @@ import SyncModal from '@/components/ui/SyncModal';
 import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 const PAGE_SIZE = 50;
-
-function getSortScore(item: BaseStreamItem): number {
-  if (item.added) {
-    const ts = Number(item.added);
-    if (!isNaN(ts) && ts > 0) return ts;
-  }
-  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
-  return !isNaN(numericId) ? numericId : 0;
-}
 
 function MoviesContent() {
   const [movies, setMovies] = useState<BaseStreamItem[]>([]);
@@ -75,13 +67,32 @@ function MoviesContent() {
   }, []);
 
   const filteredMovies = useMemo(() => {
-    return movies
+    const sorted = movies
       .filter((m) => {
         const matchCat = selectedCat === 'all' || m.category_id === selectedCat;
         const matchSearch = (m.title || m.name || '').toLowerCase().includes(search.toLowerCase());
         return matchCat && matchSearch;
       })
       .sort((a, b) => getSortScore(b) - getSortScore(a));
+
+    const newestTs = sorted.length > 0 ? parseAddedTimestamp(sorted[0].added) : null;
+
+    return sorted.map((m, idx) => {
+      let isNew = isRecentlyAdded(m);
+
+      if (!isNew && newestTs) {
+        const itemTs = parseAddedTimestamp(m.added);
+        if (itemTs) {
+          const diffFromNewestDays = (newestTs - itemTs) / (1000 * 60 * 60 * 24);
+          const nowDiffDays = (Date.now() - newestTs) / (1000 * 60 * 60 * 24);
+          if (nowDiffDays <= 45 && diffFromNewestDays <= 14 && idx < 12) {
+            isNew = true;
+          }
+        }
+      }
+
+      return isNew ? { ...m, isNew: true } : m;
+    });
   }, [movies, selectedCat, search]);
 
   const paginatedMovies = useMemo(() => {

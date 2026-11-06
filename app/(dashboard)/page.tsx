@@ -4,21 +4,12 @@ import Link from 'next/link';
 import { Sparkles, Tv, Film, Video, RotateCw, Heart, Layers, ArrowRight } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
+import { getSortScore, isRecentlyAdded } from '@/lib/stream-utils';
 import MediaCard from '@/components/media/MediaCard';
 import SyncModal from '@/components/ui/SyncModal';
 import HeroSlider from '@/components/home/HeroSlider';
 import ContinueWatchingSection from '@/components/home/ContinueWatchingSection';
 import { useFavorites } from '@/hooks/useFavorites';
-
-// Calcula a pontuação de atualização: timestamp 'added'/'last_modified' ou fallback para stream_id numérico decrescente
-function getSortScore(item: BaseStreamItem): number {
-  if (item.added) {
-    const ts = Number(item.added);
-    if (!isNaN(ts) && ts > 0) return ts;
-  }
-  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
-  return !isNaN(numericId) ? numericId : 0;
-}
 
 // Filtra filmes para exibir SOMENTE versão 4K ou Dublada (sem a tag [L] no título)
 function is4kOrDubbed(item: BaseStreamItem): boolean {
@@ -85,10 +76,15 @@ export default function HomePage() {
         .slice(0, 10);
 
       setHeroItems(combinedRecent);
-      setRecentMovies(filteredSortedMovies.slice(0, 16));
+      const moviesWithNewTag = filteredSortedMovies.slice(0, 16).map((m, idx) => ({
+        ...m,
+        isNew: idx < 8 || isRecentlyAdded(m),
+      }));
+      setRecentMovies(moviesWithNewTag as BaseStreamItem[]);
+
       const seriesWithNewTag = sortedSeries.slice(0, 16).map((s, idx) => ({
         ...s,
-        isNew: idx < 8,
+        isNew: idx < 8 || isRecentlyAdded(s),
       }));
       setRecentSeries(seriesWithNewTag as BaseStreamItem[]);
     } catch (e) {

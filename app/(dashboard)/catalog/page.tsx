@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { localDB, LocalCategory } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
+import { getSortScore } from '@/lib/stream-utils';
 import { getWatchUrl, getInfoUrl } from '@/lib/routes';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
@@ -23,15 +24,6 @@ import { expandQueryWithAliases } from '@/lib/anime-aliases';
 import Pagination from '@/components/ui/Pagination';
 
 const PAGE_SIZE = 50;
-
-function getSortScore(item: BaseStreamItem): number {
-  if (item.added) {
-    const ts = Number(item.added);
-    if (!isNaN(ts) && ts > 0) return ts;
-  }
-  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
-  return !isNaN(numericId) ? numericId : 0;
-}
 
 type SortField = 'title' | 'stream_type' | 'category_name' | 'rating' | 'watched';
 type SortOrder = 'asc' | 'desc';

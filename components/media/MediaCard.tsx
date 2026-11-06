@@ -5,21 +5,12 @@ import { BaseStreamItem } from '@/lib/types';
 import { getWatchUrl, getInfoUrl } from '@/lib/routes';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
+import { isRecentlyAdded, cleanCategoryName } from '@/lib/stream-utils';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
 
 interface MediaCardProps {
   item: BaseStreamItem;
   streamUrl?: string;
-}
-
-function cleanCategoryName(raw?: string): string {
-  if (!raw) return '';
-  return raw
-    .replace(/^Canais\s*\|\s*/i, '')
-    .replace(/^Filmes\s*\|\s*/i, '')
-    .replace(/^Séries\s*\|\s*/i, '')
-    .replace(/^Series\s*\|\s*/i, '')
-    .trim();
 }
 
 export default function MediaCard({ item }: MediaCardProps) {
@@ -29,6 +20,11 @@ export default function MediaCard({ item }: MediaCardProps) {
 
   const favorited = isFavorite(item.stream_id, item.stream_type);
   const watched = isWatched(item.stream_id, item.stream_type);
+  const isItemNew = Boolean(
+    (item as any).isNew ||
+    (item as any).is_new ||
+    isRecentlyAdded(item)
+  );
 
   // Clicar no card abre a página de RESUMO / INFO estilo Miruro
   const handleOpenInfo = () => {
@@ -121,19 +117,13 @@ export default function MediaCard({ item }: MediaCardProps) {
 
         {/* Badges superiores e Botões Fixos de Concluído e Favorito (z-20: sempre visíveis) */}
         <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between pointer-events-none">
-          {/* Tag de Categoria e Tipo */}
+          {/* Tag NOVO no canto superior esquerdo (apenas quando for lançamento / upload recente) */}
           <div className="flex items-center gap-1.5 max-w-[65%] truncate pointer-events-auto">
-            {Boolean((item as any).isNew || (item as any).is_new) && (
+            {isItemNew && (
               <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded-md tracking-wider bg-emerald-500 text-black shadow-lg shadow-emerald-500/50 shrink-0 animate-pulse">
                 NOVO
               </span>
             )}
-            <span
-              className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider bg-black/75 backdrop-blur-md text-neutral-200 border border-white/15 truncate shadow-md"
-              title={item.category_name || (item.stream_type === 'live' ? 'TV' : item.stream_type === 'movie' ? 'Filme' : 'Série')}
-            >
-              {cleanCategoryName(item.category_name) || (item.stream_type === 'live' ? 'TV' : item.stream_type === 'movie' ? 'Filme' : 'Série')}
-            </span>
           </div>
 
           {/* Ações Rápidas Fixas: Concluído / Não Concluído e Favoritos */}
@@ -177,7 +167,9 @@ export default function MediaCard({ item }: MediaCardProps) {
           {item.title || item.name}
         </h3>
         <div className="flex items-center justify-between text-[11px] text-neutral-400 mt-1">
-          <span className="truncate max-w-[120px]">{item.category_name || 'Geral'}</span>
+          <span className="truncate max-w-[120px]" title={item.category_name || 'Geral'}>
+            {cleanCategoryName(item.category_name) || item.category_name || 'Geral'}
+          </span>
           {item.rating && (
             <span className="text-amber-400 font-medium">★ {item.rating}</span>
           )}
