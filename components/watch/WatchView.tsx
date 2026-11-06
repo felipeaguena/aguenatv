@@ -911,7 +911,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-stretch">
         {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div className="lg:col-span-8 xl:col-span-9 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+        <div className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -938,13 +938,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
           </div>
 
         {/* Lado Direito: Dinâmica Diferenciada para Séries vs Ao Vivo / Filmes */}
-        <div className="lg:col-span-4 xl:col-span-3 min-w-0 w-full h-[460px] lg:h-full">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full max-w-full overflow-hidden">
+        <div className="lg:col-span-4 xl:col-span-4 min-w-0 w-full h-[460px] lg:h-full min-h-0">
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full min-h-0 max-w-full overflow-hidden">
             {/* ======================================================== */}
             {/* CENÁRIO 1: SÉRIES (Capítulos com Seletor de Temporada)     */}
             {/* ======================================================== */}
             {isSeries ? (
-              <div className="flex flex-col h-full space-y-3">
+              <div className="flex flex-col h-full min-h-0 space-y-2.5">
                 {/* Cabeçalho de Séries */}
                 <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
                   <div className="flex items-center gap-2">
@@ -1033,7 +1033,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 )}
 
                 {/* Lista de Capítulos / Episódios estilo Miruro */}
-                <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 divide-y divide-white/[0.03]">
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 divide-y divide-white/[0.03]">
                   {loadingSeries && !activeEpisode ? (
                     <div className="py-12 flex flex-col items-center justify-center gap-2">
                       <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -1063,14 +1063,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                         <div
                           key={`ep_${ep.id}`}
                           onClick={() => handleSelectEpisode(ep)}
-                          className={`p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition group ${
+                          className={`p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group ${
                             isCurrent
                               ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
                               : 'hover:bg-white/5 text-neutral-300 hover:text-white'
                           }`}
                         >
                           {/* Miniatura do Episódio com Badge de Número */}
-                          <div className="w-14 h-11 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
+                          <div className="w-14 h-10 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
                             <ImageWithFallback
                               src={epThumb}
                               alt={formattedEpTitle}
@@ -1140,7 +1140,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
               /* ======================================================== */
               /* CENÁRIO 2: AO VIVO / FILMES (Sem Capítulos, Mesma Categoria)*/
               /* ======================================================== */
-              <div className="flex flex-col h-full space-y-3">
+              <div className="flex flex-col h-full min-h-0 space-y-2.5">
                 {/* Cabeçalho */}
                 <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
                   <div className="flex items-center gap-2">
@@ -1171,7 +1171,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 </div>
 
                 {/* Lista de Canais / Filmes */}
-                <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 divide-y divide-white/[0.03]">
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 divide-y divide-white/[0.03]">
                   {filteredRelated.length === 0 ? (
                     <div className="py-10 text-center text-xs text-neutral-500">
                       Nenhum item encontrado nesta categoria.
@@ -1185,7 +1185,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                         <div
                           key={`side_${channel.id || channel.stream_id}`}
                           onClick={() => handleSwitchStream(channel)}
-                          className={`p-2.5 rounded-xl flex items-center gap-3 cursor-pointer transition group ${
+                          className={`p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group ${
                             isCurrent
                               ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
                               : 'hover:bg-white/5 text-neutral-300 hover:text-white'

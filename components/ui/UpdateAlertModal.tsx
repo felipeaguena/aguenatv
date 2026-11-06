@@ -1,11 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Download, Sparkles, X, ExternalLink, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Download, Sparkles, X, ExternalLink, CheckCircle2, ShieldCheck, Loader2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { AppVersionInfo } from '@/app/api/version/route';
+import { BackgroundDownload } from '@/lib/download-manager';
 
-const FALLBACK_VERSION = '0.2.5';
+const FALLBACK_VERSION = '0.2.6';
 
 interface UpdateAlertModalProps {
   manualCheck?: boolean;
@@ -44,6 +45,11 @@ export default function UpdateAlertModal({
   const [hasUpdate, setHasUpdate] = useState(false);
   const [checking, setChecking] = useState(false);
 
+  // Estados de download nativo do APK com barra de progresso
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadStatus, setDownloadStatus] = useState('');
+
   // Detecta a versão instalada no APK via Capacitor nativo
   useEffect(() => {
     async function detectInstalledVersion() {
@@ -64,7 +70,6 @@ export default function UpdateAlertModal({
   const checkVersion = async (isManual = false) => {
     setChecking(true);
     try {
-      // Obtém versão nativa atualizada
       let currentVer = installedVersion;
       if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
         try {
@@ -78,7 +83,7 @@ export default function UpdateAlertModal({
         const data: AppVersionInfo = await res.json();
         setVersionInfo(data);
 
-        // O popup SÓ aparece se a versão instalada for MENOR que a mais recente do GitHub
+        // O popup SÓ aparece se a versão instalada for estritamente menor que a do GitHub
         const isStrictlyLower = isVersionLower(currentVer, data.latestVersion);
         setHasUpdate(isStrictlyLower);
 
@@ -102,6 +107,82 @@ export default function UpdateAlertModal({
     checkVersion(manualCheck);
   }, [manualCheck]);
 
+  const cleanLatest = versionInfo?.latestVersion?.replace(/^v/i, '') || '0.2.5';
+  const directApkUrl = `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release.apk`;
+  const releasesPageUrl = `https://github.com/felipeaguena/aguenatv/releases#release-v${cleanLatest}`;
+
+  // Executa a instalação automática com barra de progresso no APK
+  const handleInstallUpdate = async () => {
+    if (!Capacitor.isNativePlatform()) {
+      // No navegador comum, abre o download direto
+      window.open(directApkUrl, '_blank');
+      return;
+    }
+
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+      setDownloadStatus('Iniciando download do pacote...');
+
+      const updateDownloadId = 'apk_update_job';
+
+      // Registra listeners de progresso e conclusão
+      const progressSub = await BackgroundDownload.addListener('progress', (data) => {
+        if (data.id === updateDownloadId) {
+          setDownloadProgress(data.percentage);
+          setDownloadStatus(`Baixando atualização... ${data.percentage}%`);
+        }
+      });
+
+      const completeSub = await BackgroundDownload.addListener('complete', async (data) => {
+        if (data.id === updateDownloadId) {
+          if (data.success && data.path) {
+            setDownloadProgress(100);
+            setDownloadStatus('Download finalizado! Abrindo instalador...');
+            try {
+              await BackgroundDownload.installApk({ filePath: data.path });
+            } catch (err: any) {
+              setDownloadStatus('Erro ao acionar instalador');
+              alert('Erro ao disparar instalador: ' + (err?.message || err));
+            }
+          } else {
+            setDownloadStatus('Falha no download');
+            alert('Falha ao baixar nova versão: ' + (data.error || 'Erro de conexão'));
+            setIsDownloading(false);
+          }
+          try {
+            progressSub.remove();
+            completeSub.remove();
+          } catch {}
+        }
+      });
+
+      await BackgroundDownload.startDownload({
+        id: updateDownloadId,
+        url: directApkUrl,
+        title: `Atualização AGUENATV v${cleanLatest}`,
+        fileName: `AGUENATV-v${cleanLatest}.apk`,
+      });
+    } catch (err: any) {
+      console.error('Erro ao baixar atualização:', err);
+      alert('Não foi possível iniciar o download da atualização: ' + (err?.message || err));
+      setIsDownloading(false);
+    }
+  };
+
+  // Abre a página de Releases no navegador padrão do aparelho (fora do APK)
+  const handleOpenGitHub = async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await BackgroundDownload.openExternalUrl({ url: releasesPageUrl });
+        return;
+      } catch (e) {
+        console.warn('Erro ao abrir navegador externo via plugin:', e);
+      }
+    }
+    window.open(releasesPageUrl, '_blank');
+  };
+
   const handleClose = () => {
     if (controlledOnClose) {
       controlledOnClose();
@@ -115,10 +196,6 @@ export default function UpdateAlertModal({
 
   const modalVisible = controlledIsOpen !== undefined ? controlledIsOpen : isOpen;
   if (!modalVisible) return null;
-
-  const cleanLatest = versionInfo?.latestVersion?.replace(/^v/i, '') || '0.2.5';
-  const directApkUrl = `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release.apk`;
-  const releasesPageUrl = `https://github.com/felipeaguena/aguenatv/releases#release-v${cleanLatest}`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -161,28 +238,55 @@ export default function UpdateAlertModal({
               </ul>
             </div>
 
-            <div className="flex flex-col gap-2 pt-2">
-              {/* Botão 1: Baixar Diretamente o arquivo APK */}
-              <a
-                href={directApkUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Baixar APK Diretamente (v{cleanLatest})</span>
-              </a>
+            {/* Barra de Progresso quando estiver baixando */}
+            {isDownloading && (
+              <div className="p-3.5 rounded-2xl bg-[#181924] border border-white/10 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-neutral-300 flex items-center gap-1.5 font-medium">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                    {downloadStatus}
+                  </span>
+                  <span className="font-mono font-bold text-emerald-400">{downloadProgress}%</span>
+                </div>
+                <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-200"
+                    style={{ width: `${Math.max(4, downloadProgress)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
-              {/* Botão 2: Ver a Release no GitHub */}
-              <a
-                href={releasesPageUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+            <div className="flex flex-col gap-2 pt-2">
+              {/* Botão 1: Instalar Atualização Automaticamente com Progresso */}
+              <button
+                type="button"
+                disabled={isDownloading}
+                onClick={handleInstallUpdate}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isDownloading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Atualizando AGUENATV ({downloadProgress}%)...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4" />
+                    <span>Instalar Atualização (v{cleanLatest})</span>
+                  </>
+                )}
+              </button>
+
+              {/* Botão 2: Ver a Release no GitHub (Abre o navegador padrão do aparelho) */}
+              <button
+                type="button"
+                onClick={handleOpenGitHub}
                 className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-200 hover:text-white font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 <ExternalLink className="w-3.5 h-3.5 text-violet-400" />
-                <span>Ver Release no GitHub</span>
-              </a>
+                <span>Ver Release no GitHub (Navegador)</span>
+              </button>
 
               <button
                 type="button"
@@ -197,7 +301,7 @@ export default function UpdateAlertModal({
           <div className="space-y-4 pt-1">
             <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-xs text-emerald-300">
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-              <span>Você já está utilizando a versão mais recente do AGUENATV (v{installedVersion}) com todas as correções e recursos instalados.</span>
+              <span>Você já está utilizando a versão mais recente do AGUENATV (v{installedVersion}) com todas as correções instaladas.</span>
             </div>
 
             <button

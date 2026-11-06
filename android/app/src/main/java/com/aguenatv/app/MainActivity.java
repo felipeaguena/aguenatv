@@ -65,7 +65,11 @@ public class MainActivity extends BridgeActivity {
                         if (swipeRefreshLayout != null) {
                             swipeRefreshLayout.setRefreshing(false);
                         }
-                        loadOfflinePortal(view);
+                        // Não sobrescreve a página ativa do usuário se ela já estiver carregada
+                        String currentUrl = view.getUrl();
+                        if (currentUrl == null || "about:blank".equals(currentUrl)) {
+                            loadOfflinePortal(view);
+                        }
                     }
 
                     @Override
@@ -76,11 +80,13 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                // Se abrir o app offline ou em Modo Avião, para conexões remotas e carrega imediatamente o portal offline local
+                // Se abrir o app offline pela primeira vez sem nenhuma página em memória
                 if (!isNetworkConnected()) {
-                    webView.stopLoading();
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    loadOfflinePortal(webView);
+                    String currentUrl = webView.getUrl();
+                    if (currentUrl == null || "about:blank".equals(currentUrl)) {
+                        loadOfflinePortal(webView);
+                    }
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }
@@ -98,14 +104,7 @@ public class MainActivity extends BridgeActivity {
                 if (url != null) {
                     String host = url.getHost();
                     if ("163.176.207.140".equals(host)) {
-                        // Se estiver sem conexão e for requisição de página principal HTML
-                        if (!isNetworkConnected() && request.isForMainFrame()) {
-                            try {
-                                InputStream is = getAssets().open("public/index.html");
-                                return new WebResourceResponse("text/html", "UTF-8", is);
-                            } catch (Exception ignored) {}
-                        }
-                        // Serve recursos estáticos locais (svg, png)
+                        // Serve recursos estáticos locais (svg, png) quando sem rede
                         if (!isNetworkConnected()) {
                             String path = url.getPath();
                             if (path != null && (path.endsWith(".svg") || path.endsWith(".png") || path.endsWith(".ico"))) {
@@ -123,28 +122,24 @@ public class MainActivity extends BridgeActivity {
             }
 
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
-                if (url != null && url.contains("163.176.207.140") && !isNetworkConnected()) {
-                    try {
-                        InputStream is = getAssets().open("public/index.html");
-                        return new WebResourceResponse("text/html", "UTF-8", is);
-                    } catch (Exception ignored) {}
-                }
-                return super.shouldInterceptRequest(view, url);
-            }
-
-            @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                // Apenas exibe o portal offline local se for erro de carga inicial completa (sem página prévia)
                 if (request != null && request.isForMainFrame()) {
-                    loadOfflinePortal(view);
-                    return;
+                    String currentUrl = view.getUrl();
+                    if (currentUrl == null || "about:blank".equals(currentUrl)) {
+                        loadOfflinePortal(view);
+                        return;
+                    }
                 }
                 super.onReceivedError(view, request, error);
             }
 
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                loadOfflinePortal(view);
+                String currentUrl = view.getUrl();
+                if (currentUrl == null || "about:blank".equals(currentUrl)) {
+                    loadOfflinePortal(view);
+                }
             }
         });
     }
@@ -181,7 +176,7 @@ public class MainActivity extends BridgeActivity {
                             webView.reload();
                         }
                     } else {
-                        loadOfflinePortal(webView);
+                        // Quando sem internet, apenas desliga o spinner sem sobrescrever a página
                         swipeRefreshLayout.setRefreshing(false);
                     }
                 });
@@ -196,7 +191,7 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void loadOfflinePortal(WebView webView) {
+    public void loadOfflinePortal(WebView webView) {
         if (webView == null) return;
         webView.post(() -> {
             try {
@@ -242,7 +237,7 @@ public class MainActivity extends BridgeActivity {
                 WebSettings settings = webView.getSettings();
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    loadOfflinePortal(webView);
+                    // IMPORTANTE: NÃO chama loadOfflinePortal aqui para NUNCA apagar o player ou página ativa do usuário!
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }

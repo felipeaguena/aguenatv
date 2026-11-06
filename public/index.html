@@ -14,6 +14,7 @@
       display: flex;
       flex-direction: column;
       padding: 0;
+      padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
       position: relative;
       overflow-x: hidden;
       overscroll-behavior-y: contain;
@@ -55,7 +56,10 @@
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      padding: 12px 16px;
+      padding-top: max(14px, env(safe-area-inset-top, 0px));
+      padding-bottom: 12px;
+      padding-left: max(16px, env(safe-area-inset-left, 0px));
+      padding-right: max(16px, env(safe-area-inset-right, 0px));
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -685,20 +689,21 @@
         return Math.round(mb) + ' MB';
       }
 
-      // Abre o IndexedDB com fallback
+      // Abre o IndexedDB com fallback seguro
       function openDB(name) {
         return new Promise((resolve) => {
           try {
             const req = indexedDB.open(name);
             req.onsuccess = (e) => resolve(e.target.result);
             req.onerror = () => resolve(null);
+            req.onblocked = () => resolve(null);
           } catch {
             resolve(null);
           }
         });
       }
 
-      // Lê registros de uma store
+      // Lê registros de uma store de forma otimizada para catálogos volumosos
       function getStoreData(db, storeName) {
         return new Promise((resolve) => {
           if (!db || !db.objectStoreNames.contains(storeName)) {
@@ -708,6 +713,24 @@
           try {
             const tx = db.transaction(storeName, 'readonly');
             const store = tx.objectStore(storeName);
+
+            // Para streams (catálogo volumoso), lê até 500 itens com cursor para evitar crash de IPC
+            if (storeName === 'streams') {
+              const list = [];
+              const req = store.openCursor();
+              req.onsuccess = (e) => {
+                const cursor = e.target.result;
+                if (cursor && list.length < 500) {
+                  list.push(cursor.value);
+                  cursor.continue();
+                } else {
+                  resolve(list);
+                }
+              };
+              req.onerror = () => resolve([]);
+              return;
+            }
+
             const req = store.getAll();
             req.onsuccess = () => resolve(req.result || []);
             req.onerror = () => resolve([]);

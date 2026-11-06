@@ -10,17 +10,18 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.5';
+  let latestVersion = '0.2.6';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
-    'Sistema de pré-renderização offline integrado no APK (elimina erro ERR_INTERNET_DISCONNECTED no Modo Avião)',
-    'Portal offline autônomo com listagem e reprodução de vídeos salvos e catálogo em cache sem internet',
-    'Novo gesto nativo e web Pull-To-Refresh (arrastar para baixo para atualizar a aplicação sem precisar reiniciar)',
-    'Reconexão automática com o servidor quando a internet for restabelecida',
-    'Redesign completo da página Vídeos Baixados (Offline) com agrupamento de séries e filmes',
-    'Travamento de download duplicado para uma única vez por título/episódio com ícone de status',
-    'Exclusão segura de downloads da memória e do disco com popup de confirmação',
-    'Contabilização exata de espaço em disco utilizado pelos downloads salvos',
+    'Ajuste na proporção cinema do player no desktop e barra lateral acompanhando a altura com média de 5 capítulos visíveis',
+    'Nova página de Vídeos Baixados (Offline) no estilo Watch Séries com player local no topo e lista sequencial abaixo',
+    'Instalação automática do APK nativo sem sair do aplicativo com barra de progresso em tempo real (%)',
+    'Abertura de links externos do GitHub no navegador padrão do aparelho celular',
+    'Persistência total na página ativa ao desconectar da internet ou retomar do segundo plano',
+    'Notificação discreta de modo offline no topo com confirmação prévia antes de alternar',
+    'Correção do cabeçalho no notch da câmera em aparelhos móveis no portal offline',
+    'Carregamento otimizado do catálogo em cache do IndexedDB no modo offline',
+    'Separação estrita de abas e gerenciamento entre Favoritos e Concluídos sem abas de TV ao Vivo',
   ];
 
   try {

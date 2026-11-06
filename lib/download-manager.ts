@@ -6,6 +6,8 @@ import { localDB } from './db-local';
 export interface BackgroundDownloadPluginInterface {
   startDownload(options: { id: string; url: string; title: string; fileName: string }): Promise<{ started: boolean; id: string }>;
   cancelDownload(options: { id: string }): Promise<void>;
+  installApk(options: { filePath: string }): Promise<{ success: boolean }>;
+  openExternalUrl(options: { url: string }): Promise<{ success: boolean }>;
   addListener(
     eventName: 'progress',
     listenerFunc: (data: { id: string; title: string; bytes: number; contentLength: number; percentage: number }) => void
