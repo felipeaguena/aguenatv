@@ -1083,7 +1083,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
             )}
           </div>
 
-          {/* Botões de Capítulo Anterior e Próximo na parte inferior da mesma div */}
+          {/* Botões de Navegação (Capítulo Anterior/Próximo para séries ou Canal Anterior/Próximo para TV ao Vivo) */}
           <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
             <button
               type="button"
@@ -1094,10 +1094,24 @@ export default function WatchView({ type, id }: WatchViewProps) {
                   ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
                   : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
               }`}
-              title={canGoPrev ? 'Voltar para o capítulo anterior' : 'Não há capítulo anterior'}
+              title={
+                canGoPrev
+                  ? isLive
+                    ? 'Ir para o canal anterior'
+                    : isMovie
+                    ? 'Ir para o filme anterior'
+                    : 'Voltar para o capítulo anterior'
+                  : isLive
+                  ? 'Não há canal anterior'
+                  : isMovie
+                  ? 'Não há filme anterior'
+                  : 'Não há capítulo anterior'
+              }
             >
               <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
-              <span className="truncate">Capítulo Anterior</span>
+              <span className="truncate">
+                {isLive ? 'Canal Anterior' : isMovie ? 'Filme Anterior' : 'Capítulo Anterior'}
+              </span>
             </button>
 
             {isSeries && activeEpisode && (
@@ -1111,6 +1125,18 @@ export default function WatchView({ type, id }: WatchViewProps) {
               </div>
             )}
 
+            {isLive && item && (
+              <div className="hidden sm:flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
+                <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider flex items-center gap-1 justify-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                  Canal Atual
+                </span>
+                <span className="text-xs font-bold text-white truncate w-full">
+                  {item.title || item.name}
+                </span>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={handleNextChapter}
@@ -1120,9 +1146,23 @@ export default function WatchView({ type, id }: WatchViewProps) {
                   ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
                   : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
               }`}
-              title={canGoNext ? 'Ir para o próximo capítulo' : 'Não há próximo capítulo'}
+              title={
+                canGoNext
+                  ? isLive
+                    ? 'Ir para o próximo canal'
+                    : isMovie
+                    ? 'Ir para o próximo filme'
+                    : 'Ir para o próximo capítulo'
+                  : isLive
+                  ? 'Não há próximo canal'
+                  : isMovie
+                  ? 'Não há próximo filme'
+                  : 'Não há próximo capítulo'
+              }
             >
-              <span className="truncate">Próximo Capítulo</span>
+              <span className="truncate">
+                {isLive ? 'Próximo Canal' : isMovie ? 'Próximo Filme' : 'Próximo Capítulo'}
+              </span>
               <ChevronRight className="w-4 h-4 text-white shrink-0" />
             </button>
           </div>
