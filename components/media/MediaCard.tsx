@@ -122,7 +122,12 @@ export default function MediaCard({ item }: MediaCardProps) {
         {/* Badges superiores e Botões Fixos de Concluído e Favorito (z-20: sempre visíveis) */}
         <div className="absolute top-2.5 left-2.5 right-2.5 z-20 flex items-center justify-between pointer-events-none">
           {/* Tag de Categoria e Tipo */}
-          <div className="flex items-center gap-1.5 max-w-[55%] truncate pointer-events-auto">
+          <div className="flex items-center gap-1.5 max-w-[65%] truncate pointer-events-auto">
+            {Boolean((item as any).isNew || (item as any).is_new) && (
+              <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded-md tracking-wider bg-emerald-500 text-black shadow-lg shadow-emerald-500/50 shrink-0 animate-pulse">
+                NOVO
+              </span>
+            )}
             <span
               className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-md tracking-wider bg-black/75 backdrop-blur-md text-neutral-200 border border-white/15 truncate shadow-md"
               title={item.category_name || (item.stream_type === 'live' ? 'TV' : item.stream_type === 'movie' ? 'Filme' : 'Série')}

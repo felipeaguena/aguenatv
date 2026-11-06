@@ -39,6 +39,18 @@ import UpdateAlertModal from '@/components/ui/UpdateAlertModal';
 
 export default function SettingsPage() {
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
+  const [installedVersion, setInstalledVersion] = useState<string>('0.2.5');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      import('@capacitor/app')
+        .then(({ App }) => App.getInfo())
+        .then((info) => {
+          if (info?.version) setInstalledVersion(info.version);
+        })
+        .catch(() => {});
+    }
+  }, []);
   const [playlists, setPlaylists] = useState<IPTVPlaylist[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -845,7 +857,7 @@ export default function SettingsPage() {
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               Versão do AGUENATV
               <span className="px-2 py-0.5 rounded text-[10px] font-extrabold font-mono bg-white/5 border border-white/10 text-violet-300">
-                v0.2.0
+                v{installedVersion}
               </span>
             </h3>
             <p className="text-xs text-neutral-400 mt-0.5">

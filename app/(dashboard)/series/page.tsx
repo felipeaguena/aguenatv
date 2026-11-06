@@ -11,6 +11,15 @@ import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 const PAGE_SIZE = 50;
 
+function getSortScore(item: BaseStreamItem): number {
+  if (item.added) {
+    const ts = Number(item.added);
+    if (!isNaN(ts) && ts > 0) return ts;
+  }
+  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
+  return !isNaN(numericId) ? numericId : 0;
+}
+
 function SeriesContent() {
   const [series, setSeries] = useState<BaseStreamItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
@@ -34,8 +43,28 @@ function SeriesContent() {
           localDB.streams.where('stream_type').equals('series').toArray(),
           localDB.categories.where('type').equals('series').toArray(),
         ]);
-        setSeries(streams as unknown as BaseStreamItem[]);
-        setCategories(cats.map((c) => ({ id: c.category_id, name: c.category_name })));
+        const seriesItems = streams as unknown as BaseStreamItem[];
+        const catScores = new Map<string, number>();
+        seriesItems.forEach((s) => {
+          const cId = String(s.category_id || 'all');
+          const score = getSortScore(s);
+          const currentMax = catScores.get(cId) || 0;
+          if (score > currentMax) {
+            catScores.set(cId, score);
+          }
+        });
+
+        const sortedCats = cats
+          .map((c) => ({ id: c.category_id, name: c.category_name }))
+          .sort((a, b) => {
+            const scoreA = catScores.get(a.id) || 0;
+            const scoreB = catScores.get(b.id) || 0;
+            if (scoreB !== scoreA) return scoreB - scoreA;
+            return a.name.localeCompare(b.name, 'pt-BR');
+          });
+
+        setSeries(seriesItems);
+        setCategories(sortedCats);
       } catch (e) {
         console.error('Erro ao carregar Séries:', e);
       } finally {
@@ -46,11 +75,13 @@ function SeriesContent() {
   }, []);
 
   const filteredSeries = useMemo(() => {
-    return series.filter((s) => {
-      const matchCat = selectedCat === 'all' || s.category_id === selectedCat;
-      const matchSearch = (s.title || s.name || '').toLowerCase().includes(search.toLowerCase());
-      return matchCat && matchSearch;
-    });
+    return series
+      .filter((s) => {
+        const matchCat = selectedCat === 'all' || s.category_id === selectedCat;
+        const matchSearch = (s.title || s.name || '').toLowerCase().includes(search.toLowerCase());
+        return matchCat && matchSearch;
+      })
+      .sort((a, b) => getSortScore(b) - getSortScore(a));
   }, [series, selectedCat, search]);
 
   const paginatedSeries = useMemo(() => {

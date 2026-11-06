@@ -9,6 +9,7 @@ import {
   Video,
   List,
   Heart,
+  CheckCircle2,
   Users,
   LogOut,
   Play,
@@ -49,6 +50,21 @@ export default function Navbar() {
   const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const searchIdRef = useRef(0);
   const [isNative, setIsNative] = useState(false);
+  const [installedVersion, setInstalledVersion] = useState<string>('0.2.5');
+
+  // Detecta a versão instalada no APK via Capacitor nativo
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      import('@capacitor/app')
+        .then(({ App }) => App.getInfo())
+        .then((info) => {
+          if (info?.version) {
+            setInstalledVersion(info.version);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   // Busca dados do usuário logado e detecta se está no app nativo
   useEffect(() => {
@@ -220,6 +236,7 @@ export default function Navbar() {
     { href: '/series', label: 'Séries', icon: Video },
     { href: '/catalog', label: 'Catálogo', icon: List },
     { href: '/favorites', label: 'Favoritos', icon: Heart },
+    { href: '/completed', label: 'Concluídos', icon: CheckCircle2 },
     { href: '/settings', label: 'Configurações', icon: Settings },
   ];
 
@@ -309,7 +326,7 @@ export default function Navbar() {
 
           {/* Dropdown com as 5 referências mais próximas e botão Pesquisar Todos */}
           {isSearchOpen && searchQuery.trim().length > 0 && (
-            <div className="absolute top-full mt-2 w-full bg-[#13141b] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in duration-150 backdrop-blur-md">
+            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto top-16 sm:top-full mt-2 sm:w-full bg-[#13141b]/98 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in duration-150 backdrop-blur-2xl max-w-[calc(100vw-16px)] sm:max-w-none">
               <div className="px-3.5 py-2 text-[10px] font-bold text-neutral-400 border-b border-white/5 uppercase tracking-wider flex justify-between items-center">
                 <span>5 Referências Mais Próximas</span>
                 {isSearching ? (
@@ -451,6 +468,19 @@ export default function Navbar() {
                     <span>Favoritos</span>
                   </Link>
 
+                  <Link
+                    href="/completed"
+                    onClick={() => setIsProfileDropdownOpen(false)}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                      pathname === '/completed'
+                        ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30'
+                        : 'text-neutral-300 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 fill-emerald-500/20" />
+                    <span>Concluídos</span>
+                  </Link>
+
                   {isNative && (
                     <Link
                       href="/offline"
@@ -504,7 +534,7 @@ export default function Navbar() {
                 </div>
 
                 {/* Divisor & Botão Sair */}
-                <div className="pt-1 mt-1 border-t border-white/5 p-1.5">
+                <div className="pt-1 mt-1 border-t border-white/5 p-1.5 space-y-1">
                   <button
                     onClick={() => {
                       setIsProfileDropdownOpen(false);
@@ -515,6 +545,9 @@ export default function Navbar() {
                     <LogOut className="w-4 h-4 text-rose-400" />
                     <span>Sair da conta</span>
                   </button>
+                  <p className="text-[10px] text-neutral-500 text-center font-mono py-1">
+                    AGUENATV v{installedVersion}
+                  </p>
                 </div>
               </div>
             )}
@@ -610,8 +643,8 @@ export default function Navbar() {
               })}
             </div>
 
-            {/* Rodapé da Gaveta com Botão de Logout */}
-            <div className="p-4 pb-8 border-t border-white/10 bg-[#08090d] safe-area-pb">
+            {/* Rodapé da Gaveta com Versão e Botão de Logout */}
+            <div className="p-4 pb-8 border-t border-white/10 bg-[#08090d] safe-area-pb space-y-2">
               <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
@@ -622,6 +655,9 @@ export default function Navbar() {
                 <LogOut className="w-4 h-4 text-rose-400" />
                 <span>Sair da conta</span>
               </button>
+              <p className="text-[10px] text-neutral-500 text-center font-mono">
+                AGUENATV v{installedVersion}
+              </p>
             </div>
           </div>
         </div>

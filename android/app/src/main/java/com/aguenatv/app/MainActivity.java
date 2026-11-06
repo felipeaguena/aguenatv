@@ -4,13 +4,22 @@ import android.content.Context;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.ViewGroup;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
 import com.getcapacitor.WebViewListener;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends BridgeActivity {
     private static final String DEFAULT_SERVER_URL = "http://163.176.207.140";
@@ -27,18 +36,22 @@ public class MainActivity extends BridgeActivity {
                 WebSettings settings = webView.getSettings();
                 settings.setDomStorageEnabled(true);
                 settings.setDatabaseEnabled(true);
+                settings.setAllowFileAccess(true);
+                settings.setAllowContentAccess(true);
+
+                // Configura cliente customizado para interceptar requisições offline
+                setupCustomWebViewClient(webView);
 
                 // Configura Pull-to-Refresh nativo com SwipeRefreshLayout
                 setupSwipeRefresh(webView);
 
-                // Listener para interceptar erros de rede e desativar spinner
+                // Listener para eventos de carregamento e desativação do spinner
                 getBridge().addWebViewListener(new WebViewListener() {
                     @Override
                     public void onPageLoaded(WebView view) {
                         if (swipeRefreshLayout != null) {
                             swipeRefreshLayout.setRefreshing(false);
                             String url = view.getUrl();
-                            // Desativa pull-to-refresh na tela do player para não interferir em gestos
                             if (url != null && url.contains("/watch")) {
                                 swipeRefreshLayout.setEnabled(false);
                             } else {
@@ -52,8 +65,7 @@ public class MainActivity extends BridgeActivity {
                         if (swipeRefreshLayout != null) {
                             swipeRefreshLayout.setRefreshing(false);
                         }
-                        // Se falhou ao conectar ao servidor remoto, abre o portal offline local
-                        fallbackToLocalOffline(view);
+                        loadOfflinePortal(view);
                     }
 
                     @Override
@@ -64,10 +76,11 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                // Se abrir o app offline ou em Modo Avião, carrega imediatamente o portal offline local
+                // Se abrir o app offline ou em Modo Avião, para conexões remotas e carrega imediatamente o portal offline local
                 if (!isNetworkConnected()) {
+                    webView.stopLoading();
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    fallbackToLocalOffline(webView);
+                    loadOfflinePortal(webView);
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }
@@ -75,6 +88,65 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void setupCustomWebViewClient(WebView webView) {
+        getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                Uri url = request.getUrl();
+                if (url != null) {
+                    String host = url.getHost();
+                    if ("163.176.207.140".equals(host)) {
+                        // Se estiver sem conexão e for requisição de página principal HTML
+                        if (!isNetworkConnected() && request.isForMainFrame()) {
+                            try {
+                                InputStream is = getAssets().open("public/index.html");
+                                return new WebResourceResponse("text/html", "UTF-8", is);
+                            } catch (Exception ignored) {}
+                        }
+                        // Serve recursos estáticos locais (svg, png)
+                        if (!isNetworkConnected()) {
+                            String path = url.getPath();
+                            if (path != null && (path.endsWith(".svg") || path.endsWith(".png") || path.endsWith(".ico"))) {
+                                try {
+                                    String assetPath = "public" + path;
+                                    InputStream is = getAssets().open(assetPath);
+                                    String mime = path.endsWith(".svg") ? "image/svg+xml" : "image/png";
+                                    return new WebResourceResponse(mime, "UTF-8", is);
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, String url) {
+                if (url != null && url.contains("163.176.207.140") && !isNetworkConnected()) {
+                    try {
+                        InputStream is = getAssets().open("public/index.html");
+                        return new WebResourceResponse("text/html", "UTF-8", is);
+                    } catch (Exception ignored) {}
+                }
+                return super.shouldInterceptRequest(view, url);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request != null && request.isForMainFrame()) {
+                    loadOfflinePortal(view);
+                    return;
+                }
+                super.onReceivedError(view, request, error);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                loadOfflinePortal(view);
+            }
+        });
     }
 
     private void setupSwipeRefresh(WebView webView) {
@@ -103,15 +175,14 @@ public class MainActivity extends BridgeActivity {
                 swipeRefreshLayout.setOnRefreshListener(() -> {
                     if (isNetworkConnected()) {
                         String currentUrl = webView.getUrl();
-                        if (currentUrl != null && currentUrl.contains("localhost")) {
-                            // Estava no portal offline e a rede voltou: recarrega para o servidor de produção
+                        if (currentUrl == null || currentUrl.contains("data:text/html") || currentUrl.contains("localhost")) {
                             webView.loadUrl(DEFAULT_SERVER_URL);
                         } else {
                             webView.reload();
                         }
                     } else {
-                        // Sem rede: apenas recarrega o portal local
-                        webView.reload();
+                        loadOfflinePortal(webView);
+                        swipeRefreshLayout.setRefreshing(false);
                     }
                 });
 
@@ -125,19 +196,41 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void fallbackToLocalOffline(WebView webView) {
+    private void loadOfflinePortal(WebView webView) {
         if (webView == null) return;
         webView.post(() -> {
             try {
-                String localUrl = getBridge().getLocalUrl();
-                String curUrl = webView.getUrl();
-                if (localUrl != null && (curUrl == null || !curUrl.startsWith(localUrl))) {
-                    webView.loadUrl(localUrl);
-                }
+                webView.stopLoading();
+                String html = readAssetString("public/index.html");
+                webView.loadDataWithBaseURL(DEFAULT_SERVER_URL + "/", html, "text/html", "UTF-8", DEFAULT_SERVER_URL + "/");
             } catch (Exception e) {
                 e.printStackTrace();
             }
         });
+    }
+
+    private String readAssetString(String assetPath) {
+        try (InputStream is = getAssets().open(assetPath);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            try (InputStream is2 = getAssets().open("index.html");
+                 BufferedReader reader2 = new BufferedReader(new InputStreamReader(is2, StandardCharsets.UTF_8))) {
+                StringBuilder sb2 = new StringBuilder();
+                String line2;
+                while ((line2 = reader2.readLine()) != null) {
+                    sb2.append(line2).append("\n");
+                }
+                return sb2.toString();
+            } catch (Exception e2) {
+                return "<!DOCTYPE html><html><body style='background:#0b0c10;color:#fff;padding:24px;font-family:sans-serif;'><h2>AGUENATV - Modo Offline</h2><p>Sem conexão de rede no momento.</p></body></html>";
+            }
+        }
     }
 
     @Override
@@ -149,7 +242,7 @@ public class MainActivity extends BridgeActivity {
                 WebSettings settings = webView.getSettings();
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    fallbackToLocalOffline(webView);
+                    loadOfflinePortal(webView);
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }

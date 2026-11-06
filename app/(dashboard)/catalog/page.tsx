@@ -24,6 +24,15 @@ import Pagination from '@/components/ui/Pagination';
 
 const PAGE_SIZE = 50;
 
+function getSortScore(item: BaseStreamItem): number {
+  if (item.added) {
+    const ts = Number(item.added);
+    if (!isNaN(ts) && ts > 0) return ts;
+  }
+  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
+  return !isNaN(numericId) ? numericId : 0;
+}
+
 type SortField = 'title' | 'stream_type' | 'category_name' | 'rating' | 'watched';
 type SortOrder = 'asc' | 'desc';
 
@@ -156,11 +165,17 @@ function CatalogContent() {
       }
     });
 
+    const catLatestScores = new Map<string, number>();
+
     // 2. Mapeia e conta a partir dos itens sincronizados do tipo ativo
     allItems.forEach((item) => {
       if (selectedType === 'all' || item.stream_type === selectedType) {
         const catId = String(item.category_id || 'geral');
         const catName = item.category_name || 'Geral';
+        const score = getSortScore(item);
+        const curScore = catLatestScores.get(catId) || 0;
+        if (score > curScore) catLatestScores.set(catId, score);
+
         const existing = map.get(catId);
         if (existing) {
           existing.count += 1;
@@ -175,10 +190,15 @@ function CatalogContent() {
       }
     });
 
-    // Ordena as categorias alfabeticamente
+    // Ordena as categorias por data de upload / novidade decrescente, com desempate alfabético
     return Array.from(map.values())
       .filter((c) => c.count > 0 || allCategories.some((orig) => String(orig.category_id) === c.id))
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+      .sort((a, b) => {
+        const scoreA = catLatestScores.get(a.id) || 0;
+        const scoreB = catLatestScores.get(b.id) || 0;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+      });
   }, [allCategories, allItems, selectedType]);
 
   // Manipulador de troca de Tipo (reseta a categoria para evitar filtros órfãos)
@@ -257,7 +277,7 @@ function CatalogContent() {
           return bExact - aExact;
         });
       }
-      return filtered;
+      return [...filtered].sort((a, b) => getSortScore(b) - getSortScore(a));
     }
 
     // Ordenação ativa por coluna clicada

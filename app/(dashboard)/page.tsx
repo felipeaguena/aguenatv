@@ -49,7 +49,6 @@ export default function HomePage() {
   const [heroItems, setHeroItems] = useState<BaseStreamItem[]>([]);
   const [recentMovies, setRecentMovies] = useState<BaseStreamItem[]>([]);
   const [recentSeries, setRecentSeries] = useState<BaseStreamItem[]>([]);
-  const [liveChannels, setLiveChannels] = useState<BaseStreamItem[]>([]);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [hasData, setHasData] = useState(true);
 
@@ -64,10 +63,9 @@ export default function HomePage() {
       }
       setHasData(true);
 
-      const [allMovies, allSeries, rawLive] = await Promise.all([
+      const [allMovies, allSeries] = await Promise.all([
         localDB.streams.where('stream_type').equals('movie').toArray(),
         localDB.streams.where('stream_type').equals('series').toArray(),
-        localDB.streams.where('stream_type').equals('live').limit(10).toArray(),
       ]);
 
       const moviesList = allMovies as unknown as BaseStreamItem[];
@@ -87,9 +85,12 @@ export default function HomePage() {
         .slice(0, 10);
 
       setHeroItems(combinedRecent);
-      setRecentMovies(filteredSortedMovies.slice(0, 10)); // 2 linhas perfeitas de 5 no grid
-      setRecentSeries(sortedSeries.slice(0, 10)); // 2 linhas perfeitas de 5 no grid
-      setLiveChannels(rawLive as unknown as BaseStreamItem[]);
+      setRecentMovies(filteredSortedMovies.slice(0, 16));
+      const seriesWithNewTag = sortedSeries.slice(0, 16).map((s, idx) => ({
+        ...s,
+        isNew: idx < 8,
+      }));
+      setRecentSeries(seriesWithNewTag as BaseStreamItem[]);
     } catch (e) {
       console.warn('Erro ao carregar dados locais:', e);
     }
@@ -149,7 +150,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
             {favorites.slice(0, 10).map((fav) => (
               <MediaCard
                 key={`fav_${fav.id}`}
@@ -201,40 +202,9 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
             {recentMovies.map((movie) => (
               <MediaCard key={`movie_${movie.id || movie.stream_id}`} item={movie} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 5. Canais de TV ao Vivo - Grid de 5 colunas */}
-      {liveChannels.length > 0 && (
-        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-violet-600/20 text-violet-400 border border-violet-500/30 flex items-center justify-center">
-                <Tv className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-lg font-black text-white tracking-tight">TV ao Vivo</h2>
-                <p className="text-[11px] text-neutral-400">Canais em transmissão contínua</p>
-              </div>
-            </div>
-
-            <Link
-              href="/live"
-              className="text-xs text-violet-400 hover:text-violet-300 font-semibold flex items-center gap-1 transition"
-            >
-              Ver todos os canais
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
-            {liveChannels.map((channel) => (
-              <MediaCard key={`live_${channel.id || channel.stream_id}`} item={channel} />
             ))}
           </div>
         </section>
@@ -272,7 +242,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
             {recentSeries.map((series) => (
               <MediaCard key={`series_${series.id || series.stream_id}`} item={series} />
             ))}

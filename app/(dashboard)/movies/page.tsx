@@ -11,6 +11,15 @@ import { useUrlPagination } from '@/hooks/useUrlPagination';
 
 const PAGE_SIZE = 50;
 
+function getSortScore(item: BaseStreamItem): number {
+  if (item.added) {
+    const ts = Number(item.added);
+    if (!isNaN(ts) && ts > 0) return ts;
+  }
+  const numericId = Number(String(item.stream_id).replace(/\D/g, ''));
+  return !isNaN(numericId) ? numericId : 0;
+}
+
 function MoviesContent() {
   const [movies, setMovies] = useState<BaseStreamItem[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
@@ -34,8 +43,28 @@ function MoviesContent() {
           localDB.streams.where('stream_type').equals('movie').toArray(),
           localDB.categories.where('type').equals('movie').toArray(),
         ]);
-        setMovies(streams as unknown as BaseStreamItem[]);
-        setCategories(cats.map((c) => ({ id: c.category_id, name: c.category_name })));
+        const movieItems = streams as unknown as BaseStreamItem[];
+        const catScores = new Map<string, number>();
+        movieItems.forEach((m) => {
+          const cId = String(m.category_id || 'all');
+          const score = getSortScore(m);
+          const currentMax = catScores.get(cId) || 0;
+          if (score > currentMax) {
+            catScores.set(cId, score);
+          }
+        });
+
+        const sortedCats = cats
+          .map((c) => ({ id: c.category_id, name: c.category_name }))
+          .sort((a, b) => {
+            const scoreA = catScores.get(a.id) || 0;
+            const scoreB = catScores.get(b.id) || 0;
+            if (scoreB !== scoreA) return scoreB - scoreA;
+            return a.name.localeCompare(b.name, 'pt-BR');
+          });
+
+        setMovies(movieItems);
+        setCategories(sortedCats);
       } catch (e) {
         console.error('Erro ao carregar Filmes:', e);
       } finally {
@@ -46,11 +75,13 @@ function MoviesContent() {
   }, []);
 
   const filteredMovies = useMemo(() => {
-    return movies.filter((m) => {
-      const matchCat = selectedCat === 'all' || m.category_id === selectedCat;
-      const matchSearch = (m.title || m.name || '').toLowerCase().includes(search.toLowerCase());
-      return matchCat && matchSearch;
-    });
+    return movies
+      .filter((m) => {
+        const matchCat = selectedCat === 'all' || m.category_id === selectedCat;
+        const matchSearch = (m.title || m.name || '').toLowerCase().includes(search.toLowerCase());
+        return matchCat && matchSearch;
+      })
+      .sort((a, b) => getSortScore(b) - getSortScore(a));
   }, [movies, selectedCat, search]);
 
   const paginatedMovies = useMemo(() => {

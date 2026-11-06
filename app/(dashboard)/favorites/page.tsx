@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Heart,
   Search,
@@ -21,6 +21,7 @@ const PAGE_SIZE = 50;
 type TabType = 'all' | 'completed' | 'movie' | 'series' | 'live';
 
 function FavoritesContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { favorites, loading: loadingFavs, removeFavorite } = useFavorites();
   const { isWatched, watchedList, loading: loadingWatched, removeWatched } = useWatched();
@@ -219,6 +220,10 @@ function FavoritesContent() {
   }, [filteredItems, currentPage]);
 
   const handleSelectTab = (tabId: TabType) => {
+    if (tabId === 'completed') {
+      router.push('/completed');
+      return;
+    }
     setActiveTab(tabId);
     setCurrentPage(1);
 

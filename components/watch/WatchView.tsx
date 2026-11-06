@@ -815,7 +815,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 sm:space-y-8 overflow-x-hidden w-full max-w-full">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 sm:space-y-8 overflow-x-hidden w-full">
       {/* 1. Barra Superior com Navegação, Título e Ações */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4 w-full min-w-0">
         <div className="flex items-start sm:items-center gap-3 min-w-0 w-full">
@@ -909,10 +909,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
       </div>
 
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-stretch">
         {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div className="lg:col-span-8 xl:col-span-9 space-y-4 min-w-0 w-full">
-          <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+        <div className="lg:col-span-8 xl:col-span-9 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -938,167 +937,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
             )}
           </div>
 
-          {/* Barra de Status e Metadados Técnicos do Vídeo */}
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs w-full min-w-0">
-            {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-neutral-300 text-[11px] w-full sm:w-auto">
-              {isOfflineMode && (
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Modo Offline (Armazenamento Local)</span>
-                </div>
-              )}
-
-              {/* Duração */}
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <span className="text-neutral-400">Duração:</span>
-                <span className="font-bold text-white">{displayDuration}</span>
-              </div>
-
-              {/* Tamanho em MB */}
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-                <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <span className="text-neutral-400">Tamanho:</span>
-                <span className="font-bold text-white">{displaySize}</span>
-              </div>
-
-              {/* Dimensões */}
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <span className="text-neutral-400">Dimensões:</span>
-                <span className="font-bold text-white font-mono">{displayDimensions}</span>
-              </div>
-
-              {/* Codec Utilizado */}
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-                <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                <span className="text-neutral-400">Codec:</span>
-                <span className="font-bold text-white">{displayCodec}</span>
-              </div>
-            </div>
-
-            {/* Ações Rápidas de Reprodução Externa e Download */}
-            {(streamUrl || localPlayableUrl) && (
-              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
-                {!isLive && isNative && (
-                  <button
-                    onClick={async () => {
-                      if (isDownloading) return;
-
-                      const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
-                      const epId = activeEpisode?.id;
-                      const sNum = selectedSeason ? Number(selectedSeason) : undefined;
-                      const downId = buildDownloadId(
-                        streamType === 'series' ? 'series' : 'movie',
-                        currentActiveId || id,
-                        sNum,
-                        epNum ?? epId
-                      );
-
-                      if (isCurrentDownloaded) {
-                        if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
-                          await deleteOfflineDownload(downId);
-                          setIsCurrentDownloaded(false);
-                          setLocalPlayableUrl(null);
-                          setIsOfflineMode(false);
-                        }
-                        return;
-                      }
-
-                      if (!streamUrl) return;
-                      setIsDownloading(true);
-                      try {
-                        await downloadVideoForOffline(
-                          {
-                            stream_id: String(currentActiveId || id),
-                            stream_type: streamType === 'series' ? 'series' : 'movie',
-                            title: playerTitle,
-                            series_title: item?.title || item?.name,
-                            poster_url: playerPoster,
-                            container_extension: item?.container_extension,
-                            season_num: sNum,
-                            episode_num: epNum,
-                            episode_id: epId,
-                          },
-                          streamUrl
-                        );
-                        setIsCurrentDownloaded(true);
-                        setDownloadDone(true);
-                        setTimeout(() => setDownloadDone(false), 5000);
-                      } catch (e: any) {
-                        alert(e.message || 'Erro ao realizar download.');
-                      } finally {
-                        setIsDownloading(false);
-                      }
-                    }}
-                    disabled={isDownloading}
-                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-                      isCurrentDownloaded
-                        ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
-                        : downloadDone
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                        : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
-                    }`}
-                    title={
-                      isCurrentDownloaded
-                        ? 'Excluir da memória do celular para liberar espaço'
-                        : isNativeApp()
-                        ? 'Salvar na memória do celular para assistir offline'
-                        : 'Baixar vídeo'
-                    }
-                  >
-                    {isDownloading ? (
-                      <>
-                        <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                        <span>Baixando...</span>
-                      </>
-                    ) : isCurrentDownloaded ? (
-                      <>
-                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                        <span>Excluir do Celular</span>
-                      </>
-                    ) : downloadDone ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Baixado Offline</span>
-                      </>
-                    ) : (
-                      <>
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Baixar Offline</span>
-                      </>
-                    )}
-                  </button>
-                )}
-                {streamUrl && (
-                  <>
-                    <a
-                      href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
-                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
-                      title="Abrir diretamente no VLC Player"
-                    >
-                      <span>▶</span> VLC
-                    </a>
-                    <a
-                      href={streamUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
-                      title="Abrir o link direto em nova aba"
-                    >
-                      Link Direto
-                    </a>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Lado Direito: Dinâmica Diferenciada para Séries vs Ao Vivo / Filmes */}
-        <div className="lg:col-span-4 xl:col-span-3 space-y-3 min-w-0 w-full">
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-[480px] sm:h-[540px] max-w-full overflow-hidden">
+        <div className="lg:col-span-4 xl:col-span-3 min-w-0 w-full h-[460px] lg:h-full">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full max-w-full overflow-hidden">
             {/* ======================================================== */}
             {/* CENÁRIO 1: SÉRIES (Capítulos com Seletor de Temporada)     */}
             {/* ======================================================== */}
@@ -1384,6 +1225,164 @@ export default function WatchView({ type, id }: WatchViewProps) {
             )}
           </div>
         </div>
+      </div>
+
+
+      {/* Barra de Status e Metadados Técnicos do Vídeo */}
+      <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs w-full min-w-0">
+        {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-neutral-300 text-[11px] w-full sm:w-auto">
+          {isOfflineMode && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Modo Offline (Armazenamento Local)</span>
+            </div>
+          )}
+
+          {/* Duração */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+            <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <span className="text-neutral-400">Duração:</span>
+            <span className="font-bold text-white">{displayDuration}</span>
+          </div>
+
+          {/* Tamanho em MB */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+            <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <span className="text-neutral-400">Tamanho:</span>
+            <span className="font-bold text-white">{displaySize}</span>
+          </div>
+
+          {/* Dimensões */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+            <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <span className="text-neutral-400">Dimensões:</span>
+            <span className="font-bold text-white font-mono">{displayDimensions}</span>
+          </div>
+
+          {/* Codec Utilizado */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
+            <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+            <span className="text-neutral-400">Codec:</span>
+            <span className="font-bold text-white">{displayCodec}</span>
+          </div>
+        </div>
+
+        {/* Ações Rápidas de Reprodução Externa e Download */}
+        {(streamUrl || localPlayableUrl) && (
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
+            {!isLive && isNative && (
+              <button
+                onClick={async () => {
+                  if (isDownloading) return;
+
+                  const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
+                  const epId = activeEpisode?.id;
+                  const sNum = selectedSeason ? Number(selectedSeason) : undefined;
+                  const downId = buildDownloadId(
+                    streamType === 'series' ? 'series' : 'movie',
+                    currentActiveId || id,
+                    sNum,
+                    epNum ?? epId
+                  );
+
+                  if (isCurrentDownloaded) {
+                    if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
+                      await deleteOfflineDownload(downId);
+                      setIsCurrentDownloaded(false);
+                      setLocalPlayableUrl(null);
+                      setIsOfflineMode(false);
+                    }
+                    return;
+                  }
+
+                  if (!streamUrl) return;
+                  setIsDownloading(true);
+                  try {
+                    await downloadVideoForOffline(
+                      {
+                        stream_id: String(currentActiveId || id),
+                        stream_type: streamType === 'series' ? 'series' : 'movie',
+                        title: playerTitle,
+                        series_title: item?.title || item?.name,
+                        poster_url: playerPoster,
+                        container_extension: item?.container_extension,
+                        season_num: sNum,
+                        episode_num: epNum,
+                        episode_id: epId,
+                      },
+                      streamUrl
+                    );
+                    setIsCurrentDownloaded(true);
+                    setDownloadDone(true);
+                    setTimeout(() => setDownloadDone(false), 5000);
+                  } catch (e: any) {
+                    alert(e.message || 'Erro ao realizar download.');
+                  } finally {
+                    setIsDownloading(false);
+                  }
+                }}
+                disabled={isDownloading}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                  isCurrentDownloaded
+                    ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
+                    : downloadDone
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
+                }`}
+                title={
+                  isCurrentDownloaded
+                    ? 'Excluir da memória do celular para liberar espaço'
+                    : isNativeApp()
+                    ? 'Salvar na memória do celular para assistir offline'
+                    : 'Baixar vídeo'
+                }
+              >
+                {isDownloading ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                    <span>Baixando...</span>
+                  </>
+                ) : isCurrentDownloaded ? (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Excluir do Celular</span>
+                  </>
+                ) : downloadDone ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Baixado Offline</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar Offline</span>
+                  </>
+                )}
+              </button>
+            )}
+            {streamUrl && (
+              <>
+                <a
+                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
+                  title="Abrir diretamente no VLC Player"
+                >
+                  <span>▶</span> VLC
+                </a>
+                <a
+                  href={streamUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
+                  title="Abrir o link direto em nova aba"
+                >
+                  Link Direto
+                </a>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
