@@ -1,12 +1,12 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Tv, Lock, User, AlertCircle, ShieldAlert, Sparkles, Server } from 'lucide-react';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  // Campo Honeypot para proteção Anti-Bot: invisível para usuários humanos
+  const [extraSecurityToken, setExtraSecurityToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isBlocked, setIsBlocked] = useState(false);
@@ -40,7 +40,11 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({
+          username,
+          password,
+          extra_security_token: extraSecurityToken,
+        }),
       });
 
       const data = await res.json();
@@ -48,7 +52,7 @@ export default function LoginPage() {
       if (!res.ok) {
         if (res.status === 429 || data.isBlocked) {
           setIsBlocked(true);
-          setRemainingMinutes(data.remainingMinutes || 60);
+          setRemainingMinutes(data.remainingMinutes || 15);
           setErrorMsg(data.error);
         } else {
           setErrorMsg(data.error || 'Credenciais inválidas');
@@ -86,15 +90,18 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Alerta de Bloqueio por 1 hora */}
+          {/* Alerta de Bloqueio Progressivo de IP */}
           {isBlocked && (
             <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-3 animate-in fade-in">
               <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
               <div>
-                <p className="font-bold">Acesso Bloqueado temporariamente</p>
+                <p className="font-bold">Acesso Bloqueado por Segurança</p>
                 <p className="text-[11px] mt-0.5 text-rose-200/80">
-                  3 tentativas inválidas detectadas. Por segurança, seu IP foi bloqueado por aproximadamente{' '}
-                  <span className="font-bold underline">{remainingMinutes} minutos</span>.
+                  Tentativas consecutivas incorretas detectadas (&ge;5 falhas). Por segurança, seu endereço de IP foi temporariamente bloqueado por aproximadamente{' '}
+                  <span className="font-bold underline text-white">{remainingMinutes} minutos</span>.
+                </p>
+                <p className="text-[10px] mt-2 text-rose-300/70">
+                  Caso seja um acesso legítimo, solicite ao administrador a liberação do IP pelo painel de controle.
                 </p>
               </div>
             </div>
@@ -109,6 +116,18 @@ export default function LoginPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Campo Honeypot Oculto (Anti-Bot invisível para humanos) */}
+            <div aria-hidden="true" style={{ position: 'absolute', opacity: 0, zIndex: -1, pointerEvents: 'none', height: 0, overflow: 'hidden' }}>
+              <input
+                type="text"
+                name="extra_security_token"
+                tabIndex={-1}
+                value={extraSecurityToken}
+                onChange={(e) => setExtraSecurityToken(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+
             <div>
               <label className="block text-[11px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">
                 Usuário
@@ -123,6 +142,7 @@ export default function LoginPage() {
                   disabled={loading || isBlocked}
                   required
                   autoFocus
+                  autoComplete="username"
                   className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
                 />
               </div>
@@ -141,6 +161,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   disabled={loading || isBlocked}
                   required
+                  autoComplete="current-password"
                   className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
                 />
               </div>
