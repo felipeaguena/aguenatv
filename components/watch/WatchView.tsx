@@ -123,9 +123,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
       const desktop = typeof window !== 'undefined' && window.innerWidth >= 1024;
       setIsDesktop(desktop);
       if (playerContainerRef.current) {
-        const rect = playerContainerRef.current.getBoundingClientRect();
-        if (rect.height > 0) {
-          setPlayerHeight(Math.round(rect.height));
+        const width = playerContainerRef.current.clientWidth;
+        if (width > 0) {
+          // Altura exata da proporcao 16:9 widescreen do player de video
+          const exactVideoHeight = Math.round((width * 9) / 16);
+          setPlayerHeight(exactVideoHeight);
         }
       }
     };
@@ -947,9 +949,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
       </div>
 
       {/* 2. Grid Principal: Player Central + Coluna Lateral Dinâmica */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-start">
         {/* Lado Esquerdo: Player de Vídeo Cinema */}
-        <div ref={playerContainerRef} className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
+        <div ref={playerContainerRef} className="lg:col-span-8 xl:col-span-8 aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative self-start">
             {isSeries && loadingSeries && !activeEpisode ? (
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -975,20 +977,20 @@ export default function WatchView({ type, id }: WatchViewProps) {
             )}
           </div>
 
-        {/* Lado Direito: Dinâmica Diferenciada para Séries vs Ao Vivo / Filmes */}
+
+        {/* Lado Direito: Segunda Div com altura relativa ao player de video na primeira div (sem h-full) */}
         <div
-          className="lg:col-span-4 xl:col-span-4 min-w-0 w-full"
+          className="lg:col-span-4 xl:col-span-4 min-w-0 w-full p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col max-h-[500px] lg:max-h-none overflow-hidden self-start"
           style={{
             height: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
             maxHeight: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
           }}
         >
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col h-full min-h-0 max-h-full max-w-full overflow-hidden">
             {/* ======================================================== */}
             {/* CENÁRIO 1: SÉRIES (Capítulos com Seletor de Temporada)     */}
             {/* ======================================================== */}
             {isSeries ? (
-              <div className="flex flex-col h-full min-h-0 space-y-2.5">
+              <div className="flex flex-col flex-1 min-h-0 space-y-2.5">
                 {/* Cabeçalho de Séries */}
                 <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
                   <div className="flex items-center gap-2">
@@ -1184,7 +1186,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
               /* ======================================================== */
               /* CENÁRIO 2: AO VIVO / FILMES (Sem Capítulos, Mesma Categoria)*/
               /* ======================================================== */
-              <div className="flex flex-col h-full min-h-0 space-y-2.5">
+              <div className="flex flex-col flex-1 min-h-0 space-y-2.5">
                 {/* Cabeçalho */}
                 <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
                   <div className="flex items-center gap-2">
@@ -1267,7 +1269,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 </div>
               </div>
             )}
-          </div>
         </div>
       </div>
 
