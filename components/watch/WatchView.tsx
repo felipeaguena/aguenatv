@@ -980,7 +980,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
         {/* Lado Direito: Segunda Div com altura relativa ao player de video na primeira div (sem h-full) */}
         <div
-          className="lg:col-span-4 xl:col-span-4 min-w-0 w-full p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col max-h-[500px] lg:max-h-none overflow-hidden self-start"
+          className="lg:col-span-4 xl:col-span-4 min-w-0 w-full p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 shadow-xl flex flex-col max-h-[500px] lg:max-h overflow-hidden self-start"
           style={{
             height: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
             maxHeight: isDesktop && playerHeight ? `${playerHeight}px` : undefined,
