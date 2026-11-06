@@ -27,7 +27,7 @@ import { BaseStreamItem, SessionUser } from '@/lib/types';
 import { getInfoUrl, getWatchUrl } from '@/lib/routes';
 import { usePlayer } from '@/context/PlayerContext';
 import { clearUserLocalData } from '@/lib/db-local';
-import { isNativeApp } from '@/lib/download-manager';
+import { isNativeApp, warmupOfflineDownloads } from '@/lib/download-manager';
 import { resetFavoritesCache } from '@/hooks/useFavorites';
 import { resetWatchedCache } from '@/hooks/useWatched';
 import { resetContinueCache } from '@/hooks/useContinueWatching';
@@ -75,6 +75,9 @@ export default function Navbar() {
         if (data?.user) setCurrentUser(data.user);
       })
       .catch(() => {});
+
+    // Pré-carrega e sincroniza os títulos salvos offline na inicialização do APK/App
+    warmupOfflineDownloads().catch(() => {});
 
     // Pré-aquece o cache de busca em background após a inicialização da aplicação
     const preheatTimer = setTimeout(() => {

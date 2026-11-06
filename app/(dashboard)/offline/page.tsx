@@ -28,6 +28,7 @@ import {
   deleteGroupDownloads,
   formatDownloadSize,
   getPlayableOfflineUrl,
+  getCachedManifestSync,
   GroupedDownloadItem,
   OfflineDownload,
   isNativeApp,
@@ -41,33 +42,101 @@ function OfflineWatchContent() {
   const searchParams = useSearchParams();
   const initialTitleParam = searchParams.get('title');
 
-  const [groupedDownloads, setGroupedDownloads] = useState<GroupedDownloadItem[]>([]);
-  const [allDownloadsList, setAllDownloadsList] = useState<OfflineDownload[]>([]);
+  // Inicializa o estado imediatamente do cache local para 0ms de espera ao abrir
+  const [allDownloadsList, setAllDownloadsList] = useState<OfflineDownload[]>(() => {
+    if (typeof window !== 'undefined') {
+      return getCachedManifestSync();
+    }
+    return [];
+  });
+
+  const [groupedDownloads, setGroupedDownloads] = useState<GroupedDownloadItem[]>(() => {
+    if (typeof window !== 'undefined') {
+      const initial = getCachedManifestSync();
+      if (initial.length > 0) {
+        const map = new Map<string, GroupedDownloadItem>();
+        for (const item of initial) {
+          const groupKey = `${item.stream_type}_${item.stream_id}`;
+          const mainTitle = item.series_title || (item.stream_type === 'series' ? item.title.split(' - ')[0] : item.title);
+          if (!map.has(groupKey)) {
+            map.set(groupKey, {
+              stream_id: item.stream_id,
+              stream_type: item.stream_type,
+              title: mainTitle,
+              poster_url: item.poster_url,
+              total_size: item.file_size || 0,
+              items_count: 1,
+              episodes: [item],
+              last_downloaded_at: item.downloaded_at,
+            });
+          } else {
+            const existing = map.get(groupKey)!;
+            existing.total_size += item.file_size || 0;
+            existing.items_count += 1;
+            if (!existing.episodes.some((e) => e.id === item.id)) {
+              existing.episodes.push(item);
+            }
+          }
+        }
+        return Array.from(map.values());
+      }
+    }
+    return [];
+  });
+
   const [selectedGroup, setSelectedGroup] = useState<GroupedDownloadItem | null>(null);
   const [activeEpisode, setActiveEpisode] = useState<OfflineDownload | null>(null);
   const [playableUrl, setPlayableUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [isUrlResolving, setIsUrlResolving] = useState(false);
+  const [loading, setLoading] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const initial = getCachedManifestSync();
+      if (initial.length > 0) return false;
+    }
+    return true;
+  });
   const [search, setSearch] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'movie' | 'series'>('all');
   const [isNative, setIsNative] = useState(false);
 
+  // Seleciona um grupo de título para abrir a página de reprodução
+  const handleOpenTitle = useCallback(async (group: GroupedDownloadItem) => {
+    setSelectedGroup(group);
+    if (group.episodes && group.episodes.length > 0) {
+      const firstEp = group.episodes[0];
+      setActiveEpisode(firstEp);
+      setIsUrlResolving(true);
+      try {
+        const url = await getPlayableOfflineUrl(firstEp);
+        setPlayableUrl(url);
+      } catch (err) {
+        console.warn('Erro ao resolver URL offline:', err);
+        setPlayableUrl(firstEp.file_path);
+      } finally {
+        setIsUrlResolving(false);
+      }
+    } else {
+      setActiveEpisode(null);
+      setPlayableUrl(null);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
   // Carrega lista de downloads offline salvos
   const loadDownloads = useCallback(async () => {
     try {
-      const [grouped, allList] = await Promise.all([
-        getGroupedOfflineDownloads(),
-        getOfflineDownloadsList(),
-      ]);
+      const allList = await getOfflineDownloadsList();
+      const grouped = await getGroupedOfflineDownloads(allList);
 
-      setGroupedDownloads(grouped);
       setAllDownloadsList(allList);
+      setGroupedDownloads(grouped);
 
       // Se houver um título selecionado anteriormente ou via query param, revalida
       if (selectedGroup) {
         const stillGroup = grouped.find(
           (g) =>
-            `${g.stream_type}_${g.stream_id}` ===
-            `${selectedGroup.stream_type}_${selectedGroup.stream_id}`
+            String(g.stream_id) === String(selectedGroup.stream_id) &&
+            g.stream_type === selectedGroup.stream_type
         );
         if (stillGroup) {
           setSelectedGroup(stillGroup);
@@ -84,21 +153,11 @@ function OfflineWatchContent() {
               setPlayableUrl(url);
             }
           }
-        } else {
-          setSelectedGroup(null);
-          setActiveEpisode(null);
-          setPlayableUrl(null);
         }
       } else if (initialTitleParam) {
         const found = grouped.find((g) => `${g.stream_type}_${g.stream_id}` === initialTitleParam);
         if (found) {
-          setSelectedGroup(found);
-          if (found.episodes.length > 0) {
-            const firstEp = found.episodes[0];
-            setActiveEpisode(firstEp);
-            const url = await getPlayableOfflineUrl(firstEp);
-            setPlayableUrl(url);
-          }
+          handleOpenTitle(found);
         }
       }
     } catch (err) {
@@ -106,7 +165,7 @@ function OfflineWatchContent() {
     } finally {
       setLoading(false);
     }
-  }, [selectedGroup, activeEpisode, initialTitleParam]);
+  }, [selectedGroup, activeEpisode, initialTitleParam, handleOpenTitle]);
 
   useEffect(() => {
     setIsNative(isNativeApp());
@@ -122,21 +181,6 @@ function OfflineWatchContent() {
     return () => window.removeEventListener(PROGRESS_EVENT, handleProgress);
   }, []);
 
-  // Seleciona um grupo de título para abrir a página de reprodução
-  const handleOpenTitle = async (group: GroupedDownloadItem) => {
-    setSelectedGroup(group);
-    if (group.episodes.length > 0) {
-      const firstEp = group.episodes[0];
-      setActiveEpisode(firstEp);
-      const url = await getPlayableOfflineUrl(firstEp);
-      setPlayableUrl(url);
-    } else {
-      setActiveEpisode(null);
-      setPlayableUrl(null);
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   // Volta da tela de reprodução para a tela de catálogo de títulos
   const handleBackToCatalog = () => {
     setSelectedGroup(null);
@@ -147,8 +191,15 @@ function OfflineWatchContent() {
   // Alterna o capítulo selecionado na tela de reprodução
   const handleSelectEpisode = async (ep: OfflineDownload) => {
     setActiveEpisode(ep);
-    const url = await getPlayableOfflineUrl(ep);
-    setPlayableUrl(url);
+    setIsUrlResolving(true);
+    try {
+      const url = await getPlayableOfflineUrl(ep);
+      setPlayableUrl(url);
+    } catch {
+      setPlayableUrl(ep.file_path);
+    } finally {
+      setIsUrlResolving(false);
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -267,7 +318,7 @@ function OfflineWatchContent() {
   // =========================================================================
   // CENÁRIO 2: REPRODUÇÃO DO TÍTULO SELECIONADO (ESTILO WATCH COM CAPÍTULOS)
   // =========================================================================
-  if (selectedGroup && activeEpisode && playableUrl) {
+  if (selectedGroup && activeEpisode) {
     const isSeries = selectedGroup.stream_type === 'series';
 
     return (
@@ -324,15 +375,24 @@ function OfflineWatchContent() {
         {/* Grid Principal: Player Central Cinema + Controles de Capítulos */}
         <div className="flex flex-col gap-4 max-w-5xl mx-auto w-full">
           {/* Frame do Player: Widescreen 16:9, SEM AUTOPLAY (o usuário precisa dar play primeiro) */}
-          <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative">
-            <VideoPlayer
-              streamUrl={playableUrl}
-              title={playerDisplayTitle}
-              streamId={String(activeEpisode.stream_id)}
-              streamType={activeEpisode.stream_type}
-              posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
-              autoPlay={false}
-            />
+          <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative flex items-center justify-center">
+            {playableUrl ? (
+              <VideoPlayer
+                streamUrl={playableUrl}
+                title={playerDisplayTitle}
+                streamId={String(activeEpisode.stream_id)}
+                streamType={activeEpisode.stream_type}
+                posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
+                autoPlay={false}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center">
+                <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-neutral-300 font-semibold tracking-wide">
+                  Carregando vídeo offline da memória local...
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Barra de Navegação entre Capítulos logo após o frame do player na mesma div */}

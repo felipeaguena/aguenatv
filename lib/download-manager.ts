@@ -20,6 +20,10 @@ export interface BackgroundDownloadPluginInterface {
 
 export const BackgroundDownload = registerPlugin<BackgroundDownloadPluginInterface>('BackgroundDownload');
 
+// Chaves de manifesto resiliente offline (Origin-Independent)
+export const MANIFEST_FILE_PATH = 'videos/downloads_manifest.json';
+export const MANIFEST_STORAGE_KEY = 'aguenatv_offline_downloads_manifest';
+
 // Gerenciamento de progresso reativo e global
 export const activeDownloadsMap: Record<string, DownloadProgress> = {};
 export const activeDownloadTitles: Record<string, string> = {};
@@ -107,6 +111,121 @@ export interface DownloadProgress {
 
 export function isNativeApp(): boolean {
   return typeof window !== 'undefined' && Capacitor.isNativePlatform();
+}
+
+/**
+ * Recupera o cache síncrono de títulos baixados do localStorage para renderização imediata com 0ms
+ */
+export function getCachedManifestSync(): OfflineDownload[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+      if (typeof parsed === 'object' && parsed !== null) {
+        return Object.values(parsed);
+      }
+    }
+  } catch {}
+  return [];
+}
+
+/**
+ * Lê o manifesto nativo persistido no disco (Directory.Data)
+ */
+export async function readManifestFromDisk(): Promise<Record<string, OfflineDownload>> {
+  const result: Record<string, OfflineDownload> = {};
+
+  // 1. Tenta carregar do localStorage primeiro (acesso rápido)
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item: OfflineDownload) => {
+            if (item?.id) result[item.id] = item;
+          });
+        } else if (typeof parsed === 'object' && parsed !== null) {
+          Object.assign(result, parsed);
+        }
+      }
+    } catch {}
+  }
+
+  // 2. Se for app nativo, complementa/revalida com o arquivo físico no disco
+  if (isNativeApp()) {
+    try {
+      const fileData = await Filesystem.readFile({
+        path: MANIFEST_FILE_PATH,
+        directory: Directory.Data,
+      });
+      const dataStr = typeof fileData.data === 'string' ? fileData.data : '';
+      if (dataStr) {
+        const parsedDisk = JSON.parse(dataStr);
+        if (typeof parsedDisk === 'object' && parsedDisk !== null) {
+          Object.assign(result, parsedDisk);
+        }
+      }
+    } catch {}
+  }
+
+  return result;
+}
+
+/**
+ * Salva o manifesto no disco nativo e no localStorage
+ */
+export async function writeManifestToDisk(manifest: Record<string, OfflineDownload>): Promise<void> {
+  // Salva no localStorage para leitura imediata
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
+    } catch {}
+  }
+
+  // Salva no disco físico nativo em Directory.Data
+  if (isNativeApp()) {
+    try {
+      try {
+        await Filesystem.mkdir({ path: 'videos', directory: Directory.Data, recursive: true });
+      } catch {}
+
+      await Filesystem.writeFile({
+        path: MANIFEST_FILE_PATH,
+        data: JSON.stringify(manifest, null, 2),
+        directory: Directory.Data,
+        encoding: 'utf8' as any,
+      });
+    } catch (e) {
+      console.warn('[DownloadManager] Falha ao persistir manifesto em disco:', e);
+    }
+  }
+}
+
+/**
+ * Adiciona ou atualiza um item no manifesto persistente
+ */
+export async function saveDownloadToManifest(record: OfflineDownload): Promise<void> {
+  try {
+    const manifest = await readManifestFromDisk();
+    manifest[record.id] = record;
+    await writeManifestToDisk(manifest);
+  } catch {}
+}
+
+/**
+ * Remove um item do manifesto persistente
+ */
+export async function removeDownloadFromManifest(id: string): Promise<void> {
+  try {
+    const manifest = await readManifestFromDisk();
+    if (manifest[id]) {
+      delete manifest[id];
+      await writeManifestToDisk(manifest);
+    }
+  } catch {}
 }
 
 /**
@@ -230,6 +349,9 @@ export async function downloadVideoForOffline(
               await localDB.offline_downloads.put(record).catch(() => {});
             }
 
+            // Persiste no manifesto resiliente para garantir disponibilidade em modo offline
+            await saveDownloadToManifest(record);
+
             if (typeof window !== 'undefined') {
               window.dispatchEvent(
                 new CustomEvent(PROGRESS_EVENT, {
@@ -294,6 +416,7 @@ export async function downloadVideoForOffline(
     if (localDB?.offline_downloads) {
       await localDB.offline_downloads.put(record);
     }
+    await saveDownloadToManifest(record);
 
     return record;
   } catch (webErr: any) {
@@ -301,25 +424,53 @@ export async function downloadVideoForOffline(
   }
 }
 
+// Lock de sincronização para prevenir concorrência e race condition
+let activeSyncPromise: Promise<void> | null = null;
+
 /**
- * Sincroniza os arquivos físicos salvos no disco do Android com o banco IndexedDB (Dexie).
- * Garante que qualquer vídeo baixado seja contabilizado com o tamanho exato em disco.
+ * Sincroniza os arquivos físicos salvos no disco do Android com o manifesto e o banco IndexedDB (Dexie).
+ * Garante que qualquer vídeo baixado seja contabilizado com o tamanho exato em disco e que nunca
+ * sejam apagados títulos salvos caso a verificação inicial ocorra antes da montagem do sistema de arquivos.
  */
 export async function syncOfflineDownloadsWithDisk(): Promise<void> {
-  if (!localDB?.offline_downloads) return;
+  if (activeSyncPromise) {
+    return activeSyncPromise;
+  }
+
+  activeSyncPromise = (async () => {
+    try {
+      await _internalSyncOfflineDownloadsWithDisk();
+    } finally {
+      activeSyncPromise = null;
+    }
+  })();
+
+  return activeSyncPromise;
+}
+
+async function _internalSyncOfflineDownloadsWithDisk(): Promise<void> {
+  // 1. Carrega o manifesto persistente do disco / localStorage
+  const manifest = await readManifestFromDisk();
 
   if (isNativeApp()) {
     try {
-      // 1. Garante que a pasta videos existe
+      // Garante que a pasta videos existe
       try {
         await Filesystem.mkdir({ path: 'videos', directory: Directory.Data, recursive: true });
       } catch {}
 
-      // 2. Lê arquivos existentes no diretório videos
-      const dirResult = await Filesystem.readdir({ path: 'videos', directory: Directory.Data });
+      // Lê arquivos existentes no diretório videos nativo
+      let filesList: any[] = [];
+      try {
+        const dirResult = await Filesystem.readdir({ path: 'videos', directory: Directory.Data });
+        filesList = dirResult.files || [];
+      } catch (readdirErr) {
+        console.warn('[DownloadManager] readdir videos ignorado:', readdirErr);
+      }
+
       const physicalFiles = new Map<string, number>(); // fileName -> size
 
-      for (const f of dirResult.files) {
+      for (const f of filesList) {
         const name = typeof f === 'string' ? f : (f as any).name;
         if (!name || !name.startsWith('offline_') || name.endsWith('.tmp')) continue;
 
@@ -331,20 +482,47 @@ export async function syncOfflineDownloadsWithDisk(): Promise<void> {
         } catch {}
       }
 
-      // 3. Atualiza o banco com os arquivos físicos encontrados
+      // 2. Atualiza o IndexedDB e o manifesto com os arquivos físicos encontrados
       for (const [fileName, size] of physicalFiles.entries()) {
         const withoutPrefix = fileName.replace(/^offline_/, '');
         const lastDot = withoutPrefix.lastIndexOf('.');
         const cleanId = lastDot !== -1 ? withoutPrefix.substring(0, lastDot) : withoutPrefix;
         const extension = lastDot !== -1 ? withoutPrefix.substring(lastDot + 1) : 'mp4';
 
-        const existing = await localDB.offline_downloads.get(cleanId);
-        if (existing) {
-          if (existing.file_size !== size) {
-            existing.file_size = size;
-            await localDB.offline_downloads.put(existing);
+        const manifestRecord = manifest[cleanId];
+        let existingInDb: OfflineDownload | undefined;
+        if (localDB?.offline_downloads) {
+          try {
+            existingInDb = await localDB.offline_downloads.get(cleanId);
+          } catch {}
+        }
+
+        if (existingInDb) {
+          // Atualiza tamanho físico real se tiver mudado
+          let changed = false;
+          if (existingInDb.file_size !== size) {
+            existingInDb.file_size = size;
+            changed = true;
+          }
+          // Recupera metadados enriquecidos do manifesto se o DB só tinha título genérico
+          if (manifestRecord?.title && (!existingInDb.title || existingInDb.title.startsWith('Vídeo '))) {
+            existingInDb.title = manifestRecord.title;
+            existingInDb.series_title = manifestRecord.series_title;
+            existingInDb.poster_url = manifestRecord.poster_url || existingInDb.poster_url;
+            changed = true;
+          }
+          if (changed && localDB?.offline_downloads) {
+            await localDB.offline_downloads.put(existingInDb).catch(() => {});
+          }
+          manifest[cleanId] = existingInDb;
+        } else if (manifestRecord) {
+          // Restaura do manifesto para o IndexedDB
+          manifestRecord.file_size = size;
+          if (localDB?.offline_downloads) {
+            await localDB.offline_downloads.put(manifestRecord).catch(() => {});
           }
         } else {
+          // Arquivo físico no disco sem registro anterior: sintetiza registro
           const isMovie = cleanId.startsWith('movie_');
           const streamType = isMovie ? 'movie' : 'series';
 
@@ -368,16 +546,18 @@ export async function syncOfflineDownloadsWithDisk(): Promise<void> {
           let title = `Vídeo ${streamId}`;
           let posterUrl: string | undefined;
 
-          try {
-            const stream = await localDB.streams
-              .where('stream_id')
-              .equals(String(streamId))
-              .first();
-            if (stream) {
-              title = stream.title || stream.name;
-              posterUrl = stream.stream_icon;
-            }
-          } catch {}
+          if (localDB?.streams) {
+            try {
+              const stream = await localDB.streams
+                .where('stream_id')
+                .equals(String(streamId))
+                .first();
+              if (stream) {
+                title = stream.title || stream.name;
+                posterUrl = stream.stream_icon;
+              }
+            } catch {}
+          }
 
           if (!isMovie && seasonNum && episodeNum) {
             title = `${title} - T${seasonNum}:E${episodeNum}`;
@@ -399,35 +579,100 @@ export async function syncOfflineDownloadsWithDisk(): Promise<void> {
             episode_id: episodeNum,
           };
 
-          await localDB.offline_downloads.put(newRecord);
+          if (localDB?.offline_downloads) {
+            await localDB.offline_downloads.put(newRecord).catch(() => {});
+          }
+          manifest[cleanId] = newRecord;
         }
       }
 
-      // 4. Remove do banco registros cujos arquivos físicos não existem mais
-      const allDbRecords = await localDB.offline_downloads.toArray();
-      for (const rec of allDbRecords) {
-        const filePath = rec.file_path || '';
-        const fileName = filePath.includes('/') ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
-        if (!physicalFiles.has(fileName)) {
-          await localDB.offline_downloads.delete(rec.id);
+      // 3. Remove apenas registros cujos arquivos físicos comprovadamente não existem mais
+      // REGRA DE SEGURANÇA CRÍTICA: NUNCA apagar nada se physicalFiles estiver vazio (evita apagar dados se o readdir oscilar)
+      if (physicalFiles.size > 0 && localDB?.offline_downloads) {
+        try {
+          const allDbRecords = await localDB.offline_downloads.toArray();
+          for (const rec of allDbRecords) {
+            const filePath = rec.file_path || '';
+            if (filePath.startsWith('http://') || filePath.startsWith('https://') || filePath.startsWith('blob:')) {
+              continue; // Ignora downloads web padrão
+            }
+            const fileName = filePath.includes('/') ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+            if (!physicalFiles.has(fileName)) {
+              // Confirmação via stat direto antes de apagar
+              try {
+                const relPath = filePath.includes('videos/') ? filePath.substring(filePath.indexOf('videos/')) : `videos/${fileName}`;
+                await Filesystem.stat({ path: relPath, directory: Directory.Data });
+                // Arquivo existe no disco! Mantém o registro.
+              } catch {
+                // Arquivo realmente ausente no disco
+                await localDB.offline_downloads.delete(rec.id).catch(() => {});
+                delete manifest[rec.id];
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 4. Salva o manifesto atualizado no disco e localStorage
+      await writeManifestToDisk(manifest);
+    } catch (e) {
+      console.warn('[DownloadManager] Erro na sincronização com disco nativo:', e);
+    }
+  } else {
+    // Ambiente Web: sincroniza manifesto do localStorage com o IndexedDB
+    try {
+      const cached = getCachedManifestSync();
+      if (localDB?.offline_downloads && cached.length > 0) {
+        for (const item of cached) {
+          const exists = await localDB.offline_downloads.get(item.id);
+          if (!exists) {
+            await localDB.offline_downloads.put(item).catch(() => {});
+          }
         }
       }
-    } catch (e) {
-      console.warn('[DownloadManager] Erro na sincronização com disco:', e);
-    }
+    } catch {}
   }
 }
 
 /**
- * Retorna todos os vídeos salvos offline
+ * Retorna todos os vídeos salvos offline com fallback multinível resiliente
  */
 export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
-  if (!localDB?.offline_downloads) return [];
   try {
     await syncOfflineDownloadsWithDisk();
-    return await localDB.offline_downloads.toArray();
+    if (localDB?.offline_downloads) {
+      const fromDb = await localDB.offline_downloads.toArray();
+      if (fromDb.length > 0) return fromDb;
+    }
+  } catch (err) {
+    console.warn('[DownloadManager] Erro ao consultar IndexedDB:', err);
+  }
+
+  // Fallback 1: Manifesto do disco ou localStorage
+  try {
+    const manifestItems = Object.values(await readManifestFromDisk());
+    if (manifestItems.length > 0) {
+      if (localDB?.offline_downloads) {
+        for (const it of manifestItems) {
+          await localDB.offline_downloads.put(it).catch(() => {});
+        }
+      }
+      return manifestItems;
+    }
+  } catch {}
+
+  // Fallback 2: Cache síncrono imediato de localStorage
+  return getCachedManifestSync();
+}
+
+/**
+ * Pré-carrega e aquece títulos salvos offline logo na inicialização do aplicativo
+ */
+export async function warmupOfflineDownloads(): Promise<OfflineDownload[]> {
+  try {
+    return await getOfflineDownloadsList();
   } catch {
-    return [];
+    return getCachedManifestSync();
   }
 }
 
@@ -435,20 +680,22 @@ export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
  * Verifica se um item específico já foi baixado
  */
 export async function checkIsDownloaded(id: string): Promise<boolean> {
-  if (!localDB?.offline_downloads) return false;
-  try {
-    const found = await localDB.offline_downloads.get(id);
-    return !!found;
-  } catch {
-    return false;
+  if (localDB?.offline_downloads) {
+    try {
+      const found = await localDB.offline_downloads.get(id);
+      if (found) return true;
+    } catch {}
   }
+
+  const cached = getCachedManifestSync();
+  return cached.some((item) => item.id === id);
 }
 
 /**
- * Retorna itens baixados agrupados por Título / Série (ideal para a aba Favoritos)
+ * Retorna itens baixados agrupados por Título / Série (ideal para a aba Offline e Favoritos)
  */
-export async function getGroupedOfflineDownloads(): Promise<GroupedDownloadItem[]> {
-  const all = await getOfflineDownloadsList();
+export async function getGroupedOfflineDownloads(cachedList?: OfflineDownload[]): Promise<GroupedDownloadItem[]> {
+  const all = cachedList || (await getOfflineDownloadsList());
   const map = new Map<string, GroupedDownloadItem>();
 
   for (const item of all) {
@@ -470,7 +717,10 @@ export async function getGroupedOfflineDownloads(): Promise<GroupedDownloadItem[
       const existing = map.get(groupKey)!;
       existing.total_size += item.file_size || 0;
       existing.items_count += 1;
-      existing.episodes.push(item);
+      // Evita duplicatas do mesmo episódio
+      if (!existing.episodes.some((e) => e.id === item.id)) {
+        existing.episodes.push(item);
+      }
       if (new Date(item.downloaded_at) > new Date(existing.last_downloaded_at)) {
         existing.last_downloaded_at = item.downloaded_at;
       }
@@ -507,8 +757,10 @@ export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<
         path: download.file_path,
         directory: Directory.Data,
       });
-      // Converte o caminho nativo de arquivo (file://...) em URL web utilizável pelo WebView
-      return Capacitor.convertFileSrc(uriResult.uri);
+      if (uriResult?.uri) {
+        return Capacitor.convertFileSrc(uriResult.uri);
+      }
+      return Capacitor.convertFileSrc(download.file_path);
     } catch {
       return download.file_path;
     }
@@ -517,16 +769,28 @@ export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<
 }
 
 /**
- * Remove um vídeo baixado da memória e do banco de dados
+ * Remove um vídeo baixado da memória, do manifesto e do banco de dados
  */
 export async function deleteOfflineDownload(id: string): Promise<void> {
-  if (!localDB?.offline_downloads) return;
-
   try {
-    const record = await localDB.offline_downloads.get(id);
-    if (record && isNativeApp()) {
+    let filePath: string | undefined;
+
+    if (localDB?.offline_downloads) {
+      const record = await localDB.offline_downloads.get(id);
+      if (record) filePath = record.file_path;
+      await localDB.offline_downloads.delete(id).catch(() => {});
+    }
+
+    if (!filePath) {
+      const manifest = await readManifestFromDisk();
+      if (manifest[id]) filePath = manifest[id].file_path;
+    }
+
+    // Remove do manifesto persistente
+    await removeDownloadFromManifest(id);
+
+    if (filePath && isNativeApp()) {
       try {
-        const filePath = record.file_path;
         const relativePath = filePath.includes('videos/')
           ? filePath.substring(filePath.indexOf('videos/'))
           : filePath;
@@ -539,7 +803,6 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
         console.warn('[DownloadManager] Arquivo já não existia no disco:', e);
       }
     }
-    await localDB.offline_downloads.delete(id);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -557,13 +820,11 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
  * Exclui todos os downloads de uma série ou filme completo
  */
 export async function deleteGroupDownloads(streamType: 'movie' | 'series', streamId: string | number): Promise<void> {
-  if (!localDB?.offline_downloads) return;
   try {
-    const items = await localDB.offline_downloads
-      .where('stream_id')
-      .equals(streamId)
-      .filter((i) => i.stream_type === streamType)
-      .toArray();
+    const list = await getOfflineDownloadsList();
+    const items = list.filter(
+      (i) => String(i.stream_id) === String(streamId) && i.stream_type === streamType
+    );
 
     for (const item of items) {
       await deleteOfflineDownload(item.id);

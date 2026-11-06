@@ -740,18 +740,109 @@
         });
       }
 
-      // Carrega dados locais
+      // Carrega dados locais com fallback multinível (Manifesto, Disco Nativo e IndexedDB)
       async function loadLocalData() {
-        let db = await openDB(DB_NAME);
-        if (!db || !db.objectStoreNames.contains('offline_downloads')) {
-          db = await openDB(ALT_DB_NAME);
+        const downloadsMap = {};
+        const MANIFEST_KEY = 'aguenatv_offline_downloads_manifest';
+
+        // 1. Lê do localStorage primeiro para exibição imediata
+        try {
+          const raw = localStorage.getItem(MANIFEST_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((it) => {
+                if (it && it.id) downloadsMap[it.id] = it;
+              });
+            } else if (typeof parsed === 'object' && parsed !== null) {
+              Object.assign(downloadsMap, parsed);
+            }
+          }
+        } catch {}
+
+        // 2. Lê do disco nativo via Filesystem do Capacitor se disponível
+        const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+        if (fs) {
+          try {
+            const res = await fs.readFile({
+              path: 'videos/downloads_manifest.json',
+              directory: 'DATA',
+            });
+            const content = typeof res.data === 'string' ? res.data : '';
+            if (content) {
+              const diskManifest = JSON.parse(content);
+              if (typeof diskManifest === 'object' && diskManifest !== null) {
+                Object.assign(downloadsMap, diskManifest);
+              }
+            }
+          } catch {}
+
+          // Escaneia pasta física de vídeos para recuperar arquivos que porventura estejam no disco
+          try {
+            const dirRes = await fs.readdir({
+              path: 'videos',
+              directory: 'DATA',
+            });
+            const files = dirRes.files || [];
+            for (const f of files) {
+              const name = typeof f === 'string' ? f : (f && f.name);
+              if (!name || !name.startsWith('offline_') || name.endsWith('.tmp')) continue;
+
+              const withoutPrefix = name.replace(/^offline_/, '');
+              const lastDot = withoutPrefix.lastIndexOf('.');
+              const cleanId = lastDot !== -1 ? withoutPrefix.substring(0, lastDot) : withoutPrefix;
+              const ext = lastDot !== -1 ? withoutPrefix.substring(lastDot + 1) : 'mp4';
+
+              if (!downloadsMap[cleanId]) {
+                const isMovie = cleanId.startsWith('movie_');
+                let streamId = cleanId;
+                let sNum, eNum;
+                if (isMovie) {
+                  streamId = cleanId.replace('movie_', '');
+                } else {
+                  const parts = cleanId.split('_');
+                  streamId = parts[1] || cleanId;
+                  if (parts[2] && parts[2].startsWith('s')) sNum = parseInt(parts[2].substring(1), 10);
+                  if (parts[3] && parts[3].startsWith('e')) eNum = parseInt(parts[3].substring(1), 10);
+                }
+                const title = isMovie
+                  ? 'Filme ' + streamId
+                  : 'Série ' + streamId + (sNum && eNum ? ' (T' + sNum + ':E' + eNum + ')' : '');
+
+                downloadsMap[cleanId] = {
+                  id: cleanId,
+                  stream_id: streamId,
+                  stream_type: isMovie ? 'movie' : 'series',
+                  title: title,
+                  file_path: 'videos/' + name,
+                  downloaded_at: new Date().toISOString(),
+                  container_extension: ext,
+                  season_num: sNum,
+                  episode_num: eNum,
+                  episode_id: eNum,
+                };
+              }
+            }
+          } catch {}
         }
 
-        if (db) {
-          allDownloads = await getStoreData(db, 'offline_downloads');
-          allStreams = await getStoreData(db, 'streams');
-        }
+        // 3. Lê do IndexedDB se existir na origem atual
+        try {
+          let db = await openDB(DB_NAME);
+          if (!db || !db.objectStoreNames.contains('offline_downloads')) {
+            db = await openDB(ALT_DB_NAME);
+          }
 
+          if (db) {
+            const dbDownloads = await getStoreData(db, 'offline_downloads');
+            dbDownloads.forEach((it) => {
+              if (it && it.id) downloadsMap[it.id] = it;
+            });
+            allStreams = await getStoreData(db, 'streams');
+          }
+        } catch {}
+
+        allDownloads = Object.values(downloadsMap);
         renderUI();
       }
 
@@ -1021,11 +1112,32 @@
         secCatalog.appendChild(grid);
       }
 
-      // Reprodução de Vídeo Offline
-      function playVideo(item) {
+      // Reprodução de Vídeo Offline com resolução nativa robusta
+      async function playVideo(item) {
         let src = item.file_path;
-        if (window.Capacitor && window.Capacitor.convertFileSrc) {
-          src = window.Capacitor.convertFileSrc(item.file_path);
+
+        try {
+          const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+          if (fs && window.Capacitor.convertFileSrc) {
+            if (item.file_path && (item.file_path.startsWith('/') || item.file_path.startsWith('file://'))) {
+              src = window.Capacitor.convertFileSrc(item.file_path);
+            } else {
+              const uriRes = await fs.getUri({
+                path: item.file_path,
+                directory: 'DATA',
+              });
+              if (uriRes && uriRes.uri) {
+                src = window.Capacitor.convertFileSrc(uriRes.uri);
+              } else {
+                src = window.Capacitor.convertFileSrc(item.file_path);
+              }
+            }
+          } else if (window.Capacitor && window.Capacitor.convertFileSrc) {
+            src = window.Capacitor.convertFileSrc(item.file_path);
+          }
+        } catch (err) {
+          console.warn('[PlayOffline] Erro ao obter URL nativa do vídeo:', err);
+          src = item.file_path;
         }
 
         playerVideoTitle.innerText = item.title;
@@ -1040,29 +1152,59 @@
         playerModal.classList.add('hidden');
       });
 
-      // Exclusão de registro no IndexedDB
+      // Exclusão completa (IndexedDB, Manifesto e Disco Físico)
       async function deleteSingleDownload(id, filePath) {
-        let db = await openDB(DB_NAME);
-        if (!db || !db.objectStoreNames.contains('offline_downloads')) {
-          db = await openDB(ALT_DB_NAME);
-        }
-        if (db) {
-          try {
+        const MANIFEST_KEY = 'aguenatv_offline_downloads_manifest';
+
+        // 1. Remove do localStorage
+        try {
+          const raw = localStorage.getItem(MANIFEST_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed === 'object' && parsed !== null) {
+              delete parsed[id];
+              localStorage.setItem(MANIFEST_KEY, JSON.stringify(parsed));
+            }
+          }
+        } catch {}
+
+        // 2. Remove do IndexedDB
+        try {
+          let db = await openDB(DB_NAME);
+          if (!db || !db.objectStoreNames.contains('offline_downloads')) {
+            db = await openDB(ALT_DB_NAME);
+          }
+          if (db) {
             const tx = db.transaction('offline_downloads', 'readwrite');
             tx.objectStore('offline_downloads').delete(id);
-          } catch {}
-        }
+          }
+        } catch {}
 
-        // Tenta excluir via plugin Filesystem se nativo
-        if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem) {
+        // 3. Tenta excluir via plugin Filesystem do disco e do manifesto em disco se nativo
+        const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+        if (fs) {
           try {
             const relativePath = filePath && filePath.includes('videos/')
               ? filePath.substring(filePath.indexOf('videos/'))
               : filePath;
-            await window.Capacitor.Plugins.Filesystem.deleteFile({
+            await fs.deleteFile({
               path: relativePath,
               directory: 'DATA',
             });
+          } catch {}
+
+          try {
+            const res = await fs.readFile({ path: 'videos/downloads_manifest.json', directory: 'DATA' });
+            if (res && res.data) {
+              const diskManifest = JSON.parse(res.data);
+              delete diskManifest[id];
+              await fs.writeFile({
+                path: 'videos/downloads_manifest.json',
+                data: JSON.stringify(diskManifest, null, 2),
+                directory: 'DATA',
+                encoding: 'utf8',
+              });
+            }
           } catch {}
         }
       }

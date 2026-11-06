@@ -3,33 +3,46 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { WifiOff, HardDrive, ArrowRight, X, AlertCircle } from 'lucide-react';
-import { getOfflineDownloadsList } from '@/lib/download-manager';
+import { getOfflineDownloadsList, getCachedManifestSync, PROGRESS_EVENT } from '@/lib/download-manager';
 
 export function OfflineBanner() {
   const router = useRouter();
   const [isOffline, setIsOffline] = useState(false);
-  const [offlineCount, setOfflineCount] = useState(0);
+  const [offlineCount, setOfflineCount] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return getCachedManifestSync().length;
+    }
+    return 0;
+  });
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   useEffect(() => {
+    const updateCount = async () => {
+      try {
+        const list = await getOfflineDownloadsList();
+        setOfflineCount(list.length);
+      } catch {
+        setOfflineCount(getCachedManifestSync().length);
+      }
+    };
+
     const updateOnlineStatus = async () => {
       const offline = typeof navigator !== 'undefined' ? !navigator.onLine : false;
       setIsOffline(offline);
       if (offline) {
-        try {
-          const list = await getOfflineDownloadsList();
-          setOfflineCount(list.length);
-        } catch {}
+        await updateCount();
       }
     };
 
     updateOnlineStatus();
     window.addEventListener('online', updateOnlineStatus);
     window.addEventListener('offline', updateOnlineStatus);
+    window.addEventListener(PROGRESS_EVENT, updateCount);
 
     return () => {
       window.removeEventListener('online', updateOnlineStatus);
       window.removeEventListener('offline', updateOnlineStatus);
+      window.removeEventListener(PROGRESS_EVENT, updateCount);
     };
   }, []);
 
