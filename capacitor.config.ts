@@ -11,6 +11,8 @@ const config: CapacitorConfig = {
   server: {
     // Conecta diretamente ao servidor na Oracle Cloud (Live Web / OTA)
     url: serverUrl,
+    // Página local servida quando offline ou quando houver erro de rede
+    errorPath: 'index.html',
     // Permite conexões HTTP em texto claro (essencial para servidores IPTV que transmitem em HTTP)
     cleartext: true,
     // Permite navegação livre dentro do WebView nativo sem abrir o navegador Chrome externo
