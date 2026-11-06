@@ -87,15 +87,15 @@ export default function HomePage() {
         .slice(0, 10);
 
       setHeroItems(combinedRecent);
-      const moviesWithNewTag = filteredSortedMovies.slice(0, 16).map((m, idx) => ({
+      const moviesWithNewTag = filteredSortedMovies.slice(0, 12).map((m, idx) => ({
         ...m,
-        isNew: idx < 8 || isRecentlyAdded(m),
+        isNew: idx < 6 || isRecentlyAdded(m),
       }));
       setRecentMovies(moviesWithNewTag as BaseStreamItem[]);
 
-      const seriesWithNewTag = sortedSeries.slice(0, 16).map((s, idx) => ({
+      const seriesWithNewTag = sortedSeries.slice(0, 12).map((s, idx) => ({
         ...s,
-        isNew: idx < 8 || isRecentlyAdded(s),
+        isNew: idx < 6 || isRecentlyAdded(s),
       }));
       setRecentSeries(seriesWithNewTag as BaseStreamItem[]);
     } catch (e) {
@@ -177,7 +177,7 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* 4. Últimos Updates de Filmes (Apenas 4K ou Dublados, sem [L]) - Grid de 5 colunas */}
+      {/* 4. Últimos Updates de Filmes (Apenas 4K ou Dublados, sem [L]) - Grid de 6 colunas no desktop (12 itens) */}
       {recentMovies.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -209,7 +209,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-6 gap-4 sm:gap-5">
             {recentMovies.map((movie) => (
               <MediaCard key={`movie_${movie.id || movie.stream_id}`} item={movie} />
             ))}
@@ -217,7 +217,7 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* 6. ÚLTIMOS UPDATES DE SÉRIES (No final da página inicial) - Grid de 5 colunas */}
+      {/* 6. ÚLTIMOS UPDATES DE SÉRIES (No final da página inicial) - Grid de 6 colunas no desktop (12 itens) */}
       {recentSeries.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -249,7 +249,7 @@ export default function HomePage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-6 gap-4 sm:gap-5">
             {recentSeries.map((series) => (
               <MediaCard key={`series_${series.id || series.stream_id}`} item={series} />
             ))}

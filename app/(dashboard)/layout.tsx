@@ -9,6 +9,7 @@ import MobileBottomNav from '@/components/ui/MobileBottomNav';
 import { DownloadProgressBar } from '@/components/ui/DownloadProgressBar';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import PullToRefresh from '@/components/ui/PullToRefresh';
+import Footer from '@/components/ui/Footer';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -26,8 +27,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           }
         >
-          <main className="flex-1 pb-20">{children}</main>
+          <main className="flex-1">{children}</main>
         </Suspense>
+        <Footer />
         <FloatingPlayer />
         <SyncReminder />
         <UpdateAlertModal />
