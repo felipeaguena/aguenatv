@@ -300,11 +300,129 @@ export async function downloadVideoForOffline(
 }
 
 /**
+ * Sincroniza os arquivos físicos salvos no disco do Android com o banco IndexedDB (Dexie).
+ * Garante que qualquer vídeo baixado seja contabilizado com o tamanho exato em disco.
+ */
+export async function syncOfflineDownloadsWithDisk(): Promise<void> {
+  if (!localDB?.offline_downloads) return;
+
+  if (isNativeApp()) {
+    try {
+      // 1. Garante que a pasta videos existe
+      try {
+        await Filesystem.mkdir({ path: 'videos', directory: Directory.Data, recursive: true });
+      } catch {}
+
+      // 2. Lê arquivos existentes no diretório videos
+      const dirResult = await Filesystem.readdir({ path: 'videos', directory: Directory.Data });
+      const physicalFiles = new Map<string, number>(); // fileName -> size
+
+      for (const f of dirResult.files) {
+        const name = typeof f === 'string' ? f : (f as any).name;
+        if (!name || !name.startsWith('offline_') || name.endsWith('.tmp')) continue;
+
+        try {
+          const stat = await Filesystem.stat({ path: `videos/${name}`, directory: Directory.Data });
+          if (stat.size && stat.size > 0) {
+            physicalFiles.set(name, stat.size);
+          }
+        } catch {}
+      }
+
+      // 3. Atualiza o banco com os arquivos físicos encontrados
+      for (const [fileName, size] of physicalFiles.entries()) {
+        const withoutPrefix = fileName.replace(/^offline_/, '');
+        const lastDot = withoutPrefix.lastIndexOf('.');
+        const cleanId = lastDot !== -1 ? withoutPrefix.substring(0, lastDot) : withoutPrefix;
+        const extension = lastDot !== -1 ? withoutPrefix.substring(lastDot + 1) : 'mp4';
+
+        const existing = await localDB.offline_downloads.get(cleanId);
+        if (existing) {
+          if (existing.file_size !== size) {
+            existing.file_size = size;
+            await localDB.offline_downloads.put(existing);
+          }
+        } else {
+          const isMovie = cleanId.startsWith('movie_');
+          const streamType = isMovie ? 'movie' : 'series';
+
+          let streamId: string | number = cleanId;
+          let seasonNum: number | undefined;
+          let episodeNum: number | undefined;
+
+          if (isMovie) {
+            streamId = cleanId.replace('movie_', '');
+          } else {
+            const parts = cleanId.split('_');
+            streamId = parts[1] || cleanId;
+            if (parts[2]?.startsWith('s')) {
+              seasonNum = parseInt(parts[2].substring(1), 10);
+            }
+            if (parts[3]?.startsWith('e')) {
+              episodeNum = parseInt(parts[3].substring(1), 10);
+            }
+          }
+
+          let title = `Vídeo ${streamId}`;
+          let posterUrl: string | undefined;
+
+          try {
+            const stream = await localDB.streams
+              .where('stream_id')
+              .equals(String(streamId))
+              .first();
+            if (stream) {
+              title = stream.title || stream.name;
+              posterUrl = stream.stream_icon;
+            }
+          } catch {}
+
+          if (!isMovie && seasonNum && episodeNum) {
+            title = `${title} - T${seasonNum}:E${episodeNum}`;
+          }
+
+          const newRecord: OfflineDownload = {
+            id: cleanId,
+            stream_id: streamId,
+            stream_type: streamType,
+            title,
+            series_title: isMovie ? undefined : title.split(' - ')[0],
+            poster_url: posterUrl,
+            file_path: `videos/${fileName}`,
+            file_size: size,
+            downloaded_at: new Date().toISOString(),
+            container_extension: extension,
+            season_num: seasonNum,
+            episode_num: episodeNum,
+            episode_id: episodeNum,
+          };
+
+          await localDB.offline_downloads.put(newRecord);
+        }
+      }
+
+      // 4. Remove do banco registros cujos arquivos físicos não existem mais
+      const allDbRecords = await localDB.offline_downloads.toArray();
+      for (const rec of allDbRecords) {
+        const filePath = rec.file_path || '';
+        const fileName = filePath.includes('/') ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+        if (!physicalFiles.has(fileName)) {
+          await localDB.offline_downloads.delete(rec.id);
+        }
+      }
+    } catch (e) {
+      console.warn('[DownloadManager] Erro na sincronização com disco:', e);
+    }
+  }
+}
+
+/**
  * Retorna todos os vídeos salvos offline
  */
 export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
   if (!localDB?.offline_downloads) return [];
   try {
+    await syncOfflineDownloadsWithDisk();
     return await localDB.offline_downloads.toArray();
   } catch {
     return [];
@@ -420,6 +538,14 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
       }
     }
     await localDB.offline_downloads.delete(id);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent(PROGRESS_EVENT, {
+          detail: { id, done: true, deleted: true },
+        })
+      );
+    }
   } catch (err) {
     console.error('[DownloadManager] Erro ao excluir vídeo offline:', err);
   }

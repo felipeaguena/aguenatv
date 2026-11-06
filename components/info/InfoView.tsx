@@ -52,6 +52,7 @@ import {
   buildDownloadId,
   isNativeApp,
   OfflineDownload,
+  PROGRESS_EVENT,
 } from '@/lib/download-manager';
 import { useDownloadProgress } from '@/hooks/useDownloadProgress';
 import { usePlayer } from '@/context/PlayerContext';
@@ -117,9 +118,19 @@ export default function InfoView({ type, id }: InfoViewProps) {
     setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    const handleProgress = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.done) {
+        refreshDownloads();
+      }
+    };
+    window.addEventListener(PROGRESS_EVENT, handleProgress);
+
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener(PROGRESS_EVENT, handleProgress);
     };
   }, []);
 

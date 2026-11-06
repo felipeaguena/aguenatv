@@ -232,7 +232,7 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 w-full glass-nav">
+    <header className={`sticky top-0 w-full glass-nav ${isMobileMenuOpen ? 'z-[100]' : 'z-40'}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Lado Esquerdo: Hamburger Menu Mobile + Logo AGUENATV */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -533,7 +533,7 @@ export default function Navbar() {
 
       {/* Popup Lateral / Drawer Menu para Mobile */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-[100] lg:hidden">
           {/* Backdrop com Blur */}
           <div
             className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
@@ -542,7 +542,7 @@ export default function Navbar() {
           />
 
           {/* Gaveta Lateral (Slide from Left) */}
-          <div className="fixed inset-y-0 left-0 w-72 sm:w-80 max-w-[85vw] bg-[#0c0d12]/95 border-r border-white/10 backdrop-blur-2xl flex flex-col shadow-2xl z-10 animate-in slide-in-from-left duration-200">
+          <div className="fixed inset-y-0 left-0 w-72 sm:w-80 max-w-[85vw] bg-[#0c0d12]/95 border-r border-white/10 backdrop-blur-2xl flex flex-col shadow-2xl z-[101] animate-in slide-in-from-left duration-200">
             {/* Cabeçalho da Gaveta */}
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <Link
@@ -611,7 +611,7 @@ export default function Navbar() {
             </div>
 
             {/* Rodapé da Gaveta com Botão de Logout */}
-            <div className="p-3 border-t border-white/10 bg-[#08090d]">
+            <div className="p-4 pb-8 border-t border-white/10 bg-[#08090d] safe-area-pb">
               <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
