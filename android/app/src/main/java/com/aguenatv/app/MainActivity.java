@@ -1,11 +1,14 @@
 package com.aguenatv.app;
 
+import android.app.UiModeManager;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.KeyEvent;
 import android.view.ViewGroup;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -38,6 +41,11 @@ public class MainActivity extends BridgeActivity {
                 settings.setDatabaseEnabled(true);
                 settings.setAllowFileAccess(true);
                 settings.setAllowContentAccess(true);
+
+                // Garante que o WebView tenha foco total para eventos de controle remoto D-pad em Smart TVs
+                webView.setFocusable(true);
+                webView.setFocusableInTouchMode(true);
+                webView.requestFocus();
 
                 // Configura cliente customizado para recursos locais sem interceptar navegação normal
                 setupCustomWebViewClient(webView);
@@ -148,6 +156,11 @@ public class MainActivity extends BridgeActivity {
                 );
                 swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#181924"));
 
+                // Desativa Pull-to-Refresh em Android TV para evitar conflito com a navegação pelas setas
+                if (isTelevisionDevice()) {
+                    swipeRefreshLayout.setEnabled(false);
+                }
+
                 swipeRefreshLayout.setOnRefreshListener(() -> {
                     if (isNetworkConnected()) {
                         String currentUrl = webView.getUrl();
@@ -215,6 +228,7 @@ public class MainActivity extends BridgeActivity {
         try {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
+                webView.requestFocus();
                 WebSettings settings = webView.getSettings();
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
@@ -223,6 +237,39 @@ public class MainActivity extends BridgeActivity {
                 }
             }
         } catch (Exception ignored) {}
+    }
+
+    public boolean isTelevisionDevice() {
+        try {
+            UiModeManager uiModeManager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+            if (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int keyCode = event.getKeyCode();
+        // Garante que o WebView processe teclas de controle remoto D-pad e de mídia
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+            keyCode == KeyEvent.KEYCODE_DPAD_DOWN ||
+            keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+            keyCode == KeyEvent.KEYCODE_ENTER ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD ||
+            keyCode == KeyEvent.KEYCODE_MEDIA_REWIND) {
+            WebView webView = getBridge().getWebView();
+            if (webView != null && !webView.hasFocus()) {
+                webView.requestFocus();
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private boolean isNetworkConnected() {

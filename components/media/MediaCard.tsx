@@ -90,7 +90,20 @@ export default function MediaCard({ item }: MediaCardProps) {
   return (
     <div
       onClick={handleOpenInfo}
-      className={`group relative flex flex-col rounded-2xl overflow-hidden cursor-pointer bg-[#13141b] border card-hover-effect transition-all ${
+      tabIndex={0}
+      role="button"
+      data-tv-focusable="true"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (isLive) {
+            router.push(getWatchUrl(item.stream_type, item.stream_id));
+          } else {
+            handleOpenInfo();
+          }
+        }
+      }}
+      className={`group relative flex flex-col rounded-2xl overflow-hidden cursor-pointer bg-[#13141b] border card-hover-effect transition-all focus:outline-none ${
         watched && !isLive
           ? 'border-emerald-500 shadow-[0_0_18px_rgba(16,185,129,0.3)]'
           : isLive

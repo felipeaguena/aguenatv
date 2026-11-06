@@ -10,18 +10,16 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.6';
+  let latestVersion = '0.3.0';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
-    'Ajuste na proporção cinema do player no desktop e barra lateral acompanhando a altura com média de 5 capítulos visíveis',
-    'Nova página de Vídeos Baixados (Offline) no estilo Watch Séries com player local no topo e lista sequencial abaixo',
-    'Instalação automática do APK nativo sem sair do aplicativo com barra de progresso em tempo real (%)',
-    'Abertura de links externos do GitHub no navegador padrão do aparelho celular',
-    'Persistência total na página ativa ao desconectar da internet ou retomar do segundo plano',
-    'Notificação discreta de modo offline no topo com confirmação prévia antes de alternar',
-    'Correção do cabeçalho no notch da câmera em aparelhos móveis no portal offline',
-    'Carregamento otimizado do catálogo em cache do IndexedDB no modo offline',
-    'Separação estrita de abas e gerenciamento entre Favoritos e Concluídos sem abas de TV ao Vivo',
+    'Suporte completo a Android TV, Smart TV, TV Box, Fire TV Stick e Mi Box',
+    'Navegação fluida por controle remoto (D-Pad: Cima, Baixo, Esquerda, Direita, OK e Voltar)',
+    'Motor de navegação espacial com realce neon e foco automático em cards e botões',
+    'Controles de vídeo via controle remoto (Play/Pause, retroceder/avançar 10s e volume)',
+    'Launcher Banner 16:9 oficial para a tela inicial do Android TV e Google TV',
+    'Alternador de Modo TV integrado nas configurações e menu de perfil',
+    'Otimização de layout widescreen 16:9 e ocultação de barras de navegação touch na TV',
   ];
 
   try {

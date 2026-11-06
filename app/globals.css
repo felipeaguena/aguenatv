@@ -70,3 +70,63 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #8b5cf6;
 }
+
+/* =========================================================================
+   ESTILOS & FOCO PARA ANDROID TV / 10-FOOT EXPERIENCE (CONTROLE REMOTO D-PAD)
+   ========================================================================= */
+@keyframes tv-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.6), 0 0 5px rgba(139, 92, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(139, 92, 246, 0.9), 0 0 15px rgba(167, 139, 250, 0.6);
+  }
+}
+
+body.tv-mode {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+/* Realce nítido e vibrante em qualquer elemento focado via D-Pad na TV */
+body.tv-mode :focus-visible,
+body.tv-mode .tv-focused,
+.tv-focused {
+  outline: 3px solid #8b5cf6 !important;
+  outline-offset: 3px !important;
+  transform: scale(1.06) !important;
+  animation: tv-pulse-glow 2s infinite ease-in-out !important;
+  z-index: 40 !important;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease !important;
+}
+
+/* Remove hover de mouse em modo TV para não congelar estados ao usar controle remoto */
+body.tv-mode .card-hover-effect:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+body.tv-mode .card-hover-effect:focus-visible,
+body.tv-mode .card-hover-effect.tv-focused {
+  transform: scale(1.08) !important;
+  border-color: #8b5cf6 !important;
+}
+
+/* No modo TV: oculta barra inferior de celular e garante que a barra superior widescreen seja exibida */
+body.tv-mode nav[aria-label="Navegação inferior mobile"] {
+  display: none !important;
+}
+
+body.tv-mode .glass-nav nav.hidden.lg\:flex {
+  display: flex !important;
+}
+
+body.tv-mode button[aria-label="Abrir menu de navegação"] {
+  display: none !important;
+}
+
+/* Espaçamento otimizado para TV (10-foot UI) */
+body.tv-mode {
+  padding-bottom: 2rem !important;
+}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ServiceWorkerRegistration } from '@/components/ui/ServiceWorkerRegistration';
+import { TvProvider } from '@/context/TvContext';
 
 export const metadata: Metadata = {
   title: 'AGUENATV | Reprodução Inteligente e Privada',
@@ -21,7 +22,9 @@ export default function RootLayout({
     <html lang="pt-BR" className="h-full bg-[#0b0c10] text-[#f8fafc] dark">
       <body className="min-h-full flex flex-col">
         <ServiceWorkerRegistration />
-        {children}
+        <TvProvider>
+          {children}
+        </TvProvider>
       </body>
     </html>
   );

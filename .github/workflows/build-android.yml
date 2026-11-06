@@ -110,13 +110,12 @@ jobs:
           name: AGUENATV ${{ steps.pkg_version.outputs.version }}
           body: |
             ## 🚀 Novidades da versão ${{ steps.pkg_version.outputs.version }}
-            - 📊 **Barra de Progresso com %**: Acompanhamento visual em tempo real da quantidade baixada com porcentagem no botão e card flutuante.
-            - 🔔 **Notificações Push com Progresso e Alerta de Conclusão**: Notificação nativa no celular informando o status do download e alerta com som ao concluir.
-            - ⚡ **Download Contínuo em Segundo Plano**: Download permanece ativo mesmo com a tela do celular apagada/bloqueada ou usando outros aplicativos (Foreground Service + WakeLock).
-            - 📥 **Download de Conteúdo Offline**: Baixe filmes e episódios/temporadas de séries diretamente na tela de detalhes.
-            - 💾 **Liberação de Espaço**: Exclusão rápida de vídeos baixados para liberar espaço na memória.
-            - ⭐ **Aba "Baixados Offline" em Favoritos**: Reprodução instantânea de conteúdos salvos sem consumir internet.
-            - 🔒 **APK Release com Assinatura Segura**: Build oficial assinado para evitar avisos de Play Protect.
+            - 📺 **Modo Nativo Android TV e TV Box**: Suporte completo a navegação por controle remoto (D-Pad: Cima, Baixo, Esquerda, Direita, OK e Voltar) em Smart TVs, TV Box, Fire TV Stick e Mi Box.
+            - 🎯 **Motor de Navegação Espacial e Foco Neon**: Destaque visual pulsante com anel violeta em cards, botões e menus ao navegar pelo controle remoto.
+            - 🎮 **Controles de Reprodução no Controle Remoto**: Play/Pause no botão central e tecla Play, retroceder/avançar 10s nas setas laterais, e ajuste de volume nas setas verticais.
+            - 🖼️ **Launcher Banner 16:9 Oficial**: Ícone e banner dedicados para a tela inicial do Android TV e Google TV (Leanback launcher).
+            - ⚙️ **Alternador de Modo TV**: Alternância rápida entre interface mobile e TV nas configurações e no menu de perfil.
+            - 🔒 **APK Híbrido Release Assinado**: Compatível tanto com smartphones Android quanto com televisores e TV Boxes na mesma instalação.
           files: |
             build-apks/AGUENATV-release.apk
             build-apks/AGUENATV-debug.apk

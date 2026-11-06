@@ -36,8 +36,10 @@ import { IPTVPlaylist, BaseStreamItem, SessionUser } from '@/lib/types';
 import { initSearchIndex } from '@/lib/search-index';
 import { fetchIPTVApi } from '@/lib/iptv-client';
 import UpdateAlertModal from '@/components/ui/UpdateAlertModal';
+import { useTv } from '@/context/TvContext';
 
 export default function SettingsPage() {
+  const { isTv, toggleTv } = useTv();
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [installedVersion, setInstalledVersion] = useState<string>('0.2.5');
 
@@ -847,7 +849,46 @@ export default function SettingsPage() {
         </section>
       )}
 
-      {/* 5. SEÇÃO: ATUALIZAÇÕES DO APLICATIVO */}
+      {/* 5. SEÇÃO: MODO ANDROID TV & CONTROLE REMOTO */}
+      <section className="p-6 rounded-3xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-400 shrink-0">
+            <Tv className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white">Modo Android TV (D-Pad / Controle Remoto)</h3>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                  isTv
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : 'bg-white/5 text-neutral-400 border border-white/10'
+                }`}
+              >
+                {isTv ? 'Ativo' : 'Desativado'}
+              </span>
+            </div>
+            <p className="text-xs text-neutral-400 mt-0.5">
+              Navegação espacial fluida usando controle remoto (D-Pad), zoom ampliado com brilho neon nos cards e atalhos de TV.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={toggleTv}
+          className={`px-5 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 w-fit cursor-pointer shadow-lg ${
+            isTv
+              ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30'
+              : 'bg-violet-600 hover:bg-violet-700 text-white shadow-violet-600/30'
+          }`}
+        >
+          <Tv className="w-4 h-4" />
+          <span>{isTv ? 'Desativar Modo TV' : 'Ativar Modo TV Agora'}</span>
+        </button>
+      </section>
+
+      {/* 6. SEÇÃO: ATUALIZAÇÕES DO APLICATIVO */}
       <section className="p-6 rounded-3xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">

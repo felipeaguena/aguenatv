@@ -191,7 +191,9 @@ export default function HeroSlider({ items, onSyncClick }: HeroSliderProps) {
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <Link
             href={watchUrl}
-            className="px-6 py-3 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white text-xs sm:text-sm font-bold shadow-xl shadow-violet-600/40 transition-all flex items-center gap-2 group cursor-pointer hover:scale-105 active:scale-95"
+            tabIndex={0}
+            data-tv-focusable="true"
+            className="px-6 py-3 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white text-xs sm:text-sm font-bold shadow-xl shadow-violet-600/40 transition-all flex items-center gap-2 group cursor-pointer hover:scale-105 active:scale-95 focus:outline-none"
           >
             <Play className="w-4 h-4 fill-white group-hover:scale-110 transition-transform" />
             Assistir Agora
@@ -199,7 +201,9 @@ export default function HeroSlider({ items, onSyncClick }: HeroSliderProps) {
 
           <Link
             href={infoUrl}
-            className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs sm:text-sm font-bold border border-white/15 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95"
+            tabIndex={0}
+            data-tv-focusable="true"
+            className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs sm:text-sm font-bold border border-white/15 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95 focus:outline-none"
           >
             <Info className="w-4 h-4 text-neutral-300" />
             Mais Detalhes

@@ -125,7 +125,17 @@ export default function ContinueWatchingSection() {
           return (
             <div
               key={item.id}
-              className="group relative flex-none w-[260px] sm:w-[300px] snap-start rounded-2xl overflow-hidden bg-[#13141b] border border-white/10 hover:border-violet-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-violet-600/20 flex flex-col justify-between"
+              tabIndex={0}
+              role="button"
+              data-tv-focusable="true"
+              onClick={() => router.push(resumeUrl)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  router.push(resumeUrl);
+                }
+              }}
+              className="group relative flex-none w-[260px] sm:w-[300px] snap-start rounded-2xl overflow-hidden bg-[#13141b] border border-white/10 hover:border-violet-500/40 transition-all duration-300 hover:shadow-2xl hover:shadow-violet-600/20 flex flex-col justify-between cursor-pointer focus:outline-none"
             >
               {/* Thumbnail 16:9 Cinema */}
               <div className="relative aspect-video w-full overflow-hidden bg-black">

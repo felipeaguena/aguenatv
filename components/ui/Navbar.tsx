@@ -31,12 +31,14 @@ import { isNativeApp, warmupOfflineDownloads } from '@/lib/download-manager';
 import { resetFavoritesCache } from '@/hooks/useFavorites';
 import { resetWatchedCache } from '@/hooks/useWatched';
 import { resetContinueCache } from '@/hooks/useContinueWatching';
+import { useTv } from '@/context/TvContext';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
 
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { play } = usePlayer();
+  const { isTv, toggleTv } = useTv();
 
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -50,7 +52,7 @@ export default function Navbar() {
   const searchTimerRef = useRef<NodeJS.Timeout | null>(null);
   const searchIdRef = useRef(0);
   const [isNative, setIsNative] = useState(false);
-  const [installedVersion, setInstalledVersion] = useState<string>('0.2.5');
+  const [installedVersion, setInstalledVersion] = useState<string>('0.3.0');
 
   // Detecta a versão instalada no APK via Capacitor nativo
   useEffect(() => {
@@ -514,6 +516,33 @@ export default function Navbar() {
                       <span className="text-[10px] text-neutral-500">M3U / Cache</span>
                     </div>
                   </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      toggleTv();
+                      setIsProfileDropdownOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      isTv
+                        ? 'bg-violet-600/25 text-violet-300 border border-violet-500/40'
+                        : 'text-neutral-300 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <Tv className="w-4 h-4 text-violet-400" />
+                    <div className="flex-1 flex items-center justify-between text-left">
+                      <span>Modo Android TV</span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                          isTv
+                            ? 'bg-violet-500 text-white shadow-sm shadow-violet-500/50'
+                            : 'bg-neutral-800 text-neutral-400'
+                        }`}
+                      >
+                        {isTv ? 'Ativo' : 'Off'}
+                      </span>
+                    </div>
+                  </button>
 
                   {currentUser?.role === 'admin' && (
                     <Link
