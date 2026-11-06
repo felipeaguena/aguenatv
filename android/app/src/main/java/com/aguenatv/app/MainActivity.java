@@ -39,7 +39,7 @@ public class MainActivity extends BridgeActivity {
                 settings.setAllowFileAccess(true);
                 settings.setAllowContentAccess(true);
 
-                // Configura cliente customizado para interceptar requisições offline
+                // Configura cliente customizado para recursos locais sem interceptar navegação normal
                 setupCustomWebViewClient(webView);
 
                 // Configura Pull-to-Refresh nativo com SwipeRefreshLayout
@@ -65,11 +65,7 @@ public class MainActivity extends BridgeActivity {
                         if (swipeRefreshLayout != null) {
                             swipeRefreshLayout.setRefreshing(false);
                         }
-                        // Não sobrescreve a página ativa do usuário se ela já estiver carregada
-                        String currentUrl = view.getUrl();
-                        if (currentUrl == null || "about:blank".equals(currentUrl)) {
-                            loadOfflinePortal(view);
-                        }
+                        // NUNCA redireciona automaticamente para portal offline em erros durante a navegação
                     }
 
                     @Override
@@ -80,13 +76,8 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                // Se abrir o app offline pela primeira vez sem nenhuma página em memória
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    String currentUrl = webView.getUrl();
-                    if (currentUrl == null || "about:blank".equals(currentUrl)) {
-                        loadOfflinePortal(webView);
-                    }
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }
@@ -123,23 +114,13 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                // Apenas exibe o portal offline local se for erro de carga inicial completa (sem página prévia)
-                if (request != null && request.isForMainFrame()) {
-                    String currentUrl = view.getUrl();
-                    if (currentUrl == null || "about:blank".equals(currentUrl)) {
-                        loadOfflinePortal(view);
-                        return;
-                    }
-                }
+                // Apenas loga erro sem sobrescrever a tela do usuário
                 super.onReceivedError(view, request, error);
             }
 
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                String currentUrl = view.getUrl();
-                if (currentUrl == null || "about:blank".equals(currentUrl)) {
-                    loadOfflinePortal(view);
-                }
+                // Não sobrescreve a página ativa
             }
         });
     }
@@ -237,7 +218,6 @@ public class MainActivity extends BridgeActivity {
                 WebSettings settings = webView.getSettings();
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    // IMPORTANTE: NÃO chama loadOfflinePortal aqui para NUNCA apagar o player ou página ativa do usuário!
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }

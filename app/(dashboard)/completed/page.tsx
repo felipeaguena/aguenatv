@@ -37,133 +37,96 @@ function CompletedContent() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [search, setSearch] = useState<string>('');
 
-  // Metadados extras (como poster oficial e categoria) recuperados do IndexedDB local
-  const [extraMeta, setExtraMeta] = useState<
-    Record<string, { posterUrl?: string; categoryName?: string; rating?: string }>
-  >({});
+  // Títulos verificados do catálogo oficial (apenas filmes e séries completos)
+  const [verifiedCompletedTitles, setVerifiedCompletedTitles] = useState<any[]>([]);
+  const [loadingTitles, setLoadingTitles] = useState<boolean>(true);
 
-  // Recupera imagens originais dos títulos concluídos caso não tenham poster salvo no histórico
+  // Carrega e valida estritamente os títulos principais concluídos a partir do catálogo local
+  // Capítulos individuais de episódios são descartados para manter a página leve e sem bugs
   useEffect(() => {
-    if (!localDB?.streams || watchedList.length === 0) return;
-
     let isMounted = true;
-    async function fillMissingPosters() {
-      const missingItems = watchedList.filter(
-        (w) =>
-          w.is_completed &&
-          !w.poster_url &&
-          !favorites.some((f) => String(f.stream_id) === String(w.stream_id))
-      );
 
-      if (missingItems.length === 0) return;
+    async function loadVerifiedCompleted() {
+      setLoadingTitles(true);
+      try {
+        const titleMap = new Map<string, any>();
 
-      const newPosters: Record<
-        string,
-        { posterUrl?: string; categoryName?: string; rating?: string }
-      > = {};
-
-      for (const item of missingItems) {
-        try {
-          const streamType = (item.stream_type as string) === 'movies' ? 'movie' : item.stream_type;
-          let found = await localDB.streams
-            .where('stream_id')
-            .equals(String(item.stream_id))
-            .filter((s) => s.stream_type === streamType)
-            .first();
-
-          if (!found) {
-            found = await localDB.streams
-              .where('stream_id')
-              .equals(String(item.stream_id))
-              .first();
+        // 1. Títulos de Favoritos marcados como concluídos
+        for (const fav of favorites) {
+          if (fav.stream_type === 'live') continue;
+          if (isWatched(fav.stream_id, fav.stream_type)) {
+            const key = `${fav.stream_type}_${fav.stream_id}`;
+            titleMap.set(key, {
+              id: fav.stream_id,
+              stream_id: fav.stream_id,
+              stream_type: fav.stream_type,
+              title: fav.title,
+              name: fav.title,
+              stream_icon: fav.poster_url,
+              category_name: fav.category_name || (fav.stream_type === 'series' ? 'Série' : 'Filme'),
+              rating: fav.rating,
+              isCompleted: true,
+            });
           }
-
-          if (!found && item.title) {
-            found = await localDB.streams.where('name').equals(item.title).first();
-          }
-
-          if (found && (found.stream_icon || found.category_name)) {
-            newPosters[`${item.stream_type}_${item.stream_id}`] = {
-              posterUrl: found.stream_icon,
-              categoryName: found.category_name,
-              rating: found.rating !== undefined ? String(found.rating) : undefined,
-            };
-          }
-        } catch {
-          // ignora falha pontual
         }
-      }
 
-      if (isMounted && Object.keys(newPosters).length > 0) {
-        setExtraMeta((prev) => ({ ...prev, ...newPosters }));
+        // 2. Histórico de concluídos diretos (verificando se o stream_id é de fato um título no catálogo)
+        const candidates = watchedList.filter((w) => w.is_completed && w.stream_type !== 'live');
+
+        if (localDB?.streams && candidates.length > 0) {
+          for (const w of candidates) {
+            const rawType = (w.stream_type as string) === 'movies' ? 'movie' : w.stream_type;
+            const key = `${rawType}_${w.stream_id}`;
+
+            if (titleMap.has(key)) continue;
+
+            // Busca no banco local se o ID corresponde a um Filme ou Série catalogado
+            let catalogItem = await localDB.streams.get(`${rawType}_${w.stream_id}`);
+            if (!catalogItem) {
+              catalogItem = await localDB.streams
+                .where('stream_id')
+                .equals(String(w.stream_id))
+                .filter((s) => s.stream_type === rawType)
+                .first();
+            }
+
+            // Somente inclui se for um título legítimo do catálogo (ignora episódios soltos)
+            if (catalogItem) {
+              titleMap.set(key, {
+                id: catalogItem.stream_id,
+                stream_id: catalogItem.stream_id,
+                stream_type: catalogItem.stream_type,
+                title: catalogItem.name || catalogItem.title || w.title,
+                name: catalogItem.name || catalogItem.title || w.title,
+                stream_icon: catalogItem.stream_icon || w.poster_url,
+                category_name: catalogItem.category_name || (rawType === 'series' ? 'Série' : 'Filme'),
+                rating: catalogItem.rating || (w as any).rating,
+                isCompleted: true,
+              });
+            }
+          }
+        }
+
+        if (isMounted) {
+          setVerifiedCompletedTitles(Array.from(titleMap.values()));
+        }
+      } catch (err) {
+        console.warn('[CompletedPage] Erro ao filtrar títulos concluídos:', err);
+      } finally {
+        if (isMounted) setLoadingTitles(false);
       }
     }
 
-    fillMissingPosters();
+    loadVerifiedCompleted();
+
     return () => {
       isMounted = false;
     };
-  }, [watchedList, favorites]);
-
-  // Itens unificados concluídos (assistidos)
-  const completedItems = useMemo(() => {
-    const itemsMap = new Map<string, any>();
-
-    // 1. Favoritos marcados como assistidos/concluídos
-    for (const fav of favorites) {
-      if (fav.stream_type === 'live') continue; // Canais TV nunca entram em concluídos
-      if (isWatched(fav.stream_id, fav.stream_type)) {
-        const key = `${fav.stream_type}_${fav.stream_id}`;
-        itemsMap.set(key, {
-          id: fav.stream_id,
-          stream_id: fav.stream_id,
-          stream_type: fav.stream_type,
-          title: fav.title,
-          name: fav.title,
-          stream_icon: fav.poster_url,
-          category_name: fav.category_name,
-          rating: fav.rating,
-          isCompleted: true,
-        });
-      }
-    }
-
-    // 2. Histórico de concluídos diretos
-    for (const w of watchedList) {
-      if (!w.is_completed) continue;
-      if (w.stream_type === 'live') continue; // Canais TV nunca entram em concluídos
-
-      const rawType = (w.stream_type as string) === 'movies' ? 'movie' : w.stream_type;
-      const key = `${rawType}_${w.stream_id}`;
-
-      if (!itemsMap.has(key)) {
-        const meta = extraMeta[key] || {};
-        itemsMap.set(key, {
-          id: w.stream_id,
-          stream_id: w.stream_id,
-          stream_type: rawType,
-          title: w.title,
-          name: w.title,
-          stream_icon: w.poster_url || meta.posterUrl,
-          category_name: meta.categoryName || 'Concluído',
-          rating: meta.rating,
-          isCompleted: true,
-        });
-      } else {
-        const existing = itemsMap.get(key);
-        const meta = extraMeta[key];
-        if (!existing.stream_icon && (w.poster_url || meta?.posterUrl)) {
-          existing.stream_icon = w.poster_url || meta?.posterUrl;
-        }
-      }
-    }
-
-    return Array.from(itemsMap.values());
-  }, [favorites, watchedList, isWatched, extraMeta]);
+  }, [favorites, watchedList, isWatched]);
 
   // Filtra por aba e busca
   const filteredItems = useMemo(() => {
-    return completedItems.filter((item) => {
+    return verifiedCompletedTitles.filter((item) => {
       let matchTab = true;
       if (activeTab === 'movie' || activeTab === 'series') {
         matchTab = item.stream_type === activeTab;
@@ -181,7 +144,7 @@ function CompletedContent() {
 
       return matchTab && matchSearch;
     });
-  }, [completedItems, activeTab, search]);
+  }, [verifiedCompletedTitles, activeTab, search]);
 
   const paginatedItems = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -210,20 +173,22 @@ function CompletedContent() {
     icon: any;
     count: number;
   }> = [
-    { id: 'all', label: 'Todos', icon: CheckCircle2, count: completedItems.length },
+    { id: 'all', label: 'Todos', icon: CheckCircle2, count: verifiedCompletedTitles.length },
     {
       id: 'movie',
       label: 'Filmes',
       icon: Film,
-      count: completedItems.filter((f) => f.stream_type === 'movie').length,
+      count: verifiedCompletedTitles.filter((f) => f.stream_type === 'movie').length,
     },
     {
       id: 'series',
       label: 'Séries',
       icon: Video,
-      count: completedItems.filter((f) => f.stream_type === 'series').length,
+      count: verifiedCompletedTitles.filter((f) => f.stream_type === 'series').length,
     },
   ];
+
+  const isLoading = loadingWatched || loadingTitles;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -235,7 +200,7 @@ function CompletedContent() {
             Títulos Concluídos
           </h1>
           <p className="text-xs text-neutral-400 mt-1">
-            Histórico completo de filmes e episódios finalizados na sua conta.
+            Filmes e séries finalizados marcados como concluídos na sua conta.
           </p>
         </div>
 
@@ -249,7 +214,7 @@ function CompletedContent() {
             <ArrowRight className="w-3 h-3 text-neutral-500" />
           </Link>
           <span className="text-xs font-semibold text-neutral-400 bg-[#13141b] border border-white/10 px-3.5 py-1.5 rounded-xl w-fit">
-            <span className="text-emerald-400 font-bold">{completedItems.length}</span> concluídos
+            <span className="text-emerald-400 font-bold">{verifiedCompletedTitles.length}</span> títulos concluídos
           </span>
         </div>
       </div>
@@ -308,17 +273,17 @@ function CompletedContent() {
       </div>
 
       {/* Grid de Itens Concluídos */}
-      {loadingWatched ? (
+      {isLoading ? (
         <div className="p-20 text-center text-xs text-neutral-400 space-y-2">
           <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
-          <p>Carregando concluídos...</p>
+          <p>Carregando títulos concluídos...</p>
         </div>
       ) : paginatedItems.length === 0 ? (
         <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center space-y-3">
           <CheckCircle2 className="w-10 h-10 text-neutral-600 mx-auto" />
           <h3 className="text-sm font-bold text-neutral-200">Nenhum título concluído encontrado</h3>
           <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-            Quando você assistir filmes ou episódios até o final ou marcá-los com o ícone de concluído no player ou card, eles aparecerão aqui.
+            Quando você marcar um filme ou série como concluído na tela de detalhes (página info) ou no player, o título aparecerá organizado aqui.
           </p>
         </div>
       ) : (

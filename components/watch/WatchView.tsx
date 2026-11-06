@@ -663,7 +663,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }, [item, isFavorite, streamType]);
 
   const watched = useMemo(() => {
-    if (isSeries && activeEpisode) {
+    const targetId = item?.stream_id || id;
+    if (targetId) return isWatched(targetId, streamType);
+    if (false as boolean && activeEpisode) {
       return isWatched(String(activeEpisode.id), 'series');
     }
     if (item) {
@@ -920,9 +922,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
           <button
             onClick={() => {
               if (watched) {
-                removeWatched(currentActiveId, streamType);
+                const targetId = item?.stream_id || id;
+                removeWatched(targetId, streamType);
               } else {
-                markWatched(currentActiveId, streamType, playerTitle, true, {
+                const targetId = item?.stream_id || id;
+                const mainTitle = item?.title || item?.name || playerTitle;
+                markWatched(targetId, streamType, mainTitle, true, {
                   posterUrl: item?.stream_icon,
                   categoryName: item?.category_name,
                   rating: item?.rating,

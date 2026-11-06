@@ -1,5 +1,5 @@
 // AGUENATV Service Worker para Suporte Completo Offline e Modo Avião
-const CACHE_NAME = 'aguenatv-v1';
+const CACHE_NAME = 'aguenatv-v2';
 
 // Recursos críticos pré-cacheados para navegação sem internet
 const PRECACHE_URLS = [
@@ -65,21 +65,13 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(async () => {
-          // Se estiver offline ou em Modo Avião, busca a página correspondente no cache
+          // Se estiver offline, retorna a página solicitada se ela estiver no cache
           const cachedResponse = await caches.match(request);
           if (cachedResponse) {
             return cachedResponse;
           }
-          // Fallback para a página de offline ou home cacheada
-          const offlineFallback = await caches.match('/offline');
-          if (offlineFallback) return offlineFallback;
-          const homeFallback = await caches.match('/');
-          if (homeFallback) return homeFallback;
-
-          return new Response(
-            '<html><body><h2>Modo Offline Ativo</h2><p>Conecte-se para atualizar ou acesse seus conteúdos baixados.</p></body></html>',
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-          );
+          // NUNCA redireciona automaticamente para /offline durante a navegação
+          return new Response('Sem conexão', { status: 503, statusText: 'Offline' });
         })
     );
     return;
