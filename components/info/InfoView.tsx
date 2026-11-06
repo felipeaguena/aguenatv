@@ -45,6 +45,7 @@ import { getWatchUrl, getRouteType } from '@/lib/routes';
 import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle, isSpecialSeason } from '@/lib/series';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
+import { cleanCategoryName } from '@/lib/stream-utils';
 import {
   downloadVideoForOffline,
   getOfflineDownloadsList,
@@ -331,6 +332,12 @@ export default function InfoView({ type, id }: InfoViewProps) {
 
   // 2. Busca Metadados Gratuitos Enriquecidos (TMDb / Kitsu / TVMaze)
   useEffect(() => {
+    // TV ao Vivo utiliza estritamente dados da lista M3U (sem TMDb / metadados externos)
+    if (type === 'live' || item?.stream_type === 'live') {
+      setLoadingMetadata(false);
+      return;
+    }
+
     if (!item?.title && !item?.name) return;
 
     let isMounted = true;
@@ -360,7 +367,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
     return () => {
       isMounted = false;
     };
-  }, [item?.title, item?.name, item?.stream_type]);
+  }, [item?.title, item?.name, item?.stream_type, type]);
 
   // 3. Busca Metadados de Cada Episódio da Temporada Ativa (TMDb: Nome, Sinopse, Data e Thumb)
   useEffect(() => {
@@ -569,31 +576,35 @@ export default function InfoView({ type, id }: InfoViewProps) {
 
   const favorited = isFavorite(item.stream_id, streamType);
   const watched = isWatched(item.stream_id, streamType);
+  const isLive = streamType === 'live';
 
-  // Imagens priorizadas com alta definição (Backdrop e Poster)
-  const backdropImage = enrichedMetadata?.backdropUrl || item.stream_icon;
-  const posterImage = enrichedMetadata?.posterUrl || item.stream_icon;
-  const heroImage = backdropImage || posterImage;
+  // Imagens priorizadas (Backdrop e Poster)
+  // Para TV ao Vivo, utiliza estritamente o ícone original da lista M3U, sem alteração
+  const backdropImage = isLive ? item.stream_icon : (enrichedMetadata?.backdropUrl || item.stream_icon);
+  const posterImage = isLive ? item.stream_icon : (enrichedMetadata?.posterUrl || item.stream_icon);
+  const heroImage = isLive ? item.stream_icon : (backdropImage || posterImage);
 
   // Sinopse consolidada
   const plotSynopsis =
-    enrichedMetadata?.overview ||
-    seriesInfo?.info?.plot ||
-    (streamType === 'live'
-      ? `Transmissão em alta definição ao vivo do canal ${item.title || item.name}. Acesse a reprodução instantânea com suporte a HLS e seleção de áudio/vídeo.`
-      : streamType === 'movie'
-      ? `Filme completo disponível sob demanda na categoria ${item.category_name}. Reproduza em qualidade máxima com controle de histórico e progresso.`
-      : `Série completa disponível no catálogo com temporadas e episódios organizados sob demanda.`);
+    isLive
+      ? `Transmissão ao vivo do canal ${item.title || item.name}. Acesse a reprodução instantânea com suporte a HLS.`
+      : (enrichedMetadata?.overview ||
+        seriesInfo?.info?.plot ||
+        (streamType === 'movie'
+          ? `Filme completo disponível sob demanda na categoria ${item.category_name}. Reproduza em qualidade máxima com controle de histórico e progresso.`
+          : `Série completa disponível no catálogo com temporadas e episódios organizados sob demanda.`));
 
   // Gêneros consolidados
-  const genresList = enrichedMetadata?.genres && enrichedMetadata.genres.length > 0
-    ? enrichedMetadata.genres
-    : item.category_name
-    ? [item.category_name]
-    : ['Geral'];
+  const genresList = isLive
+    ? [cleanCategoryName(item.category_name) || item.category_name || 'TV ao Vivo']
+    : (enrichedMetadata?.genres && enrichedMetadata.genres.length > 0
+      ? enrichedMetadata.genres
+      : item.category_name
+      ? [item.category_name]
+      : ['Geral']);
 
-  // Nota consolidada
-  const displayRating = enrichedMetadata?.rating || item.rating;
+  // Nota consolidada (TV ao Vivo não possui nota)
+  const displayRating = isLive ? null : (enrichedMetadata?.rating || item.rating);
 
   // Link para o primeiro episódio se for série, ou stream direto
   const firstEpId = currentSeasonEpisodes[0]?.id;
@@ -916,8 +927,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   {item.title || item.name}
                 </h1>
 
-                {/* Badges de Títulos Multilíngues (ocultos na visualização mobile conforme solicitado) */}
-                {(enrichedMetadata?.titlePortuguese ||
+                {/* Badges de Títulos Multilíngues (apenas filmes e séries) */}
+                {!isLive && (enrichedMetadata?.titlePortuguese ||
                   enrichedMetadata?.titleEnglish ||
                   enrichedMetadata?.titleRomanized ||
                   enrichedMetadata?.originalTitle ||
@@ -1056,8 +1067,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   <span className="hidden md:inline">Assistir Agora</span>
                 </Link>
 
-                {/* Botão Trailer do YouTube (quando disponível via TMDb ou Kitsu) */}
-                {enrichedMetadata?.trailerEmbedUrl && (
+                {/* Botão Trailer do YouTube (quando disponível via TMDb ou Kitsu para filmes e séries) */}
+                {!isLive && enrichedMetadata?.trailerEmbedUrl && (
                   <button
                     onClick={() => setIsTrailerModalOpen(true)}
                     title="Ver Trailer"
@@ -1081,7 +1092,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         title: item.title || item.name,
                         posterUrl: posterImage,
                         categoryName: item.category_name,
-                        rating: displayRating,
+                        rating: displayRating || undefined,
                       });
                     }
                   }}
@@ -1097,30 +1108,32 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   <span className="hidden md:inline">{favorited ? 'Favoritado' : 'Adicionar aos Favoritos'}</span>
                 </button>
 
-                {/* Botão Marcar Concluído */}
-                <button
-                  onClick={() => {
-                    if (watched) {
-                      removeWatched(item.stream_id, streamType);
-                    } else {
-                      markWatched(item.stream_id, streamType, item.title || item.name, true, {
-                        posterUrl: posterImage,
-                        categoryName: item.category_name,
-                        rating: displayRating || item.rating,
-                      });
-                    }
-                  }}
-                  title={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
-                  aria-label={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
-                  className={`w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-4 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
-                    watched
-                      ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-                      : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-200'
-                  }`}
-                >
-                  <CheckCircle2 className={`w-5 h-5 md:w-4 md:h-4 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
-                  <span className="hidden md:inline">{watched ? 'Concluído' : 'Marcar Concluído'}</span>
-                </button>
+                {/* Botão Marcar Concluído (apenas para filmes e séries) */}
+                {!isLive && (
+                  <button
+                    onClick={() => {
+                      if (watched) {
+                        removeWatched(item.stream_id, streamType);
+                      } else {
+                        markWatched(item.stream_id, streamType, item.title || item.name, true, {
+                          posterUrl: posterImage,
+                          categoryName: item.category_name,
+                          rating: displayRating || item.rating,
+                        });
+                      }
+                    }}
+                    title={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
+                    aria-label={watched ? 'Desmarcar concluído' : 'Marcar como concluído'}
+                    className={`w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-4 md:py-3.5 border text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shrink-0 ${
+                      watched
+                        ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                        : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-200'
+                    }`}
+                  >
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
+                    <span className="hidden md:inline">{watched ? 'Concluído' : 'Marcar Concluído'}</span>
+                  </button>
+                )}
 
                 {/* Botão Baixar Filme Offline (Apenas no Aplicativo Nativo) */}
                 {isNative && isMovie && (
@@ -1551,8 +1564,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
         </section>
       )}
 
-      {/* 3. Se houver Elenco Principal (Cast) enriquecido via TMDb */}
-      {enrichedMetadata?.cast && enrichedMetadata.cast.length > 0 && (
+      {/* 3. Se houver Elenco Principal (Cast) enriquecido via TMDb (apenas filmes e séries) */}
+      {!isLive && enrichedMetadata?.cast && enrichedMetadata.cast.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
           <div className="flex items-center gap-2 border-b border-white/5 pb-3">
             <Users className="w-5 h-5 text-violet-400" />
@@ -1651,8 +1664,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
         </section>
       )}
 
-      {/* Modal de Trailer do YouTube */}
-      {isTrailerModalOpen && enrichedMetadata?.trailerEmbedUrl && (
+      {/* Modal de Trailer do YouTube (apenas filmes e séries) */}
+      {isTrailerModalOpen && !isLive && enrichedMetadata?.trailerEmbedUrl && (
         <div
           onClick={() => setIsTrailerModalOpen(false)}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"

@@ -24,6 +24,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Título é obrigatório' }, { status: 400 });
   }
 
+  // TV ao Vivo não consulta TMDb/Kitsu/TVMaze (informações originais da lista M3U)
+  if (type === 'live') {
+    return NextResponse.json({
+      title: rawTitle,
+      source: 'none',
+    });
+  }
+
   const cacheKey = `meta_${type}_${rawTitle}_${customYear || ''}_${category}`;
   const cached = getFromCache<EnrichedMetadata>(cacheKey);
   if (cached) {
