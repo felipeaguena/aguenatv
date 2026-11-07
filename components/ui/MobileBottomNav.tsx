@@ -7,7 +7,7 @@ export default function MobileBottomNav() {
   const pathname = usePathname();
 
   // Oculta a barra de navegação inferior na página de reprodução em tela cheia
-  if (pathname.includes('/watch/')) {
+  if (pathname.includes('/watch')) {
     return null;
   }
 
