@@ -6,6 +6,7 @@ import Hls from 'hls.js';
 import { SkipForward, AlertTriangle, RotateCcw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
+import { StatusBar } from '@capacitor/status-bar';
 import { useWatched } from '@/hooks/useWatched';
 import { StreamType } from '@/lib/types';
 
@@ -107,50 +108,104 @@ export default function VideoPlayer({
     hasPrevEpisodeRef.current = hasPrevEpisode;
   });
 
-  // Função para acionar Tela Cheia NATIVA diretamente no elemento <video>
-  const triggerNativeFullscreen = useCallback((art: Artplayer) => {
+  // Função Unificada e Confiável de Tela Cheia (Nativa no Mobile/APK, Container no Desktop)
+  const toggleFullscreen = useCallback(async (art: Artplayer) => {
     const video = art.video;
     if (!video) return;
 
-    // 1. Trava orientação horizontal (Landscape)
-    if (Capacitor.isNativePlatform()) {
-      ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
-    } else if (
-      typeof window !== 'undefined' &&
-      window.screen?.orientation &&
-      typeof (window.screen.orientation as any).lock === 'function'
-    ) {
-      (window.screen.orientation as any).lock('landscape').catch(() => {});
-    }
+    const isCurrentlyFs = Boolean(
+      document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (video as any).webkitDisplayingFullscreen ||
+        art.fullscreen
+    );
 
-    // 2. Dispara o fullscreen nativo direto no hardware de vídeo do dispositivo
-    try {
-      if (video.requestFullscreen) {
-        video.requestFullscreen().catch(() => {});
-      } else if ((video as any).webkitRequestFullscreen) {
-        (video as any).webkitRequestFullscreen();
-      } else if ((video as any).webkitEnterFullscreen) {
-        (video as any).webkitEnterFullscreen(); // iOS Safari
-      } else if ((video as any).mozRequestFullScreen) {
-        (video as any).mozRequestFullScreen();
+    if (isCurrentlyFs) {
+      // 1. Sair da tela cheia
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen().catch(() => {});
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        } else if ((video as any).webkitExitFullscreen) {
+          (video as any).webkitExitFullscreen();
+        }
+      } catch (e) {}
+
+      if (art.fullscreen) {
+        art.fullscreen = false;
       }
-    } catch (e) {
-      console.warn('[VideoPlayer] Falha ao acionar fullscreen nativo:', e);
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          await StatusBar.show().catch(() => {});
+          await ScreenOrientation.unlock().catch(() => {});
+        } catch (e) {}
+      } else if (
+        typeof window !== 'undefined' &&
+        window.screen?.orientation &&
+        typeof (window.screen.orientation as any).unlock === 'function'
+      ) {
+        (window.screen.orientation as any).unlock();
+      }
+    } else {
+      // 2. Entrar em tela cheia
+      const isMobile = isMobileDevice();
+
+      if (isMobile) {
+        // Modo Celular / APK: Tela Cheia Nativa no elemento <video>
+        if (Capacitor.isNativePlatform()) {
+          try {
+            await StatusBar.hide().catch(() => {});
+            await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
+          } catch (e) {}
+        } else if (
+          typeof window !== 'undefined' &&
+          window.screen?.orientation &&
+          typeof (window.screen.orientation as any).lock === 'function'
+        ) {
+          (window.screen.orientation as any).lock('landscape').catch(() => {});
+        }
+
+        try {
+          if (video.requestFullscreen) {
+            await video.requestFullscreen().catch(() => {
+              art.fullscreen = true;
+            });
+          } else if ((video as any).webkitRequestFullscreen) {
+            (video as any).webkitRequestFullscreen();
+          } else if ((video as any).webkitEnterFullscreen) {
+            (video as any).webkitEnterFullscreen(); // iOS Safari
+          } else if ((video as any).mozRequestFullScreen) {
+            (video as any).mozRequestFullScreen();
+          } else {
+            art.fullscreen = true;
+          }
+        } catch (e) {
+          art.fullscreen = true;
+        }
+      } else {
+        // Modo Desktop: Usa o fullscreen padrão do Artplayer mantendo os controles na tela
+        art.fullscreen = true;
+      }
     }
   }, []);
 
-  // Monitora saída de tela cheia nativa para destravar a orientação
+  // Monitora alterações de tela cheia para destravar orientação somente quando realmente sair
   useEffect(() => {
-    const handleExitFullscreen = () => {
+    const handleFullscreenChange = () => {
       const isFs = Boolean(
         document.fullscreenElement ||
           (document as any).webkitFullscreenElement ||
           (document as any).mozFullScreenElement ||
-          (artInstanceRef.current?.video as any)?.webkitDisplayingFullscreen
+          (artInstanceRef.current?.video as any)?.webkitDisplayingFullscreen ||
+          artInstanceRef.current?.fullscreen
       );
 
       if (!isFs) {
         if (Capacitor.isNativePlatform()) {
+          StatusBar.show().catch(() => {});
           ScreenOrientation.unlock().catch(() => {});
         } else if (
           typeof window !== 'undefined' &&
@@ -162,21 +217,21 @@ export default function VideoPlayer({
       }
     };
 
-    document.addEventListener('fullscreenchange', handleExitFullscreen);
-    document.addEventListener('webkitfullscreenchange', handleExitFullscreen);
-    document.addEventListener('mozfullscreenchange', handleExitFullscreen);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 
     const video = artInstanceRef.current?.video;
     if (video) {
-      video.addEventListener('webkitendfullscreen', handleExitFullscreen);
+      video.addEventListener('webkitendfullscreen', handleFullscreenChange);
     }
 
     return () => {
-      document.removeEventListener('fullscreenchange', handleExitFullscreen);
-      document.removeEventListener('webkitfullscreenchange', handleExitFullscreen);
-      document.removeEventListener('mozfullscreenchange', handleExitFullscreen);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
       if (video) {
-        video.removeEventListener('webkitendfullscreen', handleExitFullscreen);
+        video.removeEventListener('webkitendfullscreen', handleFullscreenChange);
       }
     };
   }, []);
@@ -202,10 +257,9 @@ export default function VideoPlayer({
     setNextEpisodeCountdown(null);
     setError(null);
 
-    const isMobile = isMobileDevice();
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
 
-    // Criação da instância Artplayer.js configurada para Tela Cheia Nativa no Mobile (Opção 1)
+    // Criação da instância Artplayer.js
     const art = new Artplayer({
       container: artContainerRef.current,
       url: streamUrl,
@@ -223,13 +277,12 @@ export default function VideoPlayer({
       setting: true,
       playbackRate: true,
       aspectRatio: true,
-      // No desktop usa o fullscreen embutido do Artplayer; no mobile o botão de Fullscreen Nativo assume
-      fullscreen: !isMobile,
+      fullscreen: false, // Desabilitado o botão padrão para usar o controle unificado sem conflitos
       fullscreenWeb: false,
       subtitleOffset: true,
       miniProgressBar: true,
       playsInline: true,
-      autoOrientation: true,
+      autoOrientation: false, // Desabilitado para evitar corrida de rotação com Capacitor
       hotkey: true,
       airplay: true,
       lang: 'pt-BR',
@@ -283,21 +336,17 @@ export default function VideoPlayer({
               },
             ]
           : []),
-        // Botão de Tela Cheia NATIVA para Mobile (Opção 1)
-        ...(isMobile
-          ? [
-              {
-                name: 'native-fullscreen',
-                position: 'right' as const,
-                index: 30,
-                html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg></span>',
-                tooltip: 'Tela Cheia Nativa',
-                click: function (this: Artplayer) {
-                  triggerNativeFullscreen(this);
-                },
-              },
-            ]
-          : []),
+        // Botão de Fullscreen Unificado (Nativo no mobile, Artplayer no desktop)
+        {
+          name: 'fullscreen-toggle',
+          position: 'right' as const,
+          index: 30,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg></span>',
+          tooltip: 'Tela Cheia',
+          click: function (this: Artplayer) {
+            toggleFullscreen(this);
+          },
+        },
       ],
       customType: {
         m3u8: function (video: HTMLVideoElement, url: string, player: Artplayer) {
@@ -479,20 +528,10 @@ export default function VideoPlayer({
 
     artInstanceRef.current = art;
 
-    // No mobile, duplo toque também ativa tela cheia nativa
-    if (isMobile) {
-      art.on('dblclick', () => {
-        triggerNativeFullscreen(art);
-      });
-
-      // Se qualquer evento interno acionar fullscreen no mobile, delega para a tela cheia nativa
-      art.on('fullscreen', (state) => {
-        if (state) {
-          art.fullscreen = false;
-          triggerNativeFullscreen(art);
-        }
-      });
-    }
+    // Duplo clique na área de reprodução alterna tela cheia de forma unificada
+    art.on('dblclick', () => {
+      toggleFullscreen(art);
+    });
 
     // Restauração de posição anterior de onde o usuário parou
     const restorePosition = () => {
@@ -614,7 +653,7 @@ export default function VideoPlayer({
         artInstanceRef.current = null;
       }
     };
-  }, [streamUrl, streamType, streamId, title, posterUrl, autoPlay, initialTime, retryKey, prevEpisodeLabel, nextEpisodeLabel, triggerNativeFullscreen]);
+  }, [streamUrl, streamType, streamId, title, posterUrl, autoPlay, initialTime, retryKey, prevEpisodeLabel, nextEpisodeLabel, toggleFullscreen]);
 
   return (
     <div className="relative w-full h-full bg-black select-none overflow-hidden">
