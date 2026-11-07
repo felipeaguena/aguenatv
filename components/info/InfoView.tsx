@@ -569,6 +569,27 @@ export default function InfoView({ type, id }: InfoViewProps) {
     return [];
   }, [enrichedMetadata?.cast, seriesInfo?.info?.cast, (item as any)?.cast]);
 
+  // Próximo episódio a assistir para séries: logo após o último episódio marcado como assistido
+  const nextEpisodeToWatch = useMemo(() => {
+    if (!isSeries || !seriesInfo) return null;
+    return findNextEpisodeToWatch(seriesInfo, isWatched, watchedList);
+  }, [isSeries, seriesInfo, isWatched, watchedList]);
+
+  // Link dinâmico: se for série, direciona para o próximo capítulo após o último assistido
+  const firstEpId = currentSeasonEpisodes[0]?.id;
+  const watchUrl = useMemo(() => {
+    if (!item) return '#';
+    if (isSeries) {
+      if (nextEpisodeToWatch) {
+        return getWatchUrl('series', item.stream_id, nextEpisodeToWatch.id, nextEpisodeToWatch.seasonNumber);
+      }
+      if (firstEpId) {
+        return getWatchUrl('series', item.stream_id, firstEpId, selectedSeason);
+      }
+    }
+    return getWatchUrl(streamType, item.stream_id);
+  }, [isSeries, nextEpisodeToWatch, firstEpId, item, selectedSeason, streamType]);
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3">
@@ -626,26 +647,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
 
   // Nota consolidada (TV ao Vivo não possui nota)
   const displayRating = isLive ? null : (enrichedMetadata?.rating || item.rating);
-
-  // Próximo episódio a assistir para séries: logo após o último episódio marcado como assistido
-  const nextEpisodeToWatch = useMemo(() => {
-    if (!isSeries || !seriesInfo) return null;
-    return findNextEpisodeToWatch(seriesInfo, isWatched, watchedList);
-  }, [isSeries, seriesInfo, isWatched, watchedList]);
-
-  // Link dinâmico: se for série, direciona para o próximo capítulo após o último assistido
-  const firstEpId = currentSeasonEpisodes[0]?.id;
-  const watchUrl = useMemo(() => {
-    if (isSeries) {
-      if (nextEpisodeToWatch) {
-        return getWatchUrl('series', item.stream_id, nextEpisodeToWatch.id, nextEpisodeToWatch.seasonNumber);
-      }
-      if (firstEpId) {
-        return getWatchUrl('series', item.stream_id, firstEpId, selectedSeason);
-      }
-    }
-    return getWatchUrl(streamType, item.stream_id);
-  }, [isSeries, nextEpisodeToWatch, firstEpId, item?.stream_id, selectedSeason, streamType]);
 
   // =========================================================================
   // HANDLERS DE DOWNLOAD OFFLINE (FILMES E SÉRIES)
