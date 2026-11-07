@@ -17,6 +17,11 @@ echo "=== Restaurando dados persistentes dos usuarios ==="
 mkdir -p /home/ubuntu/aguenatv/data
 cp -rf /home/ubuntu/persistent_data/* /home/ubuntu/aguenatv/data/ 2>/dev/null || true
 
+echo "=== Mesclando historico inteligente de reproducao (Continue Assistindo) ==="
+if [ -f /home/ubuntu/merge_continue.py ]; then
+  python3 /home/ubuntu/merge_continue.py || true
+fi
+
 echo "=== Configurando permissao da porta 80 para Node ==="
 NODE_BIN=$(readlink -f $(which node))
 sudo setcap 'cap_net_bind_service=+ep' "$NODE_BIN"

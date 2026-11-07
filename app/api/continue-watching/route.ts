@@ -8,21 +8,58 @@ import { ContinueWatchingItem } from '@/lib/types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CONTINUE_WATCHING_FILE = path.join(DATA_DIR, 'local-continue-watching.json');
+const CONTINUE_WATCHING_BACKUP = path.join(DATA_DIR, 'local-continue-watching.bak.json');
+
+// Mutex de fila em memória para garantir operações de leitura/escrita atômicas sem race condition
+let writeQueue = Promise.resolve();
+function runWithLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = writeQueue.then(fn, fn);
+  writeQueue = result.then(() => {}, () => {});
+  return result;
+}
 
 async function getLocalContinueWatching(): Promise<ContinueWatchingItem[]> {
   try {
     const raw = await fs.readFile(CONTINUE_WATCHING_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      if (parsed.length > 0) {
+        // Mantém cópia de backup redundante sempre atualizada
+        fs.writeFile(CONTINUE_WATCHING_BACKUP, raw, 'utf-8').catch(() => {});
+      }
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('[ContinueWatching] Falha ao ler arquivo principal, verificando backup redundante:', err);
   }
+
+  // Fallback seguro para o backup caso o arquivo principal esteja corrompido ou vazio
+  try {
+    const bkpRaw = await fs.readFile(CONTINUE_WATCHING_BACKUP, 'utf-8');
+    const parsedBkp = JSON.parse(bkpRaw);
+    if (Array.isArray(parsedBkp) && parsedBkp.length > 0) {
+      console.info('[ContinueWatching] Restaurando dados a partir do backup redundante');
+      return parsedBkp;
+    }
+  } catch {}
+
+  return [];
 }
 
 async function saveLocalContinueWatching(items: ContinueWatchingItem[]): Promise<void> {
   if (process.env.VERCEL) return;
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(CONTINUE_WATCHING_FILE, JSON.stringify(items, null, 2), 'utf-8');
+    const content = JSON.stringify(items, null, 2);
+
+    // Escrita atômica segura via arquivo temporário + renomeação para evitar arquivos truncados
+    const tmpFile = `${CONTINUE_WATCHING_FILE}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+    await fs.writeFile(tmpFile, content, 'utf-8');
+    await fs.rename(tmpFile, CONTINUE_WATCHING_FILE);
+
+    if (items.length > 0) {
+      await fs.writeFile(CONTINUE_WATCHING_BACKUP, content, 'utf-8').catch(() => {});
+    }
   } catch (err) {
     console.warn('[ContinueWatching] Aviso: persistência em disco local indisponível:', err);
   }
@@ -146,20 +183,21 @@ export async function POST(req: NextRequest) {
       last_watched_at: new Date().toISOString(),
     };
 
-    // 1. Persiste no arquivo JSON local garantindo isolamento estrito de usuário
-    const allItems = await getLocalContinueWatching();
-    const filtered = allItems.filter(
-      (i: any) =>
-        !(
-          i.user_id === userId &&
-          (i.id === uniqueId ||
-            (i.stream_type === streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) ||
-            String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`))
-        )
-    );
-    // Insere no início
-    const updated = [item, ...filtered];
-    await saveLocalContinueWatching(updated);
+    // 1. Persiste no arquivo JSON local com bloqueio de concorrência e isolamento estrito de usuário
+    await runWithLock(async () => {
+      const allItems = await getLocalContinueWatching();
+      const filtered = allItems.filter(
+        (i: any) =>
+          !(
+            i.user_id === userId &&
+            (i.id === uniqueId ||
+              (i.stream_type === streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) ||
+              String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`))
+          )
+      );
+      const updated = [item, ...filtered];
+      await saveLocalContinueWatching(updated);
+    });
 
     // 2. Se o Turso estiver configurado, salva na nuvem
     if (isTursoConfigured()) {
@@ -243,14 +281,16 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'id ou streamId+streamType são necessários' }, { status: 400 });
     }
 
-    const allItems = await getLocalContinueWatching();
-    const updated = allItems.filter((i: any) => {
-      if (i.user_id !== userId) return true; // Preserva itens de outros usuários
-      if (id && i.id === id) return false;
-      if (streamId && streamType && i.stream_id === streamId && i.stream_type === streamType) return false;
-      return true;
+    await runWithLock(async () => {
+      const allItems = await getLocalContinueWatching();
+      const updated = allItems.filter((i: any) => {
+        if (i.user_id !== userId) return true; // Preserva itens de outros usuários
+        if (id && i.id === id) return false;
+        if (streamId && streamType && i.stream_id === streamId && i.stream_type === streamType) return false;
+        return true;
+      });
+      await saveLocalContinueWatching(updated);
     });
-    await saveLocalContinueWatching(updated);
 
     if (isTursoConfigured()) {
       try {

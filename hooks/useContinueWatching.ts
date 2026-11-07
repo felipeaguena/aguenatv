@@ -86,6 +86,8 @@ export interface SaveProgressPayload {
   duration: number;
 }
 
+const syncThrottles = new Map<string, { lastSent: number; timeoutId: any }>();
+
 export function useContinueWatching() {
   const [items, setItems] = useState<ContinueWatchingItem[]>(() => {
     return globalContinueCache || [];
@@ -189,14 +191,41 @@ export function useContinueWatching() {
     setItems(next);
     broadcastContinueUpdated(next, globalContinueUserId);
 
-    try {
-      await fetch('/api/continue-watching', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (e) {
-      console.warn('[useContinueWatching] Erro ao sincronizar com servidor:', e);
+    // Sincronização inteligente com throttling para evitar sobrecarga e condições de corrida
+    const itemKey = `${payload.streamType}_${effectiveStreamId}`;
+    const throttleInfo = syncThrottles.get(itemKey) || { lastSent: 0, timeoutId: null };
+    const now = Date.now();
+    const MIN_INTERVAL_MS = 5000;
+
+    const sendServerSync = async () => {
+      try {
+        await fetch('/api/continue-watching', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        throttleInfo.lastSent = Date.now();
+      } catch (e) {
+        console.warn('[useContinueWatching] Erro ao sincronizar com servidor:', e);
+      }
+    };
+
+    if (throttleInfo.timeoutId) {
+      clearTimeout(throttleInfo.timeoutId);
+      throttleInfo.timeoutId = null;
+    }
+
+    if (now - throttleInfo.lastSent >= MIN_INTERVAL_MS) {
+      throttleInfo.lastSent = now;
+      syncThrottles.set(itemKey, throttleInfo);
+      sendServerSync();
+    } else {
+      const waitTime = MIN_INTERVAL_MS - (now - throttleInfo.lastSent);
+      throttleInfo.timeoutId = setTimeout(() => {
+        throttleInfo.timeoutId = null;
+        sendServerSync();
+      }, waitTime);
+      syncThrottles.set(itemKey, throttleInfo);
     }
   }, [items]);
 

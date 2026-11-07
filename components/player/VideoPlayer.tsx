@@ -436,19 +436,25 @@ export default function VideoPlayer({
       }
     });
 
+    let lastProgressReportTime = 0;
+
     // Monitoramento contínuo de tempo e contagem de 30s
     art.on('video:timeupdate', () => {
       const currentTime = art.currentTime || 0;
       const duration = art.duration || 0;
 
-      // Persistência periódica de progresso
+      // Persistência periódica de progresso com throttle de 3s
       if (streamType !== 'live' && currentTime > 5 && duration > 0) {
         if (currentTime < duration - 10) {
           try {
             localStorage.setItem(`iptv_pos_${streamType}_${streamId}`, currentTime.toFixed(1));
           } catch (e) {}
         }
-        onProgressRef.current?.({ currentTime, duration });
+        const now = Date.now();
+        if (now - lastProgressReportTime >= 3000) {
+          lastProgressReportTime = now;
+          onProgressRef.current?.({ currentTime, duration });
+        }
         if (currentTime > 60 && !hasMarkedRef.current) {
           hasMarkedRef.current = true;
           markWatchedRef.current?.(streamId, streamType, title, false);
