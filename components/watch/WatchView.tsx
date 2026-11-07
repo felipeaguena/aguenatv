@@ -1006,34 +1006,29 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 sm:space-y-8 overflow-x-hidden w-full">
-      {/* 1. Barra Superior com Navegação, Título e Ações */}
+      {/* 1. Barra Superior com Navegação e Ações */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4 w-full min-w-0">
-        <div className="flex items-start sm:items-center gap-3 min-w-0 w-full">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={() => router.push(getInfoUrl(streamType, id))}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer shrink-0 mt-0.5 sm:mt-0"
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer shrink-0"
             title="Voltar para a página de detalhes"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
-                {isLive ? 'Ao Vivo' : isMovie ? 'Filme' : 'Série'}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0">
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
+              {isLive ? 'Ao Vivo' : isMovie ? 'Filme' : 'Série'}
+            </span>
+            <span className="text-xs text-neutral-400 font-medium truncate max-w-[140px] sm:max-w-none">
+              {item?.category_name || 'Geral'}
+            </span>
+            {isSeries && activeEpisode && (
+              <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-neutral-300 shrink-0">
+                T{selectedSeason} • EP {activeEpisode.episode_num}
               </span>
-              <span className="text-xs text-neutral-400 font-medium truncate max-w-[140px] sm:max-w-none">
-                {item?.category_name || 'Geral'}
-              </span>
-              {isSeries && activeEpisode && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-neutral-300 shrink-0">
-                  T{selectedSeason} • EP {activeEpisode.episode_num}
-                </span>
-              )}
-            </div>
-            <h1 className="text-sm sm:text-xl font-bold text-white break-words sm:truncate max-w-xl line-clamp-2 sm:line-clamp-1 leading-snug">
-              {playerTitle}
-            </h1>
+            )}
           </div>
         </div>
 
@@ -1295,9 +1290,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
             </div>
 
             {/* Título do Vídeo / Episódio Selecionado */}
-            <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words pt-0.5">
+            <h1 className="text-base sm:text-xl font-bold text-white tracking-tight break-words pt-0.5">
               {playerTitle}
-            </h2>
+            </h1>
 
             {/* Sinopse do Capítulo ou da Obra */}
             <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words">
