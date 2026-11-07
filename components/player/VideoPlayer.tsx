@@ -202,6 +202,27 @@ export default function VideoPlayer({
               },
             ]
           : []),
+        {
+          name: 'aspect-fill',
+          position: 'right' as const,
+          index: 20,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 3px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>',
+          tooltip: 'Preencher Tela / Ajustar',
+          click: function () {
+            const art = artInstanceRef.current;
+            if (!art) return;
+            const video = art.video;
+            if (!video) return;
+            const currentFit = video.style.objectFit || getComputedStyle(video).objectFit;
+            if (currentFit === 'cover') {
+              video.style.setProperty('object-fit', 'contain', 'important');
+              art.notice.show = 'Proporção Original (Ajustar)';
+            } else {
+              video.style.setProperty('object-fit', 'cover', 'important');
+              art.notice.show = 'Preencher Tela (Sem Barras Laterais)';
+            }
+          },
+        },
       ],
       // Suporte personalizado a streams HLS via Hls.js
       customType: {
@@ -518,6 +539,13 @@ export default function VideoPlayer({
             metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
           }
         }
+        if (state) {
+          document.documentElement.style.overflow = 'hidden';
+          document.body.style.overflow = 'hidden';
+        } else {
+          document.documentElement.style.overflow = '';
+          document.body.style.overflow = '';
+        }
       } catch (e) {}
 
       // 2. Ponte nativa Android para ativar suporte a recorte de tela (notch / cutout) APENAS em fullscreen
@@ -546,13 +574,48 @@ export default function VideoPlayer({
     art.on('fullscreen', handleFullscreenChange);
     art.on('fullscreenWeb', handleFullscreenChange);
 
+    // Detecção automática de rotação horizontal (landscape) no mobile/APK para tela cheia imersiva
+    const handleOrientationOrResize = () => {
+      const isMobile =
+        Capacitor.isNativePlatform() ||
+        ('ontouchstart' in window && window.innerWidth <= 1024) ||
+        window.innerWidth <= 900;
+
+      if (!isMobile) return;
+
+      const isLandscape =
+        (window.screen?.orientation && window.screen.orientation.type.includes('landscape')) ||
+        Math.abs(Number(window.orientation) || 0) === 90 ||
+        window.innerWidth > window.innerHeight;
+
+      if (isLandscape && !art.fullscreen && !art.fullscreenWeb) {
+        art.fullscreen = true;
+      } else if (!isLandscape && (art.fullscreen || art.fullscreenWeb)) {
+        art.fullscreen = false;
+      }
+    };
+
+    window.addEventListener('resize', handleOrientationOrResize);
+    window.addEventListener('orientationchange', handleOrientationOrResize);
+    if (window.screen?.orientation) {
+      window.screen.orientation.addEventListener('change', handleOrientationOrResize);
+    }
+
     return () => {
+      window.removeEventListener('resize', handleOrientationOrResize);
+      window.removeEventListener('orientationchange', handleOrientationOrResize);
+      if (window.screen?.orientation) {
+        window.screen.orientation.removeEventListener('change', handleOrientationOrResize);
+      }
+
       // Restaura viewport e configurações normais do sistema ao desmontar ou sair do player
       try {
         const metaViewport = document.querySelector('meta[name="viewport"]');
         if (metaViewport) {
           metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
         }
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
       } catch (e) {}
 
       try {
