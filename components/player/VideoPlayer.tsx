@@ -58,6 +58,65 @@ function isMobileDevice(): boolean {
   );
 }
 
+function setDynamicViewportCover(enable: boolean) {
+  if (typeof document === 'undefined') return;
+  try {
+    let meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.setAttribute('name', 'viewport');
+      document.head.appendChild(meta);
+    }
+    if (enable) {
+      meta.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+      );
+      document.documentElement.classList.add('art-immersive-active');
+      document.body.classList.add('art-immersive-active');
+    } else {
+      meta.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, maximum-scale=1'
+      );
+      document.documentElement.classList.remove('art-immersive-active');
+      document.body.classList.remove('art-immersive-active');
+    }
+  } catch (e) {}
+}
+
+async function setFullscreenCutoutMode(enable: boolean) {
+  setDynamicViewportCover(enable);
+
+  // 1. Bridge nativa do Android (LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES e ocultação de barras)
+  try {
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.setCutoutFullscreen) {
+      (window as any).AndroidBridge.setCutoutFullscreen(enable);
+    }
+  } catch (e) {}
+
+  // 2. Plugins Capacitor (StatusBar e ScreenOrientation)
+  if (Capacitor.isNativePlatform()) {
+    try {
+      if (enable) {
+        await StatusBar.hide().catch(() => {});
+        await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
+      } else {
+        await StatusBar.show().catch(() => {});
+        await ScreenOrientation.unlock().catch(() => {});
+      }
+    } catch (e) {}
+  } else if (typeof window !== 'undefined' && window.screen?.orientation) {
+    try {
+      if (enable && typeof (window.screen.orientation as any).lock === 'function') {
+        (window.screen.orientation as any).lock('landscape').catch(() => {});
+      } else if (!enable && typeof (window.screen.orientation as any).unlock === 'function') {
+        (window.screen.orientation as any).unlock();
+      }
+    } catch (e) {}
+  }
+}
+
 export default function VideoPlayer({
   streamUrl,
   title,
@@ -108,17 +167,15 @@ export default function VideoPlayer({
     hasPrevEpisodeRef.current = hasPrevEpisode;
   });
 
-  // Função Unificada e Confiável de Tela Cheia (Nativa no Mobile/APK, Container no Desktop)
+  // Função Unificada e Confiável de Tela Cheia com Recorte Imersivo do Notch
   const toggleFullscreen = useCallback(async (art: Artplayer) => {
-    const video = art.video;
-    if (!video) return;
-
     const isCurrentlyFs = Boolean(
       document.fullscreenElement ||
         (document as any).webkitFullscreenElement ||
         (document as any).mozFullScreenElement ||
-        (video as any).webkitDisplayingFullscreen ||
-        art.fullscreen
+        (art.video as any)?.webkitDisplayingFullscreen ||
+        art.fullscreen ||
+        art.fullscreenWeb
     );
 
     if (isCurrentlyFs) {
@@ -128,111 +185,67 @@ export default function VideoPlayer({
           await document.exitFullscreen().catch(() => {});
         } else if ((document as any).webkitExitFullscreen) {
           (document as any).webkitExitFullscreen();
-        } else if ((video as any).webkitExitFullscreen) {
-          (video as any).webkitExitFullscreen();
         }
       } catch (e) {}
 
       if (art.fullscreen) {
         art.fullscreen = false;
       }
-
-      if (Capacitor.isNativePlatform()) {
-        try {
-          await StatusBar.show().catch(() => {});
-          await ScreenOrientation.unlock().catch(() => {});
-        } catch (e) {}
-      } else if (
-        typeof window !== 'undefined' &&
-        window.screen?.orientation &&
-        typeof (window.screen.orientation as any).unlock === 'function'
-      ) {
-        (window.screen.orientation as any).unlock();
+      if (art.fullscreenWeb) {
+        art.fullscreenWeb = false;
       }
+
+      await setFullscreenCutoutMode(false);
     } else {
-      // 2. Entrar em tela cheia
-      const isMobile = isMobileDevice();
+      // 2. Entrar em tela cheia com recorte total sobrepondo notch e barras
+      await setFullscreenCutoutMode(true);
 
-      if (isMobile) {
-        // Modo Celular / APK: Tela Cheia Nativa no elemento <video>
-        if (Capacitor.isNativePlatform()) {
-          try {
-            await StatusBar.hide().catch(() => {});
-            await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
-          } catch (e) {}
-        } else if (
-          typeof window !== 'undefined' &&
-          window.screen?.orientation &&
-          typeof (window.screen.orientation as any).lock === 'function'
-        ) {
-          (window.screen.orientation as any).lock('landscape').catch(() => {});
-        }
-
-        try {
-          if (video.requestFullscreen) {
-            await video.requestFullscreen().catch(() => {
-              art.fullscreen = true;
-            });
-          } else if ((video as any).webkitRequestFullscreen) {
-            (video as any).webkitRequestFullscreen();
-          } else if ((video as any).webkitEnterFullscreen) {
-            (video as any).webkitEnterFullscreen(); // iOS Safari
-          } else if ((video as any).mozRequestFullScreen) {
-            (video as any).mozRequestFullScreen();
-          } else {
-            art.fullscreen = true;
-          }
-        } catch (e) {
-          art.fullscreen = true;
-        }
-      } else {
-        // Modo Desktop: Usa o fullscreen padrão do Artplayer mantendo os controles na tela
+      try {
         art.fullscreen = true;
+        if (!art.fullscreen) {
+          art.fullscreenWeb = true;
+        }
+      } catch (e) {
+        art.fullscreenWeb = true;
       }
     }
   }, []);
 
-  // Monitora alterações de tela cheia para destravar orientação somente quando realmente sair
+  // Monitora alterações de tela cheia para garantir desativação segura do recorte ao sair
   useEffect(() => {
-    const handleFullscreenChange = () => {
+    const handleFullscreenExitCheck = () => {
       const isFs = Boolean(
         document.fullscreenElement ||
           (document as any).webkitFullscreenElement ||
           (document as any).mozFullScreenElement ||
           (artInstanceRef.current?.video as any)?.webkitDisplayingFullscreen ||
-          artInstanceRef.current?.fullscreen
+          artInstanceRef.current?.fullscreen ||
+          artInstanceRef.current?.fullscreenWeb
       );
 
       if (!isFs) {
-        if (Capacitor.isNativePlatform()) {
-          StatusBar.show().catch(() => {});
-          ScreenOrientation.unlock().catch(() => {});
-        } else if (
-          typeof window !== 'undefined' &&
-          window.screen?.orientation &&
-          typeof (window.screen.orientation as any).unlock === 'function'
-        ) {
-          (window.screen.orientation as any).unlock();
-        }
+        setFullscreenCutoutMode(false);
       }
     };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('fullscreenchange', handleFullscreenExitCheck);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenExitCheck);
+    document.addEventListener('mozfullscreenchange', handleFullscreenExitCheck);
 
     const video = artInstanceRef.current?.video;
     if (video) {
-      video.addEventListener('webkitendfullscreen', handleFullscreenChange);
+      video.addEventListener('webkitendfullscreen', handleFullscreenExitCheck);
     }
 
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenExitCheck);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenExitCheck);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenExitCheck);
       if (video) {
-        video.removeEventListener('webkitendfullscreen', handleFullscreenChange);
+        video.removeEventListener('webkitendfullscreen', handleFullscreenExitCheck);
       }
+      // Ao sair ou desmontar da tela watch, garante restauração total e segura
+      setFullscreenCutoutMode(false);
     };
   }, []);
 
@@ -336,6 +349,26 @@ export default function VideoPlayer({
               },
             ]
           : []),
+        // Botão para Alternar Preenchimento Total da Tela (Cover vs Contain)
+        {
+          name: 'fit-toggle',
+          position: 'right' as const,
+          index: 28,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>',
+          tooltip: 'Ajuste / Preencher Tela',
+          click: function (this: Artplayer) {
+            const v = this.video;
+            if (!v) return;
+            const isCover = v.style.objectFit === 'cover';
+            if (isCover) {
+              v.style.objectFit = 'contain';
+              this.notice.show = 'Proporção: Ajustar (Original 16:9)';
+            } else {
+              v.style.objectFit = 'cover';
+              this.notice.show = 'Proporção: Preencher Tela (Imersivo Total)';
+            }
+          },
+        },
         // Botão de Fullscreen Unificado (Nativo no mobile, Artplayer no desktop)
         {
           name: 'fullscreen-toggle',
@@ -645,7 +678,21 @@ export default function VideoPlayer({
       setError('Falha na reprodução do stream de vídeo. Tente novamente mais tarde.');
     });
 
+    // Desativação segura quando o player sai do modo tela cheia internamente
+    art.on('fullscreen', (state) => {
+      if (!state && !art.fullscreenWeb) {
+        setFullscreenCutoutMode(false);
+      }
+    });
+
+    art.on('fullscreenWeb', (state) => {
+      if (!state && !art.fullscreen) {
+        setFullscreenCutoutMode(false);
+      }
+    });
+
     return () => {
+      setFullscreenCutoutMode(false);
       if (artInstanceRef.current) {
         try {
           artInstanceRef.current.destroy(false);

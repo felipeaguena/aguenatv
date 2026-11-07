@@ -88,3 +88,40 @@
 .artplayer-app .art-bottom {
   padding-bottom: 8px !important;
 }
+
+/* Modo Tela Cheia Imersiva no Artplayer (SOMENTE quando em fullscreen) */
+.artplayer-app.art-fullscreen,
+.artplayer-app.art-fullscreen-web {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 999999 !important;
+  background-color: #000 !important;
+}
+
+/* Garante que o vídeo preencha toda a largura/altura no player em tela cheia */
+.artplayer-app.art-fullscreen video,
+.artplayer-app.art-fullscreen-web video {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */
+.artplayer-app.art-fullscreen .art-bottom,
+.artplayer-app.art-fullscreen-web .art-bottom {
+  padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+}
+
+.artplayer-app.art-fullscreen .art-top,
+.artplayer-app.art-fullscreen-web .art-top {
+  padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
+  padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
+  padding-top: max(12px, env(safe-area-inset-top, 0px)) !important;
+}
