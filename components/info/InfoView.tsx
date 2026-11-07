@@ -43,7 +43,7 @@ import {
   IPTVAccount,
 } from '@/lib/types';
 import { getWatchUrl, getRouteType, getPersonUrl } from '@/lib/routes';
-import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle, isSpecialSeason } from '@/lib/series';
+import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle, isSpecialSeason, findNextEpisodeToWatch } from '@/lib/series';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
 import { cleanCategoryName } from '@/lib/stream-utils';
@@ -87,7 +87,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const [isTrailerModalOpen, setIsTrailerModalOpen] = useState(false);
 
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
-  const { isWatched, markWatched, removeWatched } = useWatched();
+  const { isWatched, markWatched, removeWatched, watchedList } = useWatched();
   const { play } = usePlayer();
   const { getProgress } = useDownloadProgress();
 
@@ -235,7 +235,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
               if (sData && isMounted) {
                 setSeriesInfo(sData);
                 const sorted = buildSortedSeasonList(sData);
-                setSelectedSeason(getDefaultSeason(sorted));
+                const nextEp = findNextEpisodeToWatch(sData, isWatched, watchedList);
+                setSelectedSeason(nextEp ? String(nextEp.seasonNumber) : getDefaultSeason(sorted));
               }
             } catch (err) {
               console.warn('Erro ao carregar capítulos da série online (tentando dados offline):', err);
@@ -284,7 +285,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   };
 
                   setSeriesInfo(fallbackSeriesInfo);
-                  setSelectedSeason(String(seasonsList[0]?.season_number || 1));
+                  const nextEp = findNextEpisodeToWatch(fallbackSeriesInfo, isWatched, watchedList);
+                  setSelectedSeason(nextEp ? String(nextEp.seasonNumber) : String(seasonsList[0]?.season_number || 1));
                 }
               }
             } finally {
@@ -311,7 +313,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
                 category_name: sData.info?.genre || 'Séries',
               });
               const sorted = buildSortedSeasonList(sData);
-              setSelectedSeason(getDefaultSeason(sorted));
+              const nextEp = findNextEpisodeToWatch(sData, isWatched, watchedList);
+              setSelectedSeason(nextEp ? String(nextEp.seasonNumber) : getDefaultSeason(sorted));
             }
           } catch (err) {
             console.error('Erro ao buscar detalhes da série no servidor:', err);
@@ -624,11 +627,25 @@ export default function InfoView({ type, id }: InfoViewProps) {
   // Nota consolidada (TV ao Vivo não possui nota)
   const displayRating = isLive ? null : (enrichedMetadata?.rating || item.rating);
 
-  // Link para o primeiro episódio se for série, ou stream direto
+  // Próximo episódio a assistir para séries: logo após o último episódio marcado como assistido
+  const nextEpisodeToWatch = useMemo(() => {
+    if (!isSeries || !seriesInfo) return null;
+    return findNextEpisodeToWatch(seriesInfo, isWatched, watchedList);
+  }, [isSeries, seriesInfo, isWatched, watchedList]);
+
+  // Link dinâmico: se for série, direciona para o próximo capítulo após o último assistido
   const firstEpId = currentSeasonEpisodes[0]?.id;
-  const watchUrl = isSeries && firstEpId
-    ? getWatchUrl('series', item.stream_id, firstEpId)
-    : getWatchUrl(streamType, item.stream_id);
+  const watchUrl = useMemo(() => {
+    if (isSeries) {
+      if (nextEpisodeToWatch) {
+        return getWatchUrl('series', item.stream_id, nextEpisodeToWatch.id, nextEpisodeToWatch.seasonNumber);
+      }
+      if (firstEpId) {
+        return getWatchUrl('series', item.stream_id, firstEpId, selectedSeason);
+      }
+    }
+    return getWatchUrl(streamType, item.stream_id);
+  }, [isSeries, nextEpisodeToWatch, firstEpId, item?.stream_id, selectedSeason, streamType]);
 
   // =========================================================================
   // HANDLERS DE DOWNLOAD OFFLINE (FILMES E SÉRIES)
@@ -1077,7 +1094,11 @@ export default function InfoView({ type, id }: InfoViewProps) {
                 {/* Botão Assistir Agora */}
                 <Link
                   href={watchUrl}
-                  title="Assistir Agora"
+                  title={
+                    isSeries && nextEpisodeToWatch
+                      ? `Assistir Agora (T${nextEpisodeToWatch.seasonNumber}:E${nextEpisodeToWatch.episode_num})`
+                      : 'Assistir Agora'
+                  }
                   aria-label="Assistir Agora"
                   className="w-12 h-12 rounded-full md:w-auto md:h-auto md:rounded-2xl md:px-8 md:py-3.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-extrabold shadow-xl shadow-violet-600/40 hover:scale-105 transition-all flex items-center justify-center gap-2 cursor-pointer border border-violet-500/30 shrink-0"
                 >

@@ -115,6 +115,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerHeight, setPlayerHeight] = useState<number | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
+  const autoMarkedEpisodesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setIsNative(isNativeApp());
@@ -667,16 +668,16 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }, [item, isFavorite, streamType]);
 
   const watched = useMemo(() => {
+    if (isSeries) {
+      if (activeEpisode) {
+        return isWatched(String(activeEpisode.id), 'series');
+      }
+      return isWatched(item?.stream_id || id, 'series');
+    }
     const targetId = item?.stream_id || id;
     if (targetId) return isWatched(targetId, streamType);
-    if (false as boolean && activeEpisode) {
-      return isWatched(String(activeEpisode.id), 'series');
-    }
-    if (item) {
-      return isWatched(item.stream_id, streamType);
-    }
     return false;
-  }, [isSeries, activeEpisode, item, isWatched, streamType]);
+  }, [isSeries, activeEpisode, item?.stream_id, id, isWatched, streamType]);
 
   // 6. Efeito: Busca Dados Técnicos do Vídeo (Tamanho em MB, Codec, Dimensões e Duração da CDN)
   useEffect(() => {
@@ -755,8 +756,58 @@ export default function WatchView({ type, id }: WatchViewProps) {
           duration,
         });
       }
+
+      // Marca o capítulo como assistido assim que faltar 1 minuto (<= 60s) para terminar
+      const remainingSeconds = duration - currentTime;
+      const isNearEnd = duration > 60 ? remainingSeconds <= 60 : (duration > 0 && currentTime >= duration * 0.9);
+
+      if (isNearEnd) {
+        if (streamType === 'series' && activeEpisode) {
+          const epIdStr = String(activeEpisode.id);
+          if (!autoMarkedEpisodesRef.current.has(epIdStr) && !isWatched(epIdStr, 'series')) {
+            autoMarkedEpisodesRef.current.add(epIdStr);
+            const epMeta = seasonEpisodesMeta[Number(activeEpisode.episode_num)];
+            const formattedEpName = formatEpisodeTitle(
+              activeEpisode.episode_num,
+              selectedSeason,
+              epMeta?.name || activeEpisode.title
+            );
+            const fullTitle = `${item.title || item.name || 'Série'} - ${formattedEpName}`;
+            markWatched(epIdStr, 'series', fullTitle, true, {
+              posterUrl:
+                epMeta?.thumbnailUrl ||
+                activeEpisode.info?.movie_image ||
+                activeEpisode.info?.cover_big ||
+                item.stream_icon,
+              categoryName: item.category_name,
+            });
+          }
+        } else if (streamType === 'movie') {
+          const movieIdStr = String(item.stream_id || id);
+          if (!autoMarkedEpisodesRef.current.has(movieIdStr) && !isWatched(movieIdStr, 'movie')) {
+            autoMarkedEpisodesRef.current.add(movieIdStr);
+            markWatched(movieIdStr, 'movie', item.title || item.name, true, {
+              posterUrl: enrichedMetadata?.posterUrl || item.stream_icon,
+              categoryName: item.category_name,
+              rating: item.rating,
+            });
+          }
+        }
+      }
     },
-    [item, streamType, activeEpisode, selectedSeason, enrichedMetadata, currentEpMeta, saveProgress]
+    [
+      item,
+      streamType,
+      activeEpisode,
+      selectedSeason,
+      enrichedMetadata,
+      currentEpMeta,
+      seasonEpisodesMeta,
+      saveProgress,
+      isWatched,
+      markWatched,
+      id,
+    ]
   );
 
   // Metadados técnicos calculados para o painel de status
@@ -1026,16 +1077,38 @@ export default function WatchView({ type, id }: WatchViewProps) {
           <button
             onClick={() => {
               if (watched) {
-                const targetId = item?.stream_id || id;
-                removeWatched(targetId, streamType);
+                if (isSeries && activeEpisode) {
+                  removeWatched(String(activeEpisode.id), 'series');
+                } else {
+                  const targetId = item?.stream_id || id;
+                  removeWatched(targetId, streamType);
+                }
               } else {
-                const targetId = item?.stream_id || id;
-                const mainTitle = item?.title || item?.name || playerTitle;
-                markWatched(targetId, streamType, mainTitle, true, {
-                  posterUrl: item?.stream_icon,
-                  categoryName: item?.category_name,
-                  rating: item?.rating,
-                });
+                if (isSeries && activeEpisode) {
+                  const epMeta = seasonEpisodesMeta[Number(activeEpisode.episode_num)];
+                  const formattedEpName = formatEpisodeTitle(
+                    activeEpisode.episode_num,
+                    selectedSeason,
+                    epMeta?.name || activeEpisode.title
+                  );
+                  const fullTitle = `${item?.title || item?.name || 'Série'} - ${formattedEpName}`;
+                  markWatched(String(activeEpisode.id), 'series', fullTitle, true, {
+                    posterUrl:
+                      epMeta?.thumbnailUrl ||
+                      activeEpisode.info?.movie_image ||
+                      activeEpisode.info?.cover_big ||
+                      item?.stream_icon,
+                    categoryName: item?.category_name,
+                  });
+                } else {
+                  const targetId = item?.stream_id || id;
+                  const mainTitle = item?.title || item?.name || playerTitle;
+                  markWatched(targetId, streamType, mainTitle, true, {
+                    posterUrl: item?.stream_icon,
+                    categoryName: item?.category_name,
+                    rating: item?.rating,
+                  });
+                }
               }
             }}
             className={`px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl border text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
@@ -1090,76 +1163,144 @@ export default function WatchView({ type, id }: WatchViewProps) {
           </div>
 
           {/* Informações do Vídeo / Capítulo Selecionado (Diretamente abaixo do player, sem background e sem border) */}
-          <div className="pt-1 pb-0.5 space-y-2 w-full min-w-0">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 min-w-0 w-full">
-              <div className="min-w-0 flex-1">
-                {/* Badges e Metadados */}
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
-                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shrink-0">
-                    {isSeries ? 'Capítulo Atual' : isMovie ? 'Filme' : 'Canal'}
-                  </span>
-
-                  {genresList.map((genre) => (
-                    <span
-                      key={`pill_${genre}`}
-                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 shrink-0"
-                    >
-                      {genre}
-                    </span>
-                  ))}
-
-                  {/* Data de Lançamento do Episódio ou Ano da Obra */}
-                  {currentEpAirDate ? (
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 flex items-center gap-1 shrink-0">
-                      <Calendar className="w-3 h-3 text-violet-400" />
-                      Lançamento: {currentEpAirDate}
-                    </span>
-                  ) : enrichedMetadata?.year ? (
-                    <span className="text-[11px] font-medium text-neutral-400 shrink-0">
-                      {enrichedMetadata.year}
-                    </span>
-                  ) : null}
-
-                  {/* Nota / Avaliação */}
-                  {currentEpMeta?.rating ? (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{' '}
-                      {currentEpMeta.rating}
-                    </span>
-                  ) : enrichedMetadata?.rating ? (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {enrichedMetadata.rating}
-                    </span>
-                  ) : null}
-
-                  {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
-                    <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30 shrink-0">
-                      Via {enrichedMetadata.source.toUpperCase()}
-                    </span>
-                  )}
-                </div>
-
-                <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words">
-                  {playerTitle}
-                </h2>
-              </div>
-
-              {/* Duração e Resolução */}
-              <div className="flex items-center gap-2 sm:gap-2.5 text-xs text-neutral-400 flex-wrap shrink-0">
-                {activeEpisode?.info?.duration && (
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
-                    <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                    <span>{activeEpisode.info.duration}</span>
+          <div className="pt-2 pb-1 space-y-2.5 w-full min-w-0">
+            {/* Especificações Técnicas: Duração, Tamanho, Dimensões e Codec (Div sem bordas e sem fundo, somente os elementos) */}
+            <div className="flex flex-wrap items-center justify-between gap-2 text-neutral-300 text-[11px] w-full">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                {isOfflineMode && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Modo Offline (Armazenamento Local)</span>
                   </div>
                 )}
-                <div className="px-2.5 py-1 rounded-xl bg-white/5 border border-white/5 font-mono text-[11px] uppercase text-neutral-300">
-                  {item?.container_extension || 'HD 1080p'}
+
+                {/* Duração */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                  <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-neutral-400">Duração:</span>
+                  <span className="font-bold text-white">{displayDuration}</span>
+                </div>
+
+                {/* Tamanho */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                  <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-neutral-400">Tamanho:</span>
+                  <span className="font-bold text-white">{displaySize}</span>
+                </div>
+
+                {/* Dimensões */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                  <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-neutral-400">Dimensões:</span>
+                  <span className="font-bold text-white font-mono">{displayDimensions}</span>
+                </div>
+
+                {/* Codec */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                  <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="text-neutral-400">Codec:</span>
+                  <span className="font-bold text-white">{displayCodec}</span>
                 </div>
               </div>
+
+              {/* Ação de Download Offline no Mobile / APK */}
+              {!isLive && isNative && (streamUrl || localPlayableUrl) && (
+                <button
+                  onClick={async () => {
+                    if (isDownloading) return;
+
+                    const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
+                    const epId = activeEpisode?.id;
+                    const sNum = selectedSeason ? Number(selectedSeason) : undefined;
+                    const downId = buildDownloadId(
+                      streamType === 'series' ? 'series' : 'movie',
+                      currentActiveId || id,
+                      sNum,
+                      epNum ?? epId
+                    );
+
+                    if (isCurrentDownloaded) {
+                      if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
+                        await deleteOfflineDownload(downId);
+                        setIsCurrentDownloaded(false);
+                        setLocalPlayableUrl(null);
+                        setIsOfflineMode(false);
+                      }
+                      return;
+                    }
+
+                    if (!streamUrl) return;
+                    setIsDownloading(true);
+                    try {
+                      await downloadVideoForOffline(
+                        {
+                          stream_id: String(currentActiveId || id),
+                          stream_type: streamType === 'series' ? 'series' : 'movie',
+                          title: playerTitle,
+                          series_title: item?.title || item?.name,
+                          poster_url: playerPoster,
+                          container_extension: item?.container_extension,
+                          season_num: sNum,
+                          episode_num: epNum,
+                          episode_id: epId,
+                        },
+                        streamUrl
+                      );
+                      setIsCurrentDownloaded(true);
+                      setDownloadDone(true);
+                      setTimeout(() => setDownloadDone(false), 5000);
+                    } catch (e: any) {
+                      alert(e.message || 'Erro ao realizar download.');
+                    } finally {
+                      setIsDownloading(false);
+                    }
+                  }}
+                  disabled={isDownloading}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                    isCurrentDownloaded
+                      ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
+                      : downloadDone
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
+                  }`}
+                  title={
+                    isCurrentDownloaded
+                      ? 'Excluir da memória do celular para liberar espaço'
+                      : 'Salvar na memória do celular para assistir offline'
+                  }
+                >
+                  {isDownloading ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                      <span>Baixando...</span>
+                    </>
+                  ) : isCurrentDownloaded ? (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Excluir do Celular</span>
+                    </>
+                  ) : downloadDone ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Baixado Offline</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar Offline</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
 
+            {/* Título do Vídeo / Episódio Selecionado */}
+            <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words pt-0.5">
+              {playerTitle}
+            </h2>
+
             {/* Sinopse do Capítulo ou da Obra */}
-            <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words pt-1">
+            <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words">
               {currentEpMeta?.overview ||
                 activeEpisode?.info?.plot ||
                 enrichedMetadata?.overview ||
@@ -1462,144 +1603,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
               </div>
             )}
         </div>
-      </div>
-
-
-      {/* Barra de Status e Metadados Técnicos do Vídeo */}
-      <div className="p-3 sm:p-3.5 rounded-2xl bg-[#13141b] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs w-full min-w-0">
-        {/* Especificações Técnicas: Duração, Tamanho em MB, Dimensões e Codec */}
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-neutral-300 text-[11px] w-full sm:w-auto">
-          {isOfflineMode && (
-            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Modo Offline (Armazenamento Local)</span>
-            </div>
-          )}
-
-          {/* Duração */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-            <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-            <span className="text-neutral-400">Duração:</span>
-            <span className="font-bold text-white">{displayDuration}</span>
-          </div>
-
-          {/* Tamanho em MB */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-            <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-            <span className="text-neutral-400">Tamanho:</span>
-            <span className="font-bold text-white">{displaySize}</span>
-          </div>
-
-          {/* Dimensões */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-            <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-            <span className="text-neutral-400">Dimensões:</span>
-            <span className="font-bold text-white font-mono">{displayDimensions}</span>
-          </div>
-
-          {/* Codec Utilizado */}
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/5 border border-white/5">
-            <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-            <span className="text-neutral-400">Codec:</span>
-            <span className="font-bold text-white">{displayCodec}</span>
-          </div>
-        </div>
-
-        {/* Ações Rápidas de Reprodução Externa e Download */}
-        {(streamUrl || localPlayableUrl) && (
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap shrink-0 pt-1 sm:pt-0 border-t sm:border-t-0 border-white/5">
-            {!isLive && isNative && (
-              <button
-                onClick={async () => {
-                  if (isDownloading) return;
-
-                  const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
-                  const epId = activeEpisode?.id;
-                  const sNum = selectedSeason ? Number(selectedSeason) : undefined;
-                  const downId = buildDownloadId(
-                    streamType === 'series' ? 'series' : 'movie',
-                    currentActiveId || id,
-                    sNum,
-                    epNum ?? epId
-                  );
-
-                  if (isCurrentDownloaded) {
-                    if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
-                      await deleteOfflineDownload(downId);
-                      setIsCurrentDownloaded(false);
-                      setLocalPlayableUrl(null);
-                      setIsOfflineMode(false);
-                    }
-                    return;
-                  }
-
-                  if (!streamUrl) return;
-                  setIsDownloading(true);
-                  try {
-                    await downloadVideoForOffline(
-                      {
-                        stream_id: String(currentActiveId || id),
-                        stream_type: streamType === 'series' ? 'series' : 'movie',
-                        title: playerTitle,
-                        series_title: item?.title || item?.name,
-                        poster_url: playerPoster,
-                        container_extension: item?.container_extension,
-                        season_num: sNum,
-                        episode_num: epNum,
-                        episode_id: epId,
-                      },
-                      streamUrl
-                    );
-                    setIsCurrentDownloaded(true);
-                    setDownloadDone(true);
-                    setTimeout(() => setDownloadDone(false), 5000);
-                  } catch (e: any) {
-                    alert(e.message || 'Erro ao realizar download.');
-                  } finally {
-                    setIsDownloading(false);
-                  }
-                }}
-                disabled={isDownloading}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold transition flex items-center gap-1.5 cursor-pointer ${
-                  isCurrentDownloaded
-                    ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/30'
-                    : downloadDone
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                    : 'bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border-violet-500/30'
-                }`}
-                title={
-                  isCurrentDownloaded
-                    ? 'Excluir da memória do celular para liberar espaço'
-                    : isNativeApp()
-                    ? 'Salvar na memória do celular para assistir offline'
-                    : 'Baixar vídeo'
-                }
-              >
-                {isDownloading ? (
-                  <>
-                    <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-                    <span>Baixando...</span>
-                  </>
-                ) : isCurrentDownloaded ? (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Excluir do Celular</span>
-                  </>
-                ) : downloadDone ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Baixado Offline</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Baixar Offline</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* ========================================================================= */}

@@ -1,4 +1,4 @@
-import { SeriesInfoResponse, SeriesSeason, SeriesEpisode } from './types';
+import { SeriesInfoResponse, SeriesSeason, SeriesEpisode, WatchedItem } from './types';
 
 export function isSpecialSeason(
   s: SeriesSeason | { season_number?: number | string; name?: string }
@@ -123,5 +123,78 @@ export function formatEpisodeTitle(
   }
 
   return `E${ep}S${sStr} - ${cleanName}`;
+}
+
+/**
+ * Localiza o próximo capítulo após o último episódio marcado como assistido.
+ * Caso nenhum episódio tenha sido assistido, retorna o primeiro episódio da série.
+ * Caso o último episódio assistido seja o fim da série, retorna o primeiro episódio (permitindo recomeçar).
+ */
+export function findNextEpisodeToWatch(
+  seriesInfo: SeriesInfoResponse | null,
+  isWatchedFn: (streamId: string | number, streamType: string) => boolean,
+  watchedList: WatchedItem[] = []
+): (SeriesEpisode & { seasonNumber: string | number }) | null {
+  if (!seriesInfo?.episodes) return null;
+
+  const sortedSeasons = buildSortedSeasonList(seriesInfo);
+  if (sortedSeasons.length === 0) return null;
+
+  // Monta lista linear e ordenada de todos os episódios de todas as temporadas
+  const allEpisodes: Array<SeriesEpisode & { seasonNumber: string | number }> = [];
+  for (const season of sortedSeasons) {
+    const eps = getEpisodesForSeason(seriesInfo, season.season_number);
+    const sortedEps = [...eps].sort(
+      (a, b) => Number(a.episode_num || 0) - Number(b.episode_num || 0)
+    );
+    for (const ep of sortedEps) {
+      allEpisodes.push({
+        ...ep,
+        seasonNumber: season.season_number,
+      });
+    }
+  }
+
+  if (allEpisodes.length === 0) return null;
+
+  // Filtra episódios da série marcados como assistidos
+  const watchedEps = allEpisodes.filter((ep) => isWatchedFn(String(ep.id), 'series'));
+
+  // Se nenhum episódio foi assistido ainda, retorna o primeiro episódio
+  if (watchedEps.length === 0) {
+    return allEpisodes[0];
+  }
+
+  // Identifica o último episódio assistido
+  // Prioriza o episódio com a data mais recente (watched_at) na lista de assistidos
+  let lastWatchedEp = watchedEps[watchedEps.length - 1];
+  let latestTime = 0;
+
+  for (const ep of watchedEps) {
+    const wItem = watchedList.find(
+      (w) =>
+        String(w.stream_id) === String(ep.id) &&
+        (w.stream_type === 'series' || !w.stream_type) &&
+        w.is_completed
+    );
+    if (wItem?.watched_at) {
+      const time = new Date(wItem.watched_at).getTime();
+      if (time > latestTime) {
+        latestTime = time;
+        lastWatchedEp = ep;
+      }
+    }
+  }
+
+  // Encontra a posição do último episódio assistido na lista linear
+  const lastIndex = allEpisodes.findIndex((ep) => String(ep.id) === String(lastWatchedEp.id));
+
+  // Retorna o próximo episódio após o último assistido
+  if (lastIndex >= 0 && lastIndex + 1 < allEpisodes.length) {
+    return allEpisodes[lastIndex + 1];
+  }
+
+  // Se assistiu até o último episódio de toda a série, retorna o primeiro para recomeçar
+  return allEpisodes[0];
 }
 
