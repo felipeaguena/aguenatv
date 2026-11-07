@@ -127,7 +127,7 @@ body:has(.art-fullscreen-web) nav {
   pointer-events: none !important;
 }
 
-/* O VÍDEO FICA EM PLANO PRINCIPAL: 100% estendido para a esquerda e cobrindo a tela toda */
+/* O VÍDEO FICA EM PLANO PRINCIPAL: proporção original por padrão (contain) */
 .artplayer-app.art-fullscreen video,
 .artplayer-app.art-fullscreen-web video,
 .art-video-player.art-fullscreen video,
@@ -150,10 +150,26 @@ body:has(.art-fullscreen-web) nav {
   margin: 0 !important;
   padding: 0 !important;
   border: none !important;
-  object-fit: cover !important;
+  object-fit: contain !important; /* Proporção original por padrão */
   z-index: 10 !important;
   background: transparent !important;
   background-color: transparent !important;
+}
+
+/* Quando o usuário clica no botão "Ajustar / Preencher a Tela" para preencher a tela inteira */
+.artplayer-app.art-video-cover video,
+.art-video-player.art-video-cover video,
+.artplayer-app.art-video-cover .art-video,
+.art-video-player.art-video-cover .art-video,
+.artplayer-app.art-fullscreen.art-video-cover video,
+.artplayer-app.art-fullscreen-web.art-video-cover video,
+.art-video-player.art-fullscreen.art-video-cover video,
+.art-video-player.art-fullscreen-web.art-video-cover video,
+.artplayer-app.art-fullscreen.art-video-cover .art-video,
+.artplayer-app.art-fullscreen-web.art-video-cover .art-video,
+.art-video-player.art-fullscreen.art-video-cover .art-video,
+.art-video-player.art-fullscreen-web.art-video-cover .art-video {
+  object-fit: cover !important;
 }
 
 /* O fundo preto fica ATRÁS do vídeo (no container pai), NUNCA por cima dele */

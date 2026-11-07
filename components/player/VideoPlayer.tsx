@@ -344,6 +344,39 @@ export default function VideoPlayer({
               },
             ]
           : []),
+        // Botão para Alternar entre Ajustar (Original) e Preencher a Tela
+        {
+          name: 'fit-toggle',
+          position: 'right' as const,
+          index: 28,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>',
+          tooltip: 'Ajustar / Preencher a Tela',
+          click: function (this: Artplayer) {
+            const v = this.video;
+            const playerEl = this.template?.$player;
+            const containerEl = this.template?.$container;
+            if (!v || !playerEl) return;
+            const isCover = playerEl.classList.contains('art-video-cover');
+            const iconEl = this.template?.$controls?.querySelector('.art-control-fit-toggle .art-icon');
+            if (isCover) {
+              playerEl.classList.remove('art-video-cover');
+              containerEl?.classList.remove('art-video-cover');
+              v.style.objectFit = 'contain';
+              this.notice.show = 'Proporção: Original (Ajustado)';
+              if (iconEl) {
+                iconEl.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+              }
+            } else {
+              playerEl.classList.add('art-video-cover');
+              containerEl?.classList.add('art-video-cover');
+              v.style.objectFit = 'cover';
+              this.notice.show = 'Proporção: Preencher a Tela';
+              if (iconEl) {
+                iconEl.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>';
+              }
+            }
+          },
+        },
         // Botão de Fullscreen exclusivo para Mobile (no Desktop o Artplayer já insere o controle nativo na barra)
         ...(isMobile
           ? [
@@ -663,7 +696,6 @@ export default function VideoPlayer({
       isFullscreenRef.current = state;
       setFullscreenCutoutMode(state);
       if (art.video) {
-        art.video.style.objectFit = state ? 'cover' : 'contain';
         art.video.style.backgroundColor = 'transparent';
       }
       try {
@@ -680,7 +712,6 @@ export default function VideoPlayer({
       isFullscreenRef.current = state;
       setFullscreenCutoutMode(state);
       if (art.video) {
-        art.video.style.objectFit = state ? 'cover' : 'contain';
         art.video.style.backgroundColor = 'transparent';
       }
     });
