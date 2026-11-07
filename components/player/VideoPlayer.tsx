@@ -502,6 +502,26 @@ export default function VideoPlayer({
 
     // Fullscreen nativo, rotação e controle de StatusBar no Capacitor (Mobile / APK / Android TV)
     const handleFullscreenChange = async (state: boolean) => {
+      // 1. Dinamicamente ajusta o viewport meta: viewport-fit=cover APENAS em fullscreen
+      try {
+        const metaViewport = document.querySelector('meta[name="viewport"]');
+        if (metaViewport) {
+          if (state) {
+            metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover');
+          } else {
+            metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
+          }
+        }
+      } catch (e) {}
+
+      // 2. Ponte nativa Android para ativar suporte a recorte de tela (notch / cutout) APENAS em fullscreen
+      try {
+        if (typeof (window as any).AndroidBridge?.setCutoutFullscreen === 'function') {
+          (window as any).AndroidBridge.setCutoutFullscreen(state);
+        }
+      } catch (e) {}
+
+      // 3. Controle de StatusBar e orientação de tela no Capacitor (Mobile / APK / Android TV)
       if (Capacitor.isNativePlatform()) {
         try {
           if (state) {
@@ -521,6 +541,26 @@ export default function VideoPlayer({
     art.on('fullscreenWeb', handleFullscreenChange);
 
     return () => {
+      // Restaura viewport e configurações normais do sistema ao desmontar ou sair do player
+      try {
+        const metaViewport = document.querySelector('meta[name="viewport"]');
+        if (metaViewport) {
+          metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1');
+        }
+      } catch (e) {}
+
+      try {
+        if (typeof (window as any).AndroidBridge?.setCutoutFullscreen === 'function') {
+          (window as any).AndroidBridge.setCutoutFullscreen(false);
+        }
+      } catch (e) {}
+
+      if (Capacitor.isNativePlatform()) {
+        StatusBar.show().catch(() => {});
+        StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+        ScreenOrientation.unlock().catch(() => {});
+      }
+
       if (artInstanceRef.current) {
         artInstanceRef.current.destroy(true);
         artInstanceRef.current = null;

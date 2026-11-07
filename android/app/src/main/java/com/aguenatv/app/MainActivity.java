@@ -5,9 +5,12 @@ import android.graphics.Color;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -35,15 +38,25 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundDownloadPlugin.class);
         super.onCreate(savedInstanceState);
 
-        // Suporte total a preenchimento de tela cheia atravessando notch / recorte de camera
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-            getWindow().getAttributes().layoutInDisplayCutoutMode =
-                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
-
         try {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
+                // Bridge nativo para controle dinâmico do recorte (notch) APENAS durante vídeo em fullscreen
+                webView.addJavascriptInterface(new Object() {
+                    @JavascriptInterface
+                    public void setCutoutFullscreen(boolean enable) {
+                        runOnUiThread(() -> {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                WindowManager.LayoutParams params = getWindow().getAttributes();
+                                params.layoutInDisplayCutoutMode = enable
+                                    ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                                    : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                                getWindow().setAttributes(params);
+                            }
+                        });
+                    }
+                }, "AndroidBridge");
+
                 WebSettings settings = webView.getSettings();
                 settings.setDomStorageEnabled(true);
                 settings.setDatabaseEnabled(true);
