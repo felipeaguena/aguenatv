@@ -170,14 +170,14 @@ export default function VideoPlayer({
 
   // Função Unificada e Confiável de Tela Cheia com Recorte Imersivo do Notch
   const toggleFullscreen = useCallback(async (art: Artplayer) => {
-    const isNativeApk = Capacitor.isNativePlatform();
-    const currentlyActive = isFullscreenRef.current || (isNativeApk ? art.fullscreenWeb : (art.fullscreen || art.fullscreenWeb || Boolean(document.fullscreenElement)));
+    const isMobile = isMobileDevice();
+    const currentlyActive = isFullscreenRef.current || (isMobile ? art.fullscreenWeb : (art.fullscreen || art.fullscreenWeb || Boolean(document.fullscreenElement)));
 
     if (currentlyActive) {
       // 1. Sair da tela cheia
       isFullscreenRef.current = false;
 
-      if (isNativeApk) {
+      if (isMobile) {
         art.fullscreenWeb = false;
       } else {
         if (art.fullscreen) art.fullscreen = false;
@@ -196,13 +196,12 @@ export default function VideoPlayer({
 
       await setFullscreenCutoutMode(true);
 
-      if (isNativeApk) {
-        // No APK nativo (Capacitor), usamos Web Fullscreen do Artplayer + AndroidBridge Edge-to-Edge.
-        // O WebView cobre 100% da tela, sobrepondo notch e barra de navegação do sistema com auto-hide.
+      if (isMobile) {
+        // No APK nativo e navegador mobile, usamos Web Fullscreen do Artplayer + rotação limpa.
+        // O player cobre 100% da tela (100dvw x 100dvh), sobrepondo notch e barra de navegação sem conflitos de API DOM
         art.fullscreenWeb = true;
       } else {
-        // No navegador mobile (Chrome/Safari) e desktop:
-        // Aciona o fullscreen da API para forçar o navegador a ocultar a barra de navegação/endereço
+        // No desktop: Aciona o fullscreen nativo da API do navegador
         try {
           art.fullscreen = true;
           if (!art.fullscreen) {
