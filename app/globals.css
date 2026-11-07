@@ -72,12 +72,13 @@
 }
 
 /* =========================================================================
-   MODO TELA CHEIA (FULLSCREEN) IMERSIVO TOTAL
-   Preenchimento 100% da tela, sem barras laterais, sobrepondo o notch e barras do sistema
+   ARTPLAYER: MODO TELA CHEIA (FULLSCREEN) IMERSIVO TOTAL
+   Preenchimento 100% da tela no mobile/APK, sobrepondo o notch e barras do sistema
    ========================================================================= */
-.html5-video-player-container:fullscreen,
-.html5-video-player-container:-webkit-full-screen,
-.html5-video-player-container.is-fullscreen {
+.art-video-player.art-fullscreen,
+.art-video-player.art-fullscreen-web,
+.art-video-player:fullscreen,
+.art-video-player:-webkit-full-screen {
   position: fixed !important;
   inset: 0 !important;
   top: 0 !important;
@@ -98,10 +99,11 @@
   background-color: #000 !important;
 }
 
-/* O elemento de vídeo preenche 100% da tela */
-.html5-video-player-container:fullscreen video,
-.html5-video-player-container:-webkit-full-screen video,
-.html5-video-player-container.is-fullscreen video {
+/* O elemento de vídeo preenche 100% da viewport */
+.art-video-player.art-fullscreen .art-video,
+.art-video-player.art-fullscreen-web .art-video,
+.art-video-player:fullscreen .art-video,
+.art-video-player:-webkit-full-screen .art-video {
   position: absolute !important;
   inset: 0 !important;
   top: 0 !important;
@@ -114,39 +116,72 @@
   border: none !important;
 }
 
-/* Modo Preenchimento Total (Cover) - Sem nenhuma barra lateral */
-.html5-video-player-container:fullscreen video.fit-cover,
-.html5-video-player-container:-webkit-full-screen video.fit-cover,
-.html5-video-player-container.is-fullscreen video.fit-cover,
-.html5-video-player-container.is-fullscreen video:not(.fit-contain) {
+/* Modo Preenchimento Total (Cover) - Sem nenhuma barra lateral ou cinza no mobile/APK */
+.art-video-player.art-fullscreen.fit-cover .art-video,
+.art-video-player.art-fullscreen-web.fit-cover .art-video,
+.art-video-player.art-fullscreen:not(.fit-contain) .art-video,
+.art-video-player.art-fullscreen-web:not(.fit-contain) .art-video {
   object-fit: cover !important;
 }
 
 /* Modo Proporção Original (Contain) */
-.html5-video-player-container:fullscreen video.fit-contain,
-.html5-video-player-container:-webkit-full-screen video.fit-contain,
-.html5-video-player-container.is-fullscreen video.fit-contain {
+.art-video-player.art-fullscreen.fit-contain .art-video,
+.art-video-player.art-fullscreen-web.fit-contain .art-video {
   object-fit: contain !important;
 }
 
-/* No desktop, se não for cover forçado, ajusta proporcional */
+/* No desktop (>1024px), proporção original por padrão a menos que forçado fit-cover */
 @media (min-width: 1025px) {
-  .html5-video-player-container:fullscreen video:not(.fit-cover),
-  .html5-video-player-container:-webkit-full-screen video:not(.fit-cover),
-  .html5-video-player-container.is-fullscreen video:not(.fit-cover) {
+  .art-video-player.art-fullscreen:not(.fit-cover) .art-video,
+  .art-video-player.art-fullscreen-web:not(.fit-cover) .art-video {
     object-fit: contain !important;
   }
 }
 
 /* Barra inferior e superior no fullscreen respeitando o entalhe da câmera (Safe Area Inset) */
-.html5-fullscreen-controls-bottom {
+.art-video-player.art-fullscreen .art-bottom,
+.art-video-player.art-fullscreen-web .art-bottom {
   padding-left: max(16px, env(safe-area-inset-left)) !important;
   padding-right: max(16px, env(safe-area-inset-right)) !important;
-  padding-bottom: max(12px, env(safe-area-inset-bottom)) !important;
+  padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
 }
 
-.html5-fullscreen-controls-top {
+.art-video-player.art-fullscreen .art-top,
+.art-video-player.art-fullscreen-web .art-top {
   padding-left: max(16px, env(safe-area-inset-left)) !important;
   padding-right: max(16px, env(safe-area-inset-right)) !important;
-  padding-top: max(12px, env(safe-area-inset-top)) !important;
+  padding-top: max(10px, env(safe-area-inset-top)) !important;
+}
+
+/* Otimização dos controles do Artplayer no mobile para telas pequenas */
+@media (max-width: 768px) {
+  .art-video-player .art-bottom .art-controls {
+    padding: 0 4px !important;
+    gap: 4px !important;
+  }
+
+  .art-video-player .art-bottom .art-controls-left,
+  .art-video-player .art-bottom .art-controls-right {
+    gap: 3px !important;
+  }
+
+  .art-video-player .art-icon {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 2px !important;
+  }
+
+  .art-video-player .art-icon svg {
+    width: 20px !important;
+    height: 20px !important;
+  }
+
+  .art-video-player .art-control-time {
+    font-size: 11px !important;
+    padding: 0 4px !important;
+  }
+
+  .art-video-player .art-control-volume {
+    display: none !important;
+  }
 }

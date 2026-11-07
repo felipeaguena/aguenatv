@@ -55,7 +55,10 @@ public class MainActivity extends BridgeActivity {
                         window.setAttributes(params);
                     }
 
-                    // 2. Ocultar completamente Status Bar e Navigation Bar (sem relógio, sem bateria, sem pílula de gestos)
+                    // 2. Não ajustar janelas às barras do sistema (permite desenho de ponta a ponta)
+                    WindowCompat.setDecorFitsSystemWindows(window, false);
+
+                    // 3. Ocultar completamente Status Bar e Navigation Bar (sem relógio, sem bateria, sem pílula de gestos)
                     WindowInsetsControllerCompat insetsController = WindowCompat.getInsetsController(window, decorView);
                     if (insetsController != null) {
                         insetsController.hide(WindowInsetsCompat.Type.systemBars());
@@ -64,7 +67,7 @@ public class MainActivity extends BridgeActivity {
                         );
                     }
 
-                    // 3. Flags completas de compatibilidade imersiva total
+                    // 4. Flags completas de compatibilidade imersiva total
                     int flags = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -74,9 +77,9 @@ public class MainActivity extends BridgeActivity {
                     decorView.setSystemUiVisibility(flags);
 
                     window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-                    window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
                 } else {
-                    // 1. Restaurar modo normal para todas as outras páginas
+                    // 1. Restaurar modo normal para todas as outras páginas (respeitando o notch)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         WindowManager.LayoutParams params = window.getAttributes();
                         params.layoutInDisplayCutoutMode =
@@ -84,7 +87,10 @@ public class MainActivity extends BridgeActivity {
                         window.setAttributes(params);
                     }
 
-                    // 2. Restaurar barras do sistema normalmente
+                    // 2. Restaurar ajuste de janelas às barras do sistema (navegação normal respeita status bar e notch)
+                    WindowCompat.setDecorFitsSystemWindows(window, true);
+
+                    // 3. Restaurar barras do sistema normalmente (status bar e navigation bar visíveis)
                     WindowInsetsControllerCompat insetsController = WindowCompat.getInsetsController(window, decorView);
                     if (insetsController != null) {
                         insetsController.show(WindowInsetsCompat.Type.systemBars());
@@ -112,6 +118,8 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BackgroundDownloadPlugin.class);
         super.onCreate(savedInstanceState);
+        // Garante que o modo de navegação normal (respeitando notch e status bar) seja o estado inicial
+        setNativeImmersive(false);
 
         try {
             WebView webView = getBridge().getWebView();
