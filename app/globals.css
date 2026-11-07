@@ -91,7 +91,9 @@
 
 /* Modo Tela Cheia Imersiva no Artplayer (SOMENTE quando em fullscreen) */
 .artplayer-app.art-fullscreen,
-.artplayer-app.art-fullscreen-web {
+.artplayer-app.art-fullscreen-web,
+.art-video-player.art-fullscreen,
+.art-video-player.art-fullscreen-web {
   width: 100vw !important;
   width: 100dvw !important;
   height: 100vh !important;
@@ -121,21 +123,27 @@ body:has(.art-fullscreen-web) nav {
 
 /* Garante que o vídeo preencha toda a largura/altura no player em tela cheia */
 .artplayer-app.art-fullscreen video,
-.artplayer-app.art-fullscreen-web video {
+.artplayer-app.art-fullscreen-web video,
+.art-video-player.art-fullscreen video,
+.art-video-player.art-fullscreen-web video {
   width: 100% !important;
   height: 100% !important;
 }
 
 /* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */
 .artplayer-app.art-fullscreen .art-bottom,
-.artplayer-app.art-fullscreen-web .art-bottom {
+.artplayer-app.art-fullscreen-web .art-bottom,
+.art-video-player.art-fullscreen .art-bottom,
+.art-video-player.art-fullscreen-web .art-bottom {
   padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
   padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
   padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
 }
 
 .artplayer-app.art-fullscreen .art-top,
-.artplayer-app.art-fullscreen-web .art-top {
+.artplayer-app.art-fullscreen-web .art-top,
+.art-video-player.art-fullscreen .art-top,
+.art-video-player.art-fullscreen-web .art-top {
   padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
   padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
   padding-top: max(12px, env(safe-area-inset-top, 0px)) !important;
