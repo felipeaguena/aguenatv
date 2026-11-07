@@ -549,6 +549,23 @@ export default function InfoView({ type, id }: InfoViewProps) {
     return 0;
   }, [isSeries, item, currentSeasonEpisodes, selectedSeason, getProgress]);
 
+  // Elenco a exibir (enriquecido via TMDb ou extraído dos metadados da lista IPTV)
+  const castToDisplay: CastMember[] = useMemo<CastMember[]>(() => {
+    if (enrichedMetadata?.cast && enrichedMetadata.cast.length > 0) {
+      return enrichedMetadata.cast;
+    }
+    const rawCast = seriesInfo?.info?.cast || (item as any)?.cast;
+    if (typeof rawCast === 'string' && rawCast.trim()) {
+      return rawCast
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n.length > 1)
+        .slice(0, 16)
+        .map((name): CastMember => ({ name }));
+    }
+    return [];
+  }, [enrichedMetadata?.cast, seriesInfo?.info?.cast, (item as any)?.cast]);
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3">
@@ -584,23 +601,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const backdropImage = isLive ? item.stream_icon : (enrichedMetadata?.backdropUrl || item.stream_icon);
   const posterImage = isLive ? item.stream_icon : (enrichedMetadata?.posterUrl || item.stream_icon);
   const heroImage = isLive ? item.stream_icon : (backdropImage || posterImage);
-
-  // Elenco a exibir (enriquecido via TMDb ou extraído dos metadados da lista IPTV)
-  const castToDisplay: CastMember[] = useMemo<CastMember[]>(() => {
-    if (enrichedMetadata?.cast && enrichedMetadata.cast.length > 0) {
-      return enrichedMetadata.cast;
-    }
-    const rawCast = seriesInfo?.info?.cast || (item as any)?.cast;
-    if (typeof rawCast === 'string' && rawCast.trim()) {
-      return rawCast
-        .split(',')
-        .map((n) => n.trim())
-        .filter((n) => n.length > 1)
-        .slice(0, 16)
-        .map((name): CastMember => ({ name }));
-    }
-    return [];
-  }, [enrichedMetadata?.cast, seriesInfo?.info?.cast, (item as any)?.cast]);
 
   // Sinopse consolidada
   const plotSynopsis =
