@@ -177,12 +177,52 @@ export default function VideoPlayer({
     hasPrevEpisodeRef.current = hasPrevEpisode;
   });
 
-  // Alterna tela cheia: no mobile usamos fullscreenWeb (evita corridas de rotação), no desktop usamos o fullscreen nativo do navegador
+  // Alterna tela cheia: suporta tanto desktop (fullscreen nativo e web) quanto mobile (fullscreenWeb imersivo)
   const toggleFullscreen = useCallback((art: Artplayer) => {
-    if (isMobileDevice()) {
-      art.fullscreenWeb = !art.fullscreenWeb;
+    const isCurrentlyFullscreen = Boolean(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      art.fullscreen ||
+      art.fullscreenWeb ||
+      isFullscreenRef.current
+    );
+
+    if (isCurrentlyFullscreen) {
+      // Sair do fullscreen: restaura o tamanho original da página
+      if (document.fullscreenElement || (document as any).webkitFullscreenElement || (document as any).mozFullScreenElement || art.fullscreen) {
+        try {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          } else if ((document as any).webkitExitFullscreen) {
+            (document as any).webkitExitFullscreen();
+          }
+        } catch (e) {}
+        try {
+          art.fullscreen = false;
+        } catch (e) {}
+      }
+
+      if (art.fullscreenWeb) {
+        art.fullscreenWeb = false;
+      }
+
+      isFullscreenRef.current = false;
+      setFullscreenCutoutMode(false);
     } else {
-      art.fullscreen = !art.fullscreen;
+      // Entrar no fullscreen
+      if (isMobileDevice()) {
+        art.fullscreenWeb = true;
+      } else {
+        try {
+          art.fullscreen = true;
+        } catch (e) {
+          art.fullscreenWeb = true;
+        }
+      }
+
+      isFullscreenRef.current = true;
+      setFullscreenCutoutMode(true);
     }
   }, []);
 
@@ -206,21 +246,23 @@ export default function VideoPlayer({
     };
   }, [toggleFullscreen]);
 
-  // Monitora alterações de tela cheia exclusivamente no Desktop
+  // Monitora alterações de tela cheia para manter estado sempre sincronizado
   useEffect(() => {
     const handleFullscreenExitCheck = () => {
-      if (isMobileDevice()) return; // No mobile usamos fullscreenWeb; ignora eventos DOM Fullscreen para evitar corridas
-
       const isFs = Boolean(
         document.fullscreenElement ||
           (document as any).webkitFullscreenElement ||
           (document as any).mozFullScreenElement ||
-          artInstanceRef.current?.fullscreen
+          artInstanceRef.current?.fullscreen ||
+          artInstanceRef.current?.fullscreenWeb
       );
 
       if (!isFs && isFullscreenRef.current) {
         isFullscreenRef.current = false;
         setFullscreenCutoutMode(false);
+        if (artInstanceRef.current?.fullscreenWeb) {
+          artInstanceRef.current.fullscreenWeb = false;
+        }
       }
     };
 
@@ -290,9 +332,9 @@ export default function VideoPlayer({
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
     const isMobile = isMobileDevice();
 
-    // No desktop: mantém o dblclick nativo do Artplayer; no mobile delegamos para fullscreenWeb
+    // Desativa o toggle nativo automático do Artplayer para gerenciarmos o duplo clique com consistência total
     try {
-      (Artplayer as any).DBCLICK_FULLSCREEN = !isMobile;
+      (Artplayer as any).DBCLICK_FULLSCREEN = false;
     } catch (e) {}
 
     // Criação da instância Artplayer.js
@@ -415,7 +457,7 @@ export default function VideoPlayer({
                 html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg></span>',
                 tooltip: 'Tela Cheia',
                 click: function (this: Artplayer) {
-                  this.fullscreenWeb = !this.fullscreenWeb;
+                  toggleFullscreen(this);
                 },
               },
             ]
@@ -608,8 +650,182 @@ export default function VideoPlayer({
       });
     } catch (e) {}
 
+    // Elementos do DOM do Artplayer
+    const playerEl = art.template?.$player;
+    const videoEl = art.template?.$video;
+
+    // Controle de inatividade do mouse e comandos (ocultação após 3 segundos)
+    let inactivityTimer: NodeJS.Timeout | null = null;
+    let lastDblClickTimestamp = 0;
+    const wasPlayingBeforeClickRef = { current: false };
+
+    const showControls = () => {
+      try {
+        if (!art.controls.show) {
+          art.controls.show = true;
+        }
+      } catch (e) {}
+      if (playerEl) {
+        playerEl.classList.add('art-control-show');
+        playerEl.classList.remove('art-hide-cursor');
+      }
+    };
+
+    const hideControls = () => {
+      // Não oculta se menus de configuração ou clique direito estiverem abertos
+      if (art.setting?.show || art.contextmenu?.show) {
+        resetInactivityTimer();
+        return;
+      }
+      try {
+        if (art.controls.show) {
+          art.controls.show = false;
+        }
+      } catch (e) {}
+      if (playerEl) {
+        playerEl.classList.remove('art-control-show');
+        playerEl.classList.add('art-hide-cursor');
+      }
+    };
+
+    const resetInactivityTimer = () => {
+      showControls();
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+      }
+      // Oculta os comandos após 3 segundos de inatividade
+      inactivityTimer = setTimeout(() => {
+        hideControls();
+      }, 3000);
+    };
+
+    const handleUserInteraction = () => {
+      resetInactivityTimer();
+    };
+
+    const handleMouseEnter = () => {
+      resetInactivityTimer();
+    };
+
+    const handleMouseLeave = () => {
+      const isFs = Boolean(
+        document.fullscreenElement ||
+          (document as any).webkitFullscreenElement ||
+          (document as any).mozFullScreenElement ||
+          (document as any).msFullscreenElement ||
+          art.fullscreen ||
+          art.fullscreenWeb ||
+          isFullscreenRef.current
+      );
+      if (!isFs) {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          hideControls();
+        }, 1000);
+      }
+    };
+
+    const handleWindowMouseMove = () => {
+      if (isFullscreenRef.current) {
+        resetInactivityTimer();
+      }
+    };
+
+    // Duplo clique / duplo toque para alternar entre tela cheia e tamanho original
+    const handleDoubleAction = (e?: Event) => {
+      const now = Date.now();
+      if (now - lastDblClickTimestamp < 350) {
+        return;
+      }
+      lastDblClickTimestamp = now;
+
+      if (e) {
+        const target = (e.target || (e as any).srcElement) as HTMLElement | null;
+        if (target?.closest?.('.art-controls, .art-bottom, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu')) {
+          return;
+        }
+      }
+
+      // Se estava tocando antes do duplo clique e o Artplayer pausou no 1º clique, restaura playback
+      if (wasPlayingBeforeClickRef.current) {
+        setTimeout(() => {
+          try {
+            if (!art.playing) {
+              art.play();
+            }
+          } catch (err) {}
+        }, 60);
+      }
+
+      toggleFullscreen(art);
+    };
+
+    const handleMouseDown = () => {
+      wasPlayingBeforeClickRef.current = art.playing;
+      resetInactivityTimer();
+    };
+
+    let lastTouchTime = 0;
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+    const handleTouchEnd = (e: TouchEvent) => {
+      resetInactivityTimer();
+      const now = Date.now();
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = Math.abs(touch.clientX - lastTouchX);
+      const dy = Math.abs(touch.clientY - lastTouchY);
+      if (now - lastTouchTime < 350 && dx < 30 && dy < 30) {
+        handleDoubleAction(e);
+        lastTouchTime = 0;
+      } else {
+        lastTouchTime = now;
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+      }
+    };
+
+    // Registra listeners de interação no container e janela
+    if (playerEl) {
+      playerEl.addEventListener('mousemove', handleUserInteraction, { passive: true });
+      playerEl.addEventListener('mousedown', handleMouseDown, { passive: true });
+      playerEl.addEventListener('touchstart', handleUserInteraction, { passive: true });
+      playerEl.addEventListener('touchmove', handleUserInteraction, { passive: true });
+      playerEl.addEventListener('touchend', handleTouchEnd, { passive: true });
+      playerEl.addEventListener('pointermove', handleUserInteraction, { passive: true });
+      playerEl.addEventListener('mouseenter', handleMouseEnter, { passive: true });
+      playerEl.addEventListener('mouseleave', handleMouseLeave, { passive: true });
+      playerEl.addEventListener('dblclick', handleDoubleAction, true);
+    }
+
+    if (videoEl) {
+      videoEl.addEventListener('dblclick', handleDoubleAction, true);
+    }
+
+    window.addEventListener('mousemove', handleWindowMouseMove, { passive: true });
+
+    // Registra listener nativo de duplo clique do Artplayer também
+    art.on('dblclick', () => {
+      handleDoubleAction();
+    });
+
+    // Inicia temporizador de 3 segundos
+    resetInactivityTimer();
+
+    art.on('video:play', () => {
+      resetInactivityTimer();
+    });
+
+    art.on('video:pause', () => {
+      showControls();
+    });
+
     // No fullscreen, quando os botões de comando estão ocultos, oculta também a barra de progresso
     art.on('control', (state) => {
+      if (state) {
+        resetInactivityTimer();
+      }
       if (isFullscreenRef.current && !state) {
         const bottom = art.template?.$bottom;
         if (bottom) {
@@ -626,13 +842,6 @@ export default function VideoPlayer({
         }
       }
     });
-
-    // No mobile, duplo toque alterna tela cheia web (no desktop o Artplayer faz nativamente de forma síncrona)
-    if (isMobile) {
-      art.on('dblclick', () => {
-        art.fullscreenWeb = !art.fullscreenWeb;
-      });
-    }
 
     // Restauração de posição anterior de onde o usuário parou
     const restorePosition = () => {
@@ -752,6 +961,7 @@ export default function VideoPlayer({
       if (art.video) {
         art.video.style.backgroundColor = 'transparent';
       }
+      resetInactivityTimer();
       if (!state) {
         const bottom = art.template?.$bottom;
         if (bottom) {
@@ -776,6 +986,7 @@ export default function VideoPlayer({
       if (art.video) {
         art.video.style.backgroundColor = 'transparent';
       }
+      resetInactivityTimer();
       if (!state) {
         const bottom = art.template?.$bottom;
         if (bottom) {
@@ -787,6 +998,26 @@ export default function VideoPlayer({
     });
 
     return () => {
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+      }
+      if (playerEl) {
+        playerEl.removeEventListener('mousemove', handleUserInteraction);
+        playerEl.removeEventListener('mousedown', handleMouseDown);
+        playerEl.removeEventListener('touchstart', handleUserInteraction);
+        playerEl.removeEventListener('touchmove', handleUserInteraction);
+        playerEl.removeEventListener('touchend', handleTouchEnd);
+        playerEl.removeEventListener('pointermove', handleUserInteraction);
+        playerEl.removeEventListener('mouseenter', handleMouseEnter);
+        playerEl.removeEventListener('mouseleave', handleMouseLeave);
+        playerEl.removeEventListener('dblclick', handleDoubleAction, true);
+      }
+      if (videoEl) {
+        videoEl.removeEventListener('dblclick', handleDoubleAction, true);
+      }
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+
       isFullscreenRef.current = false;
       setFullscreenCutoutMode(false);
       if (artInstanceRef.current) {
