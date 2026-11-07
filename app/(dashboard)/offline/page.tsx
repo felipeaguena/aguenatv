@@ -384,6 +384,9 @@ function OfflineWatchContent() {
                 streamType={activeEpisode.stream_type}
                 posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
                 autoPlay={false}
+                hasPrevEpisode={isSeries && canGoPrev}
+                onPrevEpisode={isSeries && canGoPrev ? handlePrevChapter : undefined}
+                prevEpisodeLabel="Capítulo Anterior"
                 hasNextEpisode={isSeries && canGoNext}
                 onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
                 nextEpisodeLabel="Próximo Episódio"

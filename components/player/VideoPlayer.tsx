@@ -16,6 +16,7 @@ import {
   Check,
   Sun,
   SkipForward,
+  SkipBack,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
@@ -42,6 +43,9 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   onVideoInfo?: (info: PlayerVideoInfo) => void;
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
+  hasPrevEpisode?: boolean;
+  onPrevEpisode?: () => void;
+  prevEpisodeLabel?: string;
   hasNextEpisode?: boolean;
   onNextEpisode?: () => void;
   nextEpisodeLabel?: string;
@@ -68,6 +72,9 @@ export default function VideoPlayer({
   onEnded,
   onVideoInfo,
   onProgress,
+  hasPrevEpisode = false,
+  onPrevEpisode,
+  prevEpisodeLabel = 'Capítulo Anterior',
   hasNextEpisode = false,
   onNextEpisode,
   nextEpisodeLabel = 'Próximo Episódio',
@@ -80,6 +87,31 @@ export default function VideoPlayer({
   const [buffering, setBuffering] = useState(false);
   const [isPaused, setIsPaused] = useState(!autoPlay);
   const [retryKey, setRetryKey] = useState(0);
+
+  // Controle de visibilidade dos botões integrados ao centro do player
+  const [showControlsOverlay, setShowControlsOverlay] = useState(false);
+  const controlsTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetControlsTimeout = useCallback(() => {
+    setShowControlsOverlay(true);
+    if (controlsTimerRef.current) {
+      clearTimeout(controlsTimerRef.current);
+    }
+    controlsTimerRef.current = setTimeout(() => {
+      setShowControlsOverlay(false);
+    }, 3000);
+  }, []);
+
+  const handleContainerMouseMove = useCallback(() => {
+    resetControlsTimeout();
+  }, [resetControlsTimeout]);
+
+  const handleContainerMouseLeave = useCallback(() => {
+    if (!isPaused) {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      setShowControlsOverlay(false);
+    }
+  }, [isPaused]);
 
   // Estados de controle de tela cheia com rotação automática para paisagem (Landscape)
   const lockLandscape = useCallback(async () => {
@@ -179,6 +211,7 @@ export default function VideoPlayer({
   });
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    resetControlsTimeout();
     if (e.touches.length !== 1) return;
     const touch = e.touches[0];
     const container = containerRef.current;
@@ -436,6 +469,8 @@ export default function VideoPlayer({
   const onProgressRef = useRef(onProgress);
   const onNextEpisodeRef = useRef(onNextEpisode);
   const hasNextEpisodeRef = useRef(hasNextEpisode);
+  const onPrevEpisodeRef = useRef(onPrevEpisode);
+  const hasPrevEpisodeRef = useRef(hasPrevEpisode);
 
   useEffect(() => {
     markWatchedRef.current = markWatched;
@@ -444,6 +479,8 @@ export default function VideoPlayer({
     onProgressRef.current = onProgress;
     onNextEpisodeRef.current = onNextEpisode;
     hasNextEpisodeRef.current = hasNextEpisode;
+    onPrevEpisodeRef.current = onPrevEpisode;
+    hasPrevEpisodeRef.current = hasPrevEpisode;
   });
 
   const handleTriggerNextEpisode = useCallback((e?: React.MouseEvent) => {
@@ -700,7 +737,7 @@ export default function VideoPlayer({
       }
 
       // 3. Autoplay e Botão de Ação do Próximo Episódio (30s antes do final do capítulo)
-      if (hasNextEpisodeRef.current && onNextEpisodeRef.current && duration > 30 && streamType !== 'live') {
+      if (hasNextEpisodeRef.current && onNextEpisodeRef.current && duration > 30 && streamType === 'series') {
         const remainingSeconds = Math.max(0, Math.ceil(duration - currentTime));
         if (remainingSeconds <= 30 && remainingSeconds > 0) {
           setNextEpisodeCountdown((prev) => (prev !== remainingSeconds ? remainingSeconds : prev));
@@ -885,6 +922,8 @@ export default function VideoPlayer({
   return (
     <div
       ref={containerRef}
+      onMouseMove={handleContainerMouseMove}
+      onMouseLeave={handleContainerMouseLeave}
       onDoubleClick={handleToggleFullscreen}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -941,9 +980,9 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* 4. Botão Flutuante de Ação: Próximo Episódio com Contagem Regressiva de 30s (Canto Inferior Esquerdo) */}
+      {/* 4. Botão Flutuante de Ação: Próximo Episódio com Contagem Regressiva de 30s (Canto Inferior Direito) */}
       {nextEpisodeCountdown !== null && hasNextEpisode && (
-        <div className="absolute left-4 sm:left-6 bottom-16 sm:bottom-20 z-30 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-30 animate-in fade-in slide-in-from-bottom-4 duration-300">
           <button
             type="button"
             onClick={handleTriggerNextEpisode}
@@ -981,17 +1020,108 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* 5. Overlay de Botão Play Gigante quando pausado (SEM BLUR: apenas camada escura com botão no centro) */}
-      {isPaused && !loading && !error && (
+      {/* 5. Controles Centrais Integrados ao Player: [Capítulo Anterior] [Play/Pausa] [Próximo Capítulo] */}
+      {!loading && !error && (
         <div
-          onClick={handleManualPlay}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              if (isPaused) {
+                handleManualPlay();
+              } else if (videoRef.current) {
+                videoRef.current.pause();
+              }
+            }
+          }}
           onDoubleClick={handleToggleFullscreen}
-          className="absolute inset-0 flex items-center justify-center bg-black/40 z-10 cursor-pointer transition-all hover:bg-black/30"
-          title="Clique para reproduzir (ou duplo clique para tela cheia)"
+          className={`absolute inset-0 flex items-center justify-center gap-5 sm:gap-8 z-10 transition-all duration-300 select-none ${
+            isPaused || showControlsOverlay
+              ? 'opacity-100 pointer-events-auto bg-black/40 hover:bg-black/35'
+              : 'opacity-0 pointer-events-none'
+          }`}
+          title={isPaused ? 'Clique para reproduzir (ou duplo clique para tela cheia)' : 'Clique para pausar'}
         >
-          <div className="w-20 h-20 rounded-full bg-violet-600/90 hover:bg-violet-600 text-white flex items-center justify-center shadow-[0_0_30px_rgba(139,92,246,0.6)] hover:scale-110 active:scale-95 transition-transform duration-200 border-2 border-white/20">
-            <Play className="w-9 h-9 fill-white ml-1 text-white" />
-          </div>
+          {/* Botão Ícone: Capítulo Anterior (ao lado esquerdo do Play) */}
+          {(onPrevEpisode !== undefined || hasPrevEpisode) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasPrevEpisode && onPrevEpisode) {
+                  onPrevEpisode();
+                }
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              disabled={!hasPrevEpisode}
+              tabIndex={0}
+              data-tv-focusable="true"
+              title={hasPrevEpisode ? (prevEpisodeLabel || 'Capítulo Anterior') : 'Não há capítulo anterior'}
+              className={`w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center backdrop-blur-md border transition-all duration-200 ${
+                hasPrevEpisode
+                  ? 'bg-neutral-900/85 hover:bg-violet-600 text-white border-white/20 hover:border-violet-400 hover:scale-110 active:scale-95 shadow-xl shadow-black/50 cursor-pointer'
+                  : 'bg-black/30 text-neutral-600 border-white/5 opacity-30 cursor-not-allowed'
+              }`}
+            >
+              <SkipBack className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
+            </button>
+          )}
+
+          {/* Botão Ícone Central: Play / Pause */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isPaused) {
+                handleManualPlay();
+              } else if (videoRef.current) {
+                videoRef.current.pause();
+              }
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            tabIndex={0}
+            data-tv-focusable="true"
+            title={isPaused ? 'Reproduzir' : 'Pausar'}
+            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-violet-600/90 hover:bg-violet-600 text-white flex items-center justify-center shadow-[0_0_30px_rgba(139,92,246,0.6)] hover:scale-110 active:scale-95 transition-transform duration-200 border-2 border-white/20 cursor-pointer"
+          >
+            {isPaused ? (
+              <Play className="w-8 h-8 sm:w-9 sm:h-9 fill-white ml-1 text-white" />
+            ) : (
+              <Pause className="w-8 h-8 sm:w-9 sm:h-9 fill-white text-white" />
+            )}
+          </button>
+
+          {/* Botão Ícone: Próximo Capítulo (ao lado direito do Play) */}
+          {(onNextEpisode !== undefined || hasNextEpisode) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasNextEpisode && onNextEpisode) {
+                  onNextEpisode();
+                }
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
+              disabled={!hasNextEpisode}
+              tabIndex={0}
+              data-tv-focusable="true"
+              title={hasNextEpisode ? (nextEpisodeLabel || 'Próximo Capítulo') : 'Não há próximo capítulo'}
+              className={`w-11 h-11 sm:w-13 sm:h-13 rounded-full flex items-center justify-center backdrop-blur-md border transition-all duration-200 ${
+                hasNextEpisode
+                  ? 'bg-neutral-900/85 hover:bg-violet-600 text-white border-white/20 hover:border-violet-400 hover:scale-110 active:scale-95 shadow-xl shadow-black/50 cursor-pointer'
+                  : 'bg-black/30 text-neutral-600 border-white/5 opacity-30 cursor-not-allowed'
+              }`}
+            >
+              <SkipForward className="w-5 h-5 sm:w-6 sm:h-6 fill-current" />
+            </button>
+          )}
         </div>
       )}
 
@@ -1042,43 +1172,23 @@ export default function VideoPlayer({
             </button>
 
             {streamUrl && (
-              <>
-                <button
-                  onClick={handleCopyLink}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-neutral-200 text-xs font-semibold border border-white/10 transition flex items-center gap-2 cursor-pointer"
-                  title="Copiar link do stream para colar no VLC ou outro player"
-                >
-                  {copiedLink ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      Copiado!
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-neutral-400" />
-                      Copiar Link (VLC)
-                    </>
-                  )}
-                </button>
-
-                <a
-                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
-                  className="px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold border border-amber-500/30 transition flex items-center gap-2"
-                  title="Abrir diretamente no reprodutor VLC"
-                >
-                  <span>▶</span> Abrir no VLC
-                </a>
-
-                <a
-                  href={streamUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-semibold border border-white/10 transition flex items-center gap-2"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  Link Direto
-                </a>
-              </>
+              <button
+                onClick={handleCopyLink}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-neutral-200 text-xs font-semibold border border-white/10 transition flex items-center gap-2 cursor-pointer"
+                title="Copiar link do stream para colar em reprodutor externo"
+              >
+                {copiedLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    Copiado!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-neutral-400" />
+                    Copiar Link
+                  </>
+                )}
+              </button>
             )}
           </div>
         </div>

@@ -1074,9 +1074,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 initialTime={initialTime}
                 onProgress={handlePlayerProgress}
                 onVideoInfo={handlePlayerVideoInfo}
-                hasNextEpisode={isSeries && canGoNext}
-                onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
-                nextEpisodeLabel="Próximo Episódio"
+                hasPrevEpisode={canGoPrev}
+                onPrevEpisode={canGoPrev ? handlePrevChapter : undefined}
+                prevEpisodeLabel={isLive ? 'Canal Anterior' : isMovie ? 'Filme Anterior' : 'Capítulo Anterior'}
+                hasNextEpisode={canGoNext}
+                onNextEpisode={canGoNext ? handleNextChapter : undefined}
+                nextEpisodeLabel={isLive ? 'Próximo Canal' : isMovie ? 'Próximo Filme' : 'Próximo Capítulo'}
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-neutral-400">
@@ -1086,88 +1089,83 @@ export default function WatchView({ type, id }: WatchViewProps) {
             )}
           </div>
 
-          {/* Botões de Navegação (Capítulo Anterior/Próximo para séries ou Canal Anterior/Próximo para TV ao Vivo) */}
-          <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
-            <button
-              type="button"
-              onClick={handlePrevChapter}
-              disabled={!canGoPrev}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                canGoPrev
-                  ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
-                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-              }`}
-              title={
-                canGoPrev
-                  ? isLive
-                    ? 'Ir para o canal anterior'
-                    : isMovie
-                    ? 'Ir para o filme anterior'
-                    : 'Voltar para o capítulo anterior'
-                  : isLive
-                  ? 'Não há canal anterior'
-                  : isMovie
-                  ? 'Não há filme anterior'
-                  : 'Não há capítulo anterior'
-              }
-            >
-              <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
-              <span className="truncate">
-                {isLive ? 'Canal Anterior' : isMovie ? 'Filme Anterior' : 'Capítulo Anterior'}
-              </span>
-            </button>
+          {/* Informações do Vídeo / Capítulo Selecionado (Diretamente abaixo do player, sem background e sem border) */}
+          <div className="pt-1 pb-0.5 space-y-2 w-full min-w-0">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5 min-w-0 w-full">
+              <div className="min-w-0 flex-1">
+                {/* Badges e Metadados */}
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
+                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shrink-0">
+                    {isSeries ? 'Capítulo Atual' : isMovie ? 'Filme' : 'Canal'}
+                  </span>
 
-            {isSeries && activeEpisode && (
-              <div className="hidden sm:flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
-                  Capítulo Atual
-                </span>
-                <span className="text-xs font-bold text-violet-300 truncate w-full">
-                  {formatEpisodeTitle(activeEpisode.episode_num, selectedSeason, activeEpisode.title)}
-                </span>
+                  {genresList.map((genre) => (
+                    <span
+                      key={`pill_${genre}`}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 shrink-0"
+                    >
+                      {genre}
+                    </span>
+                  ))}
+
+                  {/* Data de Lançamento do Episódio ou Ano da Obra */}
+                  {currentEpAirDate ? (
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 flex items-center gap-1 shrink-0">
+                      <Calendar className="w-3 h-3 text-violet-400" />
+                      Lançamento: {currentEpAirDate}
+                    </span>
+                  ) : enrichedMetadata?.year ? (
+                    <span className="text-[11px] font-medium text-neutral-400 shrink-0">
+                      {enrichedMetadata.year}
+                    </span>
+                  ) : null}
+
+                  {/* Nota / Avaliação */}
+                  {currentEpMeta?.rating ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{' '}
+                      {currentEpMeta.rating}
+                    </span>
+                  ) : enrichedMetadata?.rating ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {enrichedMetadata.rating}
+                    </span>
+                  ) : null}
+
+                  {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
+                    <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30 shrink-0">
+                      Via {enrichedMetadata.source.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+
+                <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words">
+                  {playerTitle}
+                </h2>
               </div>
-            )}
 
-            {isLive && item && (
-              <div className="hidden sm:flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
-                <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider flex items-center gap-1 justify-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                  Canal Atual
-                </span>
-                <span className="text-xs font-bold text-white truncate w-full">
-                  {item.title || item.name}
-                </span>
+              {/* Duração e Resolução */}
+              <div className="flex items-center gap-2 sm:gap-2.5 text-xs text-neutral-400 flex-wrap shrink-0">
+                {activeEpisode?.info?.duration && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                    <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                    <span>{activeEpisode.info.duration}</span>
+                  </div>
+                )}
+                <div className="px-2.5 py-1 rounded-xl bg-white/5 border border-white/5 font-mono text-[11px] uppercase text-neutral-300">
+                  {item?.container_extension || 'HD 1080p'}
+                </div>
               </div>
-            )}
+            </div>
 
-            <button
-              type="button"
-              onClick={handleNextChapter}
-              disabled={!canGoNext}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                canGoNext
-                  ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
-                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-              }`}
-              title={
-                canGoNext
-                  ? isLive
-                    ? 'Ir para o próximo canal'
-                    : isMovie
-                    ? 'Ir para o próximo filme'
-                    : 'Ir para o próximo capítulo'
-                  : isLive
-                  ? 'Não há próximo canal'
-                  : isMovie
-                  ? 'Não há próximo filme'
-                  : 'Não há próximo capítulo'
-              }
-            >
-              <span className="truncate">
-                {isLive ? 'Próximo Canal' : isMovie ? 'Próximo Filme' : 'Próximo Capítulo'}
-              </span>
-              <ChevronRight className="w-4 h-4 text-white shrink-0" />
-            </button>
+            {/* Sinopse do Capítulo ou da Obra */}
+            <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words pt-1">
+              {currentEpMeta?.overview ||
+                activeEpisode?.info?.plot ||
+                enrichedMetadata?.overview ||
+                seriesInfo?.info?.plot ||
+                'Aproveite a reprodução fluida direta dos servidores CDN com navegação rápida de episódios.'}
+            </p>
           </div>
         </div>
 
@@ -1600,112 +1598,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 )}
               </button>
             )}
-            {streamUrl && (
-              <>
-                <a
-                  href={`vlc://${streamUrl.replace(/^https?:\/\//, '')}`}
-                  className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 text-[11px] font-semibold transition flex items-center gap-1"
-                  title="Abrir diretamente no VLC Player"
-                >
-                  <span>▶</span> VLC
-                </a>
-                <a
-                  href={streamUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 border border-white/10 text-[11px] font-semibold transition flex items-center gap-1"
-                  title="Abrir o link direto em nova aba"
-                >
-                  Link Direto
-                </a>
-              </>
-            )}
           </div>
         )}
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. SEÇÃO DEPOIS DO REPRODUTOR: DETALHES DO CAPÍTULO & SUGESTÕES DE SÉRIES/FILMES */}
+      {/* 3. SEÇÃO DEPOIS DO REPRODUTOR: SUGESTÕES DE SÉRIES/FILMES                 */}
       {/* ========================================================================= */}
-      <div className="space-y-6 sm:space-y-8 pt-2 sm:pt-4 w-full min-w-0">
-        {/* Painel de Informações do Capítulo Selecionado */}
-        <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4 w-full min-w-0 overflow-hidden">
-          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-white/5 pb-4 min-w-0 w-full">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-                <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shrink-0">
-                  {isSeries ? 'Capítulo Atual' : isMovie ? 'Filme' : 'Canal'}
-                </span>
-
-                {genresList.map((genre) => (
-                  <span
-                    key={`pill_${genre}`}
-                    className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 shrink-0"
-                  >
-                    {genre}
-                  </span>
-                ))}
-
-                {/* Data de Lançamento do Episódio ou Ano da Obra */}
-                {currentEpAirDate ? (
-                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-white/10 text-neutral-300 border border-white/10 flex items-center gap-1 shrink-0">
-                    <Calendar className="w-3 h-3 text-violet-400" />
-                    Lançamento: {currentEpAirDate}
-                  </span>
-                ) : enrichedMetadata?.year ? (
-                  <span className="text-[11px] font-medium text-neutral-400 shrink-0">
-                    {enrichedMetadata.year}
-                  </span>
-                ) : null}
-
-                {/* Nota / Avaliação */}
-                {currentEpMeta?.rating ? (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{' '}
-                    {currentEpMeta.rating}
-                  </span>
-                ) : enrichedMetadata?.rating ? (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 shrink-0">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {enrichedMetadata.rating}
-                  </span>
-                ) : null}
-
-                {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
-                  <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30 shrink-0">
-                    Via {enrichedMetadata.source.toUpperCase()}
-                  </span>
-                )}
-              </div>
-
-              <h2 className="text-base sm:text-xl font-bold text-white tracking-tight break-words">
-                {playerTitle}
-              </h2>
-            </div>
-
-            {/* Duração e Resolução */}
-            <div className="flex items-center gap-2 sm:gap-3 text-xs text-neutral-400 flex-wrap shrink-0">
-              {activeEpisode?.info?.duration && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-white/5 border border-white/5">
-                  <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-                  <span>{activeEpisode.info.duration}</span>
-                </div>
-              )}
-              <div className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-white/5 border border-white/5 font-mono text-[11px] uppercase text-neutral-300">
-                {item?.container_extension || 'HD 1080p'}
-              </div>
-            </div>
-          </div>
-
-          {/* Sinopse do Capítulo ou da Obra */}
-          <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed max-w-4xl break-words">
-            {currentEpMeta?.overview ||
-              activeEpisode?.info?.plot ||
-              enrichedMetadata?.overview ||
-              seriesInfo?.info?.plot ||
-              'Aproveite a reprodução fluida direta dos servidores CDN com navegação rápida de episódios.'}
-          </p>
-        </div>
-
+      <div className="space-y-4 pt-1 sm:pt-2 w-full min-w-0">
         {/* Grade de Sugestões: Outras Séries e Filmes que Você Pode Gostar */}
         {suggestions.length > 0 && (
           <section className="space-y-4">
