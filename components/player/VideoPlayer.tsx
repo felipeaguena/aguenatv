@@ -238,6 +238,34 @@ export default function VideoPlayer({
     };
   }, []);
 
+  // Atalho de teclado: tecla "f" ou "F" ativa/alterna o Fullscreen do player
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignora atalho se o usuário estiver digitando em campos de texto/input
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName?.toUpperCase();
+        const isEditable = target.getAttribute?.('contenteditable');
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable === 'true' || isEditable === '') {
+          return;
+        }
+      }
+
+      if (e.key === 'f' || e.key === 'F') {
+        if (artInstanceRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleFullscreen(artInstanceRef.current);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toggleFullscreen]);
+
   const handleTriggerNextEpisode = useCallback((e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
@@ -573,6 +601,32 @@ export default function VideoPlayer({
 
     artInstanceRef.current = art;
 
+    // Registra atalho "KeyF" no Artplayer
+    try {
+      art.hotkey?.add?.('KeyF', () => {
+        toggleFullscreen(art);
+      });
+    } catch (e) {}
+
+    // No fullscreen, quando os botões de comando estão ocultos, oculta também a barra de progresso
+    art.on('control', (state) => {
+      if (isFullscreenRef.current && !state) {
+        const bottom = art.template?.$bottom;
+        if (bottom) {
+          bottom.style.opacity = '0';
+          bottom.style.visibility = 'hidden';
+          bottom.style.pointerEvents = 'none';
+        }
+      } else if (state) {
+        const bottom = art.template?.$bottom;
+        if (bottom) {
+          bottom.style.opacity = '';
+          bottom.style.visibility = '';
+          bottom.style.pointerEvents = '';
+        }
+      }
+    });
+
     // No mobile, duplo toque alterna tela cheia web (no desktop o Artplayer faz nativamente de forma síncrona)
     if (isMobile) {
       art.on('dblclick', () => {
@@ -698,6 +752,14 @@ export default function VideoPlayer({
       if (art.video) {
         art.video.style.backgroundColor = 'transparent';
       }
+      if (!state) {
+        const bottom = art.template?.$bottom;
+        if (bottom) {
+          bottom.style.opacity = '';
+          bottom.style.visibility = '';
+          bottom.style.pointerEvents = '';
+        }
+      }
       try {
         const btn = art.template?.$controls?.querySelector('.art-control-mobile-fullscreen .art-icon');
         if (btn) {
@@ -713,6 +775,14 @@ export default function VideoPlayer({
       setFullscreenCutoutMode(state);
       if (art.video) {
         art.video.style.backgroundColor = 'transparent';
+      }
+      if (!state) {
+        const bottom = art.template?.$bottom;
+        if (bottom) {
+          bottom.style.opacity = '';
+          bottom.style.visibility = '';
+          bottom.style.pointerEvents = '';
+        }
       }
     });
 
