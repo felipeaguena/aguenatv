@@ -664,6 +664,7 @@ export default function VideoPlayer({
       setFullscreenCutoutMode(state);
       if (art.video) {
         art.video.style.objectFit = state ? 'cover' : 'contain';
+        art.video.style.backgroundColor = 'transparent';
       }
       try {
         const btn = art.template?.$controls?.querySelector('.art-control-mobile-fullscreen .art-icon');
@@ -680,6 +681,7 @@ export default function VideoPlayer({
       setFullscreenCutoutMode(state);
       if (art.video) {
         art.video.style.objectFit = state ? 'cover' : 'contain';
+        art.video.style.backgroundColor = 'transparent';
       }
     });
 

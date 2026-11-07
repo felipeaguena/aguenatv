@@ -127,7 +127,7 @@ body:has(.art-fullscreen-web) nav {
   pointer-events: none !important;
 }
 
-/* Garante que o vídeo preencha 100% da tela cobrindo o notch e laterais no player em tela cheia */
+/* O VÍDEO FICA EM PLANO PRINCIPAL: 100% estendido para a esquerda e cobrindo a tela toda */
 .artplayer-app.art-fullscreen video,
 .artplayer-app.art-fullscreen-web video,
 .art-video-player.art-fullscreen video,
@@ -136,26 +136,43 @@ body:has(.art-fullscreen-web) nav {
 .artplayer-app.art-fullscreen-web .art-video,
 .art-video-player.art-fullscreen .art-video,
 .art-video-player.art-fullscreen-web .art-video {
-  width: 100% !important;
-  height: 100% !important;
-  max-width: none !important;
-  max-height: none !important;
-  object-fit: cover !important;
-  background-color: #000000 !important;
-}
-
-.art-video-player.art-fullscreen .art-layers,
-.art-video-player.art-fullscreen-web .art-layers,
-.art-video-player.art-fullscreen .art-layer-video,
-.art-video-player.art-fullscreen-web .art-layer-video {
+  display: block !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   margin: 0 !important;
   padding: 0 !important;
-  inset: 0 !important;
-  background-color: #000000 !important;
+  border: none !important;
+  object-fit: cover !important;
+  z-index: 10 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* O fundo preto fica ATRÁS do vídeo (no container pai), NUNCA por cima dele */
+.art-video-player.art-fullscreen .art-layers,
+.art-video-player.art-fullscreen-web .art-layers,
+.art-video-player.art-fullscreen .art-layers *,
+.art-video-player.art-fullscreen-web .art-layers *,
+.art-video-player.art-fullscreen .art-mask,
+.art-video-player.art-fullscreen-web .art-mask,
+.art-video-player.art-fullscreen .art-danmuku,
+.art-video-player.art-fullscreen-web .art-danmuku {
+  background: transparent !important;
+  background-color: transparent !important;
+  pointer-events: none !important;
+}
+
+.art-video-player.art-fullscreen .art-poster,
+.art-video-player.art-fullscreen-web .art-poster {
+  display: none !important;
 }
 
 /* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */

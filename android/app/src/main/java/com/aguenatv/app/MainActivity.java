@@ -75,8 +75,14 @@ public class MainActivity extends BridgeActivity {
                     decorView.setBackgroundColor(Color.BLACK);
                     try {
                         WebView wv = getBridge().getWebView();
-                        if (wv != null) wv.setBackgroundColor(Color.BLACK);
-                        if (swipeRefreshLayout != null) swipeRefreshLayout.setBackgroundColor(Color.BLACK);
+                        if (wv != null) {
+                            wv.setBackgroundColor(Color.BLACK);
+                            wv.setPadding(0, 0, 0, 0);
+                        }
+                        if (swipeRefreshLayout != null) {
+                            swipeRefreshLayout.setBackgroundColor(Color.BLACK);
+                            swipeRefreshLayout.setPadding(0, 0, 0, 0);
+                        }
                     } catch (Exception ignored) {}
 
                     // 4. Torna a barra de navegação e status 100% transparentes para não sobrepor o vídeo
