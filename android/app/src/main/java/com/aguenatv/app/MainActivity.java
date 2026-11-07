@@ -35,6 +35,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundDownloadPlugin.class);
         super.onCreate(savedInstanceState);
 
+        // Suporte total a preenchimento de tela cheia atravessando notch / recorte de camera
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+
         try {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
