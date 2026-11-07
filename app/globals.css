@@ -90,6 +90,12 @@
 }
 
 /* Modo Tela Cheia Imersiva no Artplayer (SOMENTE quando em fullscreen) */
+html.art-immersive-active,
+body.art-immersive-active {
+  background-color: #000000 !important;
+  overflow: hidden !important;
+}
+
 .artplayer-app.art-fullscreen,
 .artplayer-app.art-fullscreen-web,
 .art-video-player.art-fullscreen,
@@ -109,7 +115,7 @@
   bottom: 0 !important;
   inset: 0 !important;
   z-index: 99999999 !important;
-  background-color: #000 !important;
+  background-color: #000000 !important;
 }
 
 /* Força sobreposição de 100% da barra de navegação inferior do mobile */
@@ -121,13 +127,35 @@ body:has(.art-fullscreen-web) nav {
   pointer-events: none !important;
 }
 
-/* Garante que o vídeo preencha toda a largura/altura no player em tela cheia */
+/* Garante que o vídeo preencha 100% da tela cobrindo o notch e laterais no player em tela cheia */
 .artplayer-app.art-fullscreen video,
 .artplayer-app.art-fullscreen-web video,
 .art-video-player.art-fullscreen video,
-.art-video-player.art-fullscreen-web video {
+.art-video-player.art-fullscreen-web video,
+.artplayer-app.art-fullscreen .art-video,
+.artplayer-app.art-fullscreen-web .art-video,
+.art-video-player.art-fullscreen .art-video,
+.art-video-player.art-fullscreen-web .art-video {
   width: 100% !important;
   height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  object-fit: cover !important;
+  background-color: #000000 !important;
+}
+
+.art-video-player.art-fullscreen .art-layers,
+.art-video-player.art-fullscreen-web .art-layers,
+.art-video-player.art-fullscreen .art-layer-video,
+.art-video-player.art-fullscreen-web .art-layer-video {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  inset: 0 !important;
+  background-color: #000000 !important;
 }
 
 /* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */

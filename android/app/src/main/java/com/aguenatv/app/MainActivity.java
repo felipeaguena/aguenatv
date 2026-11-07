@@ -1,7 +1,9 @@
 package com.aguenatv.app;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
@@ -57,20 +59,33 @@ public class MainActivity extends BridgeActivity {
                     // 1. Edge-to-Edge: desenhar sob 100% da barra de navegação e status (o vídeo cobre tudo)
                     WindowCompat.setDecorFitsSystemWindows(window, false);
 
-                    // 2. Sobrepor o notch / entalhe da câmera em landscape
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    // 2. Sobrepor o notch / entalhe da câmera em qualquer orientação (API 30+ usa ALWAYS, API 28-29 usa SHORT_EDGES)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        WindowManager.LayoutParams params = window.getAttributes();
+                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+                        window.setAttributes(params);
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         WindowManager.LayoutParams params = window.getAttributes();
                         params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
                         window.setAttributes(params);
                     }
 
-                    // 3. Torna a barra de navegação e status 100% transparentes para não sobrepor o vídeo
+                    // 3. Fundo 100% preto absoluto na janela e views para eliminar qualquer barra cinza residual do notch
+                    window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+                    decorView.setBackgroundColor(Color.BLACK);
+                    try {
+                        WebView wv = getBridge().getWebView();
+                        if (wv != null) wv.setBackgroundColor(Color.BLACK);
+                        if (swipeRefreshLayout != null) swipeRefreshLayout.setBackgroundColor(Color.BLACK);
+                    } catch (Exception ignored) {}
+
+                    // 4. Torna a barra de navegação e status 100% transparentes para não sobrepor o vídeo
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         window.setStatusBarColor(Color.TRANSPARENT);
                         window.setNavigationBarColor(Color.TRANSPARENT);
                     }
 
-                    // 4. Oculta barra de status e navegação com Auto-Hide imersivo (swipe temporário)
+                    // 5. Oculta barra de status e navegação com Auto-Hide imersivo (swipe temporário)
                     WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
                     if (controller != null) {
                         controller.hide(WindowInsetsCompat.Type.systemBars());
@@ -79,7 +94,7 @@ public class MainActivity extends BridgeActivity {
                         controller.setAppearanceLightNavigationBars(false);
                     }
 
-                    // 5. Flags de fallback para garantir 100% de imersão em qualquer versão do Android
+                    // 6. Flags de fallback para garantir 100% de imersão em qualquer versão do Android
                     decorView.setSystemUiVisibility(
                         View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -103,6 +118,14 @@ public class MainActivity extends BridgeActivity {
                         window.setNavigationBarColor(SYSTEM_BAR_COLOR_DARK);
                     }
 
+                    window.setBackgroundDrawable(new ColorDrawable(SYSTEM_BAR_COLOR_DARK));
+                    decorView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
+                    try {
+                        WebView wv = getBridge().getWebView();
+                        if (wv != null) wv.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
+                        if (swipeRefreshLayout != null) swipeRefreshLayout.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
+                    } catch (Exception ignored) {}
+
                     WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
                     if (controller != null) {
                         controller.show(WindowInsetsCompat.Type.systemBars());
@@ -116,6 +139,14 @@ public class MainActivity extends BridgeActivity {
                 e.printStackTrace();
             }
         });
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (isCutoutFullscreenActive) {
+            applyCutoutFullscreen(true);
+        }
     }
 
     public class AndroidBridge {
@@ -148,7 +179,9 @@ public class MainActivity extends BridgeActivity {
                     window.setNavigationBarContrastEnforced(false);
                     window.setStatusBarContrastEnforced(false);
                 }
+                window.setBackgroundDrawable(new ColorDrawable(SYSTEM_BAR_COLOR_DARK));
                 View decorView = window.getDecorView();
+                decorView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
                 WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
                 if (controller != null) {
                     controller.setAppearanceLightStatusBars(false);
@@ -160,6 +193,7 @@ public class MainActivity extends BridgeActivity {
         try {
             WebView webView = getBridge().getWebView();
             if (webView != null) {
+                webView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
                 webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
                 WebSettings settings = webView.getSettings();
                 settings.setDomStorageEnabled(true);

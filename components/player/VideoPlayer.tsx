@@ -344,26 +344,6 @@ export default function VideoPlayer({
               },
             ]
           : []),
-        // Botão para Alternar Preenchimento Total da Tela (Cover vs Contain)
-        {
-          name: 'fit-toggle',
-          position: 'right' as const,
-          index: 28,
-          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 4px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>',
-          tooltip: 'Ajuste / Preencher Tela',
-          click: function (this: Artplayer) {
-            const v = this.video;
-            if (!v) return;
-            const isCover = v.style.objectFit === 'cover';
-            if (isCover) {
-              v.style.objectFit = 'contain';
-              this.notice.show = 'Proporção: Ajustar (Original 16:9)';
-            } else {
-              v.style.objectFit = 'cover';
-              this.notice.show = 'Proporção: Preencher Tela (Imersivo Total)';
-            }
-          },
-        },
         // Botão de Fullscreen exclusivo para Mobile (no Desktop o Artplayer já insere o controle nativo na barra)
         ...(isMobile
           ? [
@@ -682,6 +662,9 @@ export default function VideoPlayer({
     art.on('fullscreenWeb', (state) => {
       isFullscreenRef.current = state;
       setFullscreenCutoutMode(state);
+      if (art.video) {
+        art.video.style.objectFit = state ? 'cover' : 'contain';
+      }
       try {
         const btn = art.template?.$controls?.querySelector('.art-control-mobile-fullscreen .art-icon');
         if (btn) {
@@ -695,6 +678,9 @@ export default function VideoPlayer({
     art.on('fullscreen', (state) => {
       isFullscreenRef.current = state;
       setFullscreenCutoutMode(state);
+      if (art.video) {
+        art.video.style.objectFit = state ? 'cover' : 'contain';
+      }
     });
 
     return () => {
