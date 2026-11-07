@@ -64,8 +64,9 @@ export async function GET(req: NextRequest) {
             videos.find((v: any) => v.site === 'YouTube' && v.type === 'Trailer') ||
             videos.find((v: any) => v.site === 'YouTube');
 
-          // Elenco principal
-          const castList: CastMember[] = (d.credits?.cast || []).slice(0, 8).map((c: any) => ({
+          // Elenco principal (expandido para até 16 integrantes com ID do TMDb)
+          const castList: CastMember[] = (d.credits?.cast || []).slice(0, 16).map((c: any) => ({
+            id: c.id,
             name: c.name,
             character: c.character,
             profileUrl: c.profile_path ? `https://image.tmdb.org/t/p/w185${c.profile_path}` : undefined,

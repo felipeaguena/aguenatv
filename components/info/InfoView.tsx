@@ -37,11 +37,12 @@ import {
   SeriesEpisode,
   SeriesSeason,
   EnrichedMetadata,
+  CastMember,
   EnrichedEpisodeMetadata,
   SeasonOfficialMetadata,
   IPTVAccount,
 } from '@/lib/types';
-import { getWatchUrl, getRouteType } from '@/lib/routes';
+import { getWatchUrl, getRouteType, getPersonUrl } from '@/lib/routes';
 import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle, isSpecialSeason } from '@/lib/series';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
@@ -583,6 +584,23 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const backdropImage = isLive ? item.stream_icon : (enrichedMetadata?.backdropUrl || item.stream_icon);
   const posterImage = isLive ? item.stream_icon : (enrichedMetadata?.posterUrl || item.stream_icon);
   const heroImage = isLive ? item.stream_icon : (backdropImage || posterImage);
+
+  // Elenco a exibir (enriquecido via TMDb ou extraído dos metadados da lista IPTV)
+  const castToDisplay: CastMember[] = useMemo<CastMember[]>(() => {
+    if (enrichedMetadata?.cast && enrichedMetadata.cast.length > 0) {
+      return enrichedMetadata.cast;
+    }
+    const rawCast = seriesInfo?.info?.cast || (item as any)?.cast;
+    if (typeof rawCast === 'string' && rawCast.trim()) {
+      return rawCast
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n.length > 1)
+        .slice(0, 16)
+        .map((name): CastMember => ({ name }));
+    }
+    return [];
+  }, [enrichedMetadata?.cast, seriesInfo?.info?.cast, (item as any)?.cast]);
 
   // Sinopse consolidada
   const plotSynopsis =
@@ -1564,40 +1582,50 @@ export default function InfoView({ type, id }: InfoViewProps) {
         </section>
       )}
 
-      {/* 3. Se houver Elenco Principal (Cast) enriquecido via TMDb (apenas filmes e séries) */}
-      {!isLive && enrichedMetadata?.cast && enrichedMetadata.cast.length > 0 && (
+      {/* 3. Se houver Elenco Principal (Cast) enriquecido via TMDb ou lista IPTV */}
+      {!isLive && castToDisplay.length > 0 && (
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4">
-          <div className="flex items-center gap-2 border-b border-white/5 pb-3">
-            <Users className="w-5 h-5 text-violet-400" />
-            <h2 className="text-base font-bold text-white">Elenco Principal</h2>
+          <div className="flex items-center justify-between border-b border-white/5 pb-3">
+            <div className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-violet-400" />
+              <h2 className="text-base font-bold text-white">Elenco Principal</h2>
+            </div>
+            <span className="text-xs text-neutral-400">Clique para ver o perfil e filmografia</span>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-3">
-            {enrichedMetadata.cast.map((actor, idx) => (
-              <div
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+            {castToDisplay.map((actor, idx) => (
+              <Link
                 key={`cast_${idx}_${actor.name}`}
-                className="p-2 rounded-2xl bg-[#13141b] border border-white/5 flex flex-col items-center text-center space-y-2"
+                href={getPersonUrl(actor.id, actor.name)}
+                className="group/actor p-3 rounded-2xl bg-[#13141b] hover:bg-[#1a1b24] border border-white/5 hover:border-violet-500/50 hover:shadow-[0_8px_24px_rgba(139,92,246,0.18)] flex flex-col items-center text-center space-y-2 transition-all cursor-pointer transform hover:-translate-y-1"
               >
-                <div className="w-16 h-16 rounded-full overflow-hidden bg-neutral-900 border border-white/10 shrink-0">
+                <div className="w-16 h-16 rounded-full overflow-hidden bg-neutral-900 border border-white/10 shrink-0 group-hover/actor:border-violet-500/50 transition-colors">
                   {actor.profileUrl ? (
                     <img
                       src={actor.profileUrl}
                       alt={actor.name}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover group-hover/actor:scale-105 transition-transform duration-300"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center text-xs font-bold text-neutral-500">
+                    <div className="w-full h-full flex items-center justify-center text-xs font-bold text-neutral-500 group-hover/actor:text-violet-300">
                       {actor.name.slice(0, 2).toUpperCase()}
                     </div>
                   )}
                 </div>
                 <div className="w-full truncate">
-                  <p className="text-xs font-semibold text-neutral-200 truncate">{actor.name}</p>
-                  {actor.character && (
+                  <p className="text-xs font-semibold text-neutral-200 group-hover/actor:text-violet-300 truncate transition-colors">
+                    {actor.name}
+                  </p>
+                  {actor.character ? (
                     <p className="text-[10px] text-neutral-500 truncate">{actor.character}</p>
+                  ) : (
+                    <p className="text-[10px] text-violet-400/80 font-medium opacity-0 group-hover/actor:opacity-100 transition-opacity">
+                      Ver artista &rarr;
+                    </p>
                   )}
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </section>

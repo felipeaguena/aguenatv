@@ -167,9 +167,40 @@ export interface SeriesInfoResponse {
 }
 
 export interface CastMember {
+  id?: number | string;
   name: string;
   character?: string;
   profileUrl?: string;
+}
+
+export interface PersonCredit {
+  id: number;
+  title: string;
+  original_title?: string;
+  media_type: 'movie' | 'tv';
+  character?: string;
+  job?: string;
+  department?: string;
+  release_date?: string;
+  year?: string;
+  poster_url?: string;
+  backdrop_url?: string;
+  vote_average?: number;
+  popularity?: number;
+}
+
+export interface PersonDetails {
+  id: number;
+  name: string;
+  biography?: string;
+  birthday?: string;
+  deathday?: string;
+  place_of_birth?: string;
+  profile_url?: string;
+  known_for_department?: string;
+  gender?: string;
+  imdb_id?: string;
+  credits: PersonCredit[];
 }
 
 export interface EnrichedEpisodeMetadata {

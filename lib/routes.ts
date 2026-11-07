@@ -27,3 +27,12 @@ export function getInfoUrl(
   const routeType = getRouteType(streamType);
   return `/${routeType}/${id}/info`;
 }
+
+export function getPersonUrl(
+  id?: number | string,
+  name?: string
+): string {
+  const query = name ? `?name=${encodeURIComponent(name)}` : '';
+  const pathId = id ? encodeURIComponent(String(id)) : encodeURIComponent(name || '');
+  return `/person/${pathId}${query}`;
+}
