@@ -121,11 +121,11 @@ export default function VideoPlayer({
 
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
 
-    // Criação do Artplayer
+    // Criação do Artplayer com opções validadas
     const art = new Artplayer({
       container: artContainerRef.current,
       url: streamUrl,
-      type: isHls ? 'm3u8' : undefined,
+      ...(isHls ? { type: 'm3u8' } : {}),
       poster: posterUrl || '',
       theme: '#8b5cf6',
       volume: 0.8,
@@ -174,6 +174,33 @@ export default function VideoPlayer({
           'Exit PIP Mode': 'Sair do Picture-in-Picture',
         },
       },
+      // Controles customizados de Capítulo Anterior e Próximo na barra nativa
+      controls: [
+        ...(hasPrevEpisodeRef.current && onPrevEpisodeRef.current
+          ? [
+              {
+                name: 'prev-chapter',
+                position: 'left' as const,
+                index: 10,
+                html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg></span>',
+                tooltip: prevEpisodeLabel,
+                click: () => onPrevEpisodeRef.current?.(),
+              },
+            ]
+          : []),
+        ...(hasNextEpisodeRef.current && onNextEpisodeRef.current
+          ? [
+              {
+                name: 'next-chapter',
+                position: 'left' as const,
+                index: 11,
+                html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></span>',
+                tooltip: nextEpisodeLabel,
+                click: () => onNextEpisodeRef.current?.(),
+              },
+            ]
+          : []),
+      ],
       // Suporte personalizado a streams HLS via Hls.js
       customType: {
         m3u8: function (video: HTMLVideoElement, url: string, player: Artplayer) {
@@ -212,7 +239,7 @@ export default function VideoPlayer({
                   };
                 });
 
-                player.setting.update({
+                const qualitySetting = {
                   name: 'quality',
                   width: 160,
                   html: 'Qualidade',
@@ -222,7 +249,13 @@ export default function VideoPlayer({
                     hls.currentLevel = item.level;
                     return item.html;
                   },
-                });
+                };
+
+                if (player.setting.find('quality')) {
+                  player.setting.update(qualitySetting);
+                } else {
+                  player.setting.add(qualitySetting);
+                }
               }
 
               // Faixas de Áudio
@@ -233,7 +266,7 @@ export default function VideoPlayer({
                   trackId: index,
                 }));
 
-                player.setting.update({
+                const audioSetting = {
                   name: 'audio',
                   width: 180,
                   html: 'Áudio',
@@ -243,7 +276,13 @@ export default function VideoPlayer({
                     hls.audioTrack = item.trackId;
                     return item.html;
                   },
-                });
+                };
+
+                if (player.setting.find('audio')) {
+                  player.setting.update(audioSetting);
+                } else {
+                  player.setting.add(audioSetting);
+                }
               }
             });
 
@@ -259,7 +298,7 @@ export default function VideoPlayer({
                   })),
                 ];
 
-                player.setting.update({
+                const subSetting = {
                   name: 'subtitles',
                   width: 180,
                   html: 'Legendas',
@@ -269,7 +308,13 @@ export default function VideoPlayer({
                     hls.subtitleTrack = item.trackId;
                     return item.html;
                   },
-                });
+                };
+
+                if (player.setting.find('subtitles')) {
+                  player.setting.update(subSetting);
+                } else {
+                  player.setting.add(subSetting);
+                }
               }
             });
 
@@ -336,29 +381,6 @@ export default function VideoPlayer({
     });
 
     artInstanceRef.current = art;
-
-    // Adiciona botões de Capítulo Anterior e Próximo na barra de controles do player
-    if (hasPrevEpisodeRef.current && onPrevEpisodeRef.current) {
-      art.controls.add({
-        name: 'prev-chapter',
-        position: 'left',
-        index: 10,
-        html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg></span>',
-        tooltip: prevEpisodeLabel,
-        click: () => onPrevEpisodeRef.current?.(),
-      });
-    }
-
-    if (hasNextEpisodeRef.current && onNextEpisodeRef.current) {
-      art.controls.add({
-        name: 'next-chapter',
-        position: 'left',
-        index: 11,
-        html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 6px;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></span>',
-        tooltip: nextEpisodeLabel,
-        click: () => onNextEpisodeRef.current?.(),
-      });
-    }
 
     // Restauração de posição ao carregar metadados
     const restorePosition = () => {
@@ -496,7 +518,7 @@ export default function VideoPlayer({
 
   return (
     <div
-      className="relative w-full h-full bg-black overflow-hidden select-none"
+      className="absolute inset-0 w-full h-full bg-black overflow-hidden select-none"
       data-tv-focusable="true"
     >
       {/* Contêiner onde o Artplayer.js é montado */}
