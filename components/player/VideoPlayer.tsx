@@ -67,11 +67,18 @@ function setDynamicViewportCover(enable: boolean) {
       meta.setAttribute('name', 'viewport');
       document.head.appendChild(meta);
     }
+    let themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (!themeMeta) {
+      themeMeta = document.createElement('meta');
+      themeMeta.setAttribute('name', 'theme-color');
+      document.head.appendChild(themeMeta);
+    }
     if (enable) {
       meta.setAttribute(
         'content',
         'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
       );
+      themeMeta.setAttribute('content', '#000000');
       document.documentElement.classList.add('art-immersive-active');
       document.body.classList.add('art-immersive-active');
     } else {
@@ -79,6 +86,7 @@ function setDynamicViewportCover(enable: boolean) {
         'content',
         'width=device-width, initial-scale=1, maximum-scale=1'
       );
+      themeMeta.setAttribute('content', '#0b0c10');
       document.documentElement.classList.remove('art-immersive-active');
       document.body.classList.remove('art-immersive-active');
     }
@@ -103,6 +111,7 @@ async function setFullscreenCutoutMode(enable: boolean) {
         await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
       } else {
         await StatusBar.show().catch(() => {});
+        await StatusBar.setBackgroundColor({ color: '#0b0c10' }).catch(() => {});
         await ScreenOrientation.unlock().catch(() => {});
       }
     } catch (e) {}
