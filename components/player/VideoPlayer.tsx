@@ -170,17 +170,18 @@ export default function VideoPlayer({
 
   // Função Unificada e Confiável de Tela Cheia com Recorte Imersivo do Notch
   const toggleFullscreen = useCallback(async (art: Artplayer) => {
-    const isMobile = isMobileDevice();
-    const currentlyActive = isFullscreenRef.current || (isMobile ? art.fullscreenWeb : (art.fullscreen || Boolean(document.fullscreenElement)));
+    const isNativeApk = Capacitor.isNativePlatform();
+    const currentlyActive = isFullscreenRef.current || (isNativeApk ? art.fullscreenWeb : (art.fullscreen || art.fullscreenWeb || Boolean(document.fullscreenElement)));
 
     if (currentlyActive) {
       // 1. Sair da tela cheia
       isFullscreenRef.current = false;
 
-      if (isMobile) {
+      if (isNativeApk) {
         art.fullscreenWeb = false;
       } else {
         if (art.fullscreen) art.fullscreen = false;
+        if (art.fullscreenWeb) art.fullscreenWeb = false;
         if (document.fullscreenElement) {
           try {
             await document.exitFullscreen().catch(() => {});
@@ -195,13 +196,13 @@ export default function VideoPlayer({
 
       await setFullscreenCutoutMode(true);
 
-      if (isMobile) {
-        // No celular / APK (Capacitor), usamos Web Fullscreen do Artplayer.
-        // O WebView já é a janela nativa do Android que cobre o notch e laterais.
-        // NUNCA chamar art.fullscreen = true no Capacitor para evitar cancelamento pela WebChromeClient.
+      if (isNativeApk) {
+        // No APK nativo (Capacitor), usamos Web Fullscreen do Artplayer + AndroidBridge Edge-to-Edge.
+        // O WebView cobre 100% da tela, sobrepondo notch e barra de navegação do sistema com auto-hide.
         art.fullscreenWeb = true;
       } else {
-        // No desktop, usa o fullscreen nativo do navegador
+        // No navegador mobile (Chrome/Safari) e desktop:
+        // Aciona o fullscreen da API para forçar o navegador a ocultar a barra de navegação/endereço
         try {
           art.fullscreen = true;
           if (!art.fullscreen) {

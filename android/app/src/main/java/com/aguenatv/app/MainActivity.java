@@ -6,6 +6,7 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -40,25 +41,57 @@ public class MainActivity extends BridgeActivity {
             try {
                 Window window = getWindow();
                 if (window == null) return;
+                View decorView = window.getDecorView();
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    WindowManager.LayoutParams params = window.getAttributes();
-                    if (enable) {
+                if (enable) {
+                    // 1. Edge-to-Edge: desenhar sob 100% da barra de navegação e status
+                    WindowCompat.setDecorFitsSystemWindows(window, false);
+
+                    // 2. Sobrepor o notch / entalhe da câmera em landscape
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        WindowManager.LayoutParams params = window.getAttributes();
                         params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-                    } else {
-                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                        window.setAttributes(params);
                     }
-                    window.setAttributes(params);
-                }
 
-                WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-                if (controller != null) {
-                    if (enable) {
+                    // 3. Torna a barra de navegação e de status 100% transparentes
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        window.setStatusBarColor(Color.TRANSPARENT);
+                        window.setNavigationBarColor(Color.TRANSPARENT);
+                    }
+
+                    // 4. Oculta barra de status e navegação com Auto-Hide (Immersive Sticky por swipe)
+                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
+                    if (controller != null) {
                         controller.hide(WindowInsetsCompat.Type.systemBars());
                         controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                    } else {
+                    }
+
+                    // 5. Flags de fallback para forçar sobreposição de 100% da barra de navegação e auto-hide
+                    decorView.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    );
+                } else {
+                    // Restauração das barras normais de navegação e status fora do fullscreen
+                    WindowCompat.setDecorFitsSystemWindows(window, true);
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        WindowManager.LayoutParams params = window.getAttributes();
+                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                        window.setAttributes(params);
+                    }
+
+                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
+                    if (controller != null) {
                         controller.show(WindowInsetsCompat.Type.systemBars());
                     }
+
+                    decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -289,6 +322,14 @@ public class MainActivity extends BridgeActivity {
         try {
             applyCutoutFullscreen(false);
         } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && isCutoutFullscreenActive) {
+            applyCutoutFullscreen(true);
+        }
     }
 
     @Override

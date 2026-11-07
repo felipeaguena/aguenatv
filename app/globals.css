@@ -93,15 +93,30 @@
 .artplayer-app.art-fullscreen,
 .artplayer-app.art-fullscreen-web {
   width: 100vw !important;
+  width: 100dvw !important;
   height: 100vh !important;
+  height: 100dvh !important;
   max-width: none !important;
   max-height: none !important;
   margin: 0 !important;
   padding: 0 !important;
   position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   inset: 0 !important;
-  z-index: 999999 !important;
+  z-index: 99999999 !important;
   background-color: #000 !important;
+}
+
+/* Força sobreposição de 100% da barra de navegação inferior do mobile */
+body.art-immersive-active nav,
+body.art-immersive-active [role="navigation"],
+body:has(.art-fullscreen-web) nav {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 /* Garante que o vídeo preencha toda a largura/altura no player em tela cheia */
