@@ -144,6 +144,7 @@ export default function VideoPlayer({
   const [nextEpisodeCountdown, setNextEpisodeCountdown] = useState<number | null>(null);
   const hasAutoAdvancedRef = useRef(false);
   const hasRestoredRef = useRef(false);
+  const isFullscreenRef = useRef(false);
 
   const { markWatched } = useWatched();
   const hasMarkedRef = useRef(false);
@@ -169,61 +170,84 @@ export default function VideoPlayer({
 
   // Função Unificada e Confiável de Tela Cheia com Recorte Imersivo do Notch
   const toggleFullscreen = useCallback(async (art: Artplayer) => {
-    const isCurrentlyFs = Boolean(
-      document.fullscreenElement ||
-        (document as any).webkitFullscreenElement ||
-        (document as any).mozFullScreenElement ||
-        (art.video as any)?.webkitDisplayingFullscreen ||
-        art.fullscreen ||
-        art.fullscreenWeb
-    );
+    const isMobile = isMobileDevice();
+    const currentlyActive = isFullscreenRef.current || (isMobile ? art.fullscreenWeb : (art.fullscreen || Boolean(document.fullscreenElement)));
 
-    if (isCurrentlyFs) {
+    if (currentlyActive) {
       // 1. Sair da tela cheia
-      try {
-        if (document.exitFullscreen) {
-          await document.exitFullscreen().catch(() => {});
-        } else if ((document as any).webkitExitFullscreen) {
-          (document as any).webkitExitFullscreen();
-        }
-      } catch (e) {}
+      isFullscreenRef.current = false;
 
-      if (art.fullscreen) {
-        art.fullscreen = false;
-      }
-      if (art.fullscreenWeb) {
+      if (isMobile) {
         art.fullscreenWeb = false;
+      } else {
+        if (art.fullscreen) art.fullscreen = false;
+        if (document.fullscreenElement) {
+          try {
+            await document.exitFullscreen().catch(() => {});
+          } catch (e) {}
+        }
       }
 
       await setFullscreenCutoutMode(false);
     } else {
       // 2. Entrar em tela cheia com recorte total sobrepondo notch e barras
+      isFullscreenRef.current = true;
+
       await setFullscreenCutoutMode(true);
 
-      try {
-        art.fullscreen = true;
-        if (!art.fullscreen) {
+      if (isMobile) {
+        // No celular / APK (Capacitor), usamos Web Fullscreen do Artplayer.
+        // O WebView já é a janela nativa do Android que cobre o notch e laterais.
+        // NUNCA chamar art.fullscreen = true no Capacitor para evitar cancelamento pela WebChromeClient.
+        art.fullscreenWeb = true;
+      } else {
+        // No desktop, usa o fullscreen nativo do navegador
+        try {
+          art.fullscreen = true;
+          if (!art.fullscreen) {
+            art.fullscreenWeb = true;
+          }
+        } catch (e) {
           art.fullscreenWeb = true;
         }
-      } catch (e) {
-        art.fullscreenWeb = true;
       }
     }
   }, []);
 
-  // Monitora alterações de tela cheia para garantir desativação segura do recorte ao sair
+  // Suporte ao botão voltar nativo do Android no APK: sair do fullscreen antes de fechar a página
+  useEffect(() => {
+    let removeListener: (() => void) | null = null;
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/app').then(({ App }) => {
+        App.addListener('backButton', () => {
+          if (isFullscreenRef.current && artInstanceRef.current) {
+            toggleFullscreen(artInstanceRef.current);
+          }
+        }).then((handler) => {
+          removeListener = () => handler.remove();
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+
+    return () => {
+      if (removeListener) removeListener();
+    };
+  }, [toggleFullscreen]);
+
+  // Monitora alterações de tela cheia exclusivamente no Desktop
   useEffect(() => {
     const handleFullscreenExitCheck = () => {
+      if (isMobileDevice()) return; // No mobile usamos fullscreenWeb; ignora eventos DOM Fullscreen para evitar corridas
+
       const isFs = Boolean(
         document.fullscreenElement ||
           (document as any).webkitFullscreenElement ||
           (document as any).mozFullScreenElement ||
-          (artInstanceRef.current?.video as any)?.webkitDisplayingFullscreen ||
-          artInstanceRef.current?.fullscreen ||
-          artInstanceRef.current?.fullscreenWeb
+          artInstanceRef.current?.fullscreen
       );
 
-      if (!isFs) {
+      if (!isFs && isFullscreenRef.current) {
+        isFullscreenRef.current = false;
         setFullscreenCutoutMode(false);
       }
     };
@@ -232,19 +256,12 @@ export default function VideoPlayer({
     document.addEventListener('webkitfullscreenchange', handleFullscreenExitCheck);
     document.addEventListener('mozfullscreenchange', handleFullscreenExitCheck);
 
-    const video = artInstanceRef.current?.video;
-    if (video) {
-      video.addEventListener('webkitendfullscreen', handleFullscreenExitCheck);
-    }
-
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenExitCheck);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenExitCheck);
       document.removeEventListener('mozfullscreenchange', handleFullscreenExitCheck);
-      if (video) {
-        video.removeEventListener('webkitendfullscreen', handleFullscreenExitCheck);
-      }
       // Ao sair ou desmontar da tela watch, garante restauração total e segura
+      isFullscreenRef.current = false;
       setFullscreenCutoutMode(false);
     };
   }, []);
@@ -271,6 +288,11 @@ export default function VideoPlayer({
     setError(null);
 
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
+
+    // Desativação do dblclick fullscreen interno para usarmos nossa função segura
+    try {
+      (Artplayer as any).DBCLICK_FULLSCREEN = false;
+    } catch (e) {}
 
     // Criação da instância Artplayer.js
     const art = new Artplayer({
@@ -678,20 +700,48 @@ export default function VideoPlayer({
       setError('Falha na reprodução do stream de vídeo. Tente novamente mais tarde.');
     });
 
-    // Desativação segura quando o player sai do modo tela cheia internamente
-    art.on('fullscreen', (state) => {
-      if (!state && !art.fullscreenWeb) {
-        setFullscreenCutoutMode(false);
+    // Atualiza ícone do botão de tela cheia conforme o estado
+    const updateFsIcon = (active: boolean) => {
+      try {
+        const btn = art.template?.$controls?.querySelector('.art-control-fullscreen-toggle .art-icon');
+        if (btn) {
+          if (active) {
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path></svg>';
+          } else {
+            btn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path></svg>';
+          }
+        }
+      } catch (e) {}
+    };
+
+    art.on('fullscreenWeb', (state) => {
+      updateFsIcon(state);
+      if (isMobileDevice()) {
+        if (state) {
+          isFullscreenRef.current = true;
+          setFullscreenCutoutMode(true);
+        } else if (isFullscreenRef.current) {
+          isFullscreenRef.current = false;
+          setFullscreenCutoutMode(false);
+        }
       }
     });
 
-    art.on('fullscreenWeb', (state) => {
-      if (!state && !art.fullscreen) {
-        setFullscreenCutoutMode(false);
+    art.on('fullscreen', (state) => {
+      updateFsIcon(state);
+      if (!isMobileDevice()) {
+        if (state) {
+          isFullscreenRef.current = true;
+          setFullscreenCutoutMode(true);
+        } else if (isFullscreenRef.current) {
+          isFullscreenRef.current = false;
+          setFullscreenCutoutMode(false);
+        }
       }
     });
 
     return () => {
+      isFullscreenRef.current = false;
       setFullscreenCutoutMode(false);
       if (artInstanceRef.current) {
         try {
