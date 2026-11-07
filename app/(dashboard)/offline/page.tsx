@@ -384,6 +384,9 @@ function OfflineWatchContent() {
                 streamType={activeEpisode.stream_type}
                 posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
                 autoPlay={false}
+                hasNextEpisode={isSeries && canGoNext}
+                onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
+                nextEpisodeLabel="Próximo Episódio"
               />
             ) : (
               <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center">

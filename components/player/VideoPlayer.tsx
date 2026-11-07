@@ -15,6 +15,7 @@ import {
   Copy,
   Check,
   Sun,
+  SkipForward,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
@@ -41,6 +42,9 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   onVideoInfo?: (info: PlayerVideoInfo) => void;
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
+  hasNextEpisode?: boolean;
+  onNextEpisode?: () => void;
+  nextEpisodeLabel?: string;
 }
 
 function formatSeconds(sec: number): string {
@@ -64,6 +68,9 @@ export default function VideoPlayer({
   onEnded,
   onVideoInfo,
   onProgress,
+  hasNextEpisode = false,
+  onNextEpisode,
+  nextEpisodeLabel = 'Próximo Episódio',
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -290,14 +297,17 @@ export default function VideoPlayer({
 
     if (!isFullscreen) {
       lockLandscape();
-      if (video.requestFullscreen) {
-        video.requestFullscreen().catch(() => {});
-      } else if ((video as any).webkitRequestFullscreen) {
-        (video as any).webkitRequestFullscreen();
+      const container = containerRef.current;
+      if (container && container.requestFullscreen) {
+        container.requestFullscreen().catch(() => {
+          if (video.requestFullscreen) video.requestFullscreen().catch(() => {});
+        });
+      } else if (container && (container as any).webkitRequestFullscreen) {
+        (container as any).webkitRequestFullscreen();
       } else if ((video as any).webkitEnterFullscreen) {
         (video as any).webkitEnterFullscreen();
-      } else if ((video as any).mozRequestFullScreen) {
-        (video as any).mozRequestFullScreen();
+      } else if (video.requestFullscreen) {
+        video.requestFullscreen().catch(() => {});
       }
     } else {
       unlockOrientation();
@@ -414,19 +424,40 @@ export default function VideoPlayer({
   const hasRestoredRef = useRef(false);
   const lastSavedTimeRef = useRef(0);
 
+  // Estados de contagem regressiva e autoplay do Próximo Episódio
+  const [nextEpisodeCountdown, setNextEpisodeCountdown] = useState<number | null>(null);
+  const hasAutoAdvancedRef = useRef(false);
+
   const { markWatched } = useWatched();
   const hasMarkedRef = useRef(false);
   const markWatchedRef = useRef(markWatched);
   const onEndedRef = useRef(onEnded);
   const onVideoInfoRef = useRef(onVideoInfo);
   const onProgressRef = useRef(onProgress);
+  const onNextEpisodeRef = useRef(onNextEpisode);
+  const hasNextEpisodeRef = useRef(hasNextEpisode);
 
   useEffect(() => {
     markWatchedRef.current = markWatched;
     onEndedRef.current = onEnded;
     onVideoInfoRef.current = onVideoInfo;
     onProgressRef.current = onProgress;
+    onNextEpisodeRef.current = onNextEpisode;
+    hasNextEpisodeRef.current = hasNextEpisode;
   });
+
+  const handleTriggerNextEpisode = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (hasAutoAdvancedRef.current) return;
+    hasAutoAdvancedRef.current = true;
+    setNextEpisodeCountdown(null);
+    if (onNextEpisodeRef.current) {
+      onNextEpisodeRef.current();
+    }
+  }, []);
 
   const reportProgress = useCallback(() => {
     const video = videoRef.current;
@@ -497,6 +528,8 @@ export default function VideoPlayer({
     lastSavedTimeRef.current = 0;
     setShowResumeNotice(false);
     setResumedTime(null);
+    hasAutoAdvancedRef.current = false;
+    setNextEpisodeCountdown(null);
 
     // Destruir instância anterior do Hls
     if (hlsRef.current) {
@@ -645,22 +678,44 @@ export default function VideoPlayer({
     const handleTimeUpdate = () => {
       if (!video.duration) return;
 
+      const duration = video.duration;
+      const currentTime = video.currentTime;
+
       // 1. Salva a cada 4 segundos no localStorage para retomar se sair da tela
-      if (streamType !== 'live' && Math.abs(video.currentTime - lastSavedTimeRef.current) >= 4) {
-        lastSavedTimeRef.current = video.currentTime;
+      if (streamType !== 'live' && Math.abs(currentTime - lastSavedTimeRef.current) >= 4) {
+        lastSavedTimeRef.current = currentTime;
         savePlaybackPosition();
         reportProgress();
       }
 
       // 2. Marca como assistido ao alcançar 85% do filme/série
       if (!hasMarkedRef.current) {
-        const progressPercent = (video.currentTime / video.duration) * 100;
+        const progressPercent = (currentTime / duration) * 100;
         if (progressPercent >= 85) {
           hasMarkedRef.current = true;
           if (markWatchedRef.current) {
             markWatchedRef.current(streamId, streamType, title, true);
           }
         }
+      }
+
+      // 3. Autoplay e Botão de Ação do Próximo Episódio (30s antes do final do capítulo)
+      if (hasNextEpisodeRef.current && onNextEpisodeRef.current && duration > 30 && streamType !== 'live') {
+        const remainingSeconds = Math.max(0, Math.ceil(duration - currentTime));
+        if (remainingSeconds <= 30 && remainingSeconds > 0) {
+          setNextEpisodeCountdown((prev) => (prev !== remainingSeconds ? remainingSeconds : prev));
+        } else if (remainingSeconds > 30) {
+          setNextEpisodeCountdown((prev) => (prev !== null ? null : prev));
+          hasAutoAdvancedRef.current = false;
+        } else if (remainingSeconds <= 0 || currentTime >= duration - 0.4) {
+          if (!hasAutoAdvancedRef.current) {
+            hasAutoAdvancedRef.current = true;
+            setNextEpisodeCountdown(null);
+            onNextEpisodeRef.current();
+          }
+        }
+      } else {
+        setNextEpisodeCountdown((prev) => (prev !== null ? null : prev));
       }
     };
 
@@ -673,6 +728,13 @@ export default function VideoPlayer({
         markWatchedRef.current(streamId, streamType, title, true);
       }
       if (onEndedRef.current) onEndedRef.current();
+
+      // Autoplay: avança automaticamente para o próximo capítulo se ainda não avançou
+      if (!hasAutoAdvancedRef.current && hasNextEpisodeRef.current && onNextEpisodeRef.current) {
+        hasAutoAdvancedRef.current = true;
+        setNextEpisodeCountdown(null);
+        onNextEpisodeRef.current();
+      }
     };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
@@ -875,6 +937,36 @@ export default function VideoPlayer({
             className="ml-2 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-neutral-200 hover:text-white text-[11px] font-bold transition cursor-pointer"
           >
             Recomeçar do início
+          </button>
+        </div>
+      )}
+
+      {/* 4. Botão Flutuante de Ação: Próximo Episódio com Contagem Regressiva de 30s (Canto Inferior Esquerdo) */}
+      {nextEpisodeCountdown !== null && hasNextEpisode && (
+        <div className="absolute left-4 sm:left-6 bottom-16 sm:bottom-20 z-30 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <button
+            type="button"
+            onClick={handleTriggerNextEpisode}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            tabIndex={0}
+            data-tv-focusable="true"
+            title="Pular para o próximo episódio agora"
+            className="group/btn flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+          >
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/btn:bg-white text-white group-hover/btn:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+              <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+            </div>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                {nextEpisodeLabel || 'Próximo Episódio'}
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-violet-500/25 group-hover/btn:bg-white/25 border border-violet-400/30 group-hover/btn:border-white/30 text-violet-200 group-hover/btn:text-white font-mono font-extrabold text-[11px] sm:text-xs min-w-[28px] text-center">
+                {nextEpisodeCountdown}s
+              </span>
+            </div>
           </button>
         </div>
       )}

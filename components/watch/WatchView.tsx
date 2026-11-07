@@ -1074,6 +1074,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 initialTime={initialTime}
                 onProgress={handlePlayerProgress}
                 onVideoInfo={handlePlayerVideoInfo}
+                hasNextEpisode={isSeries && canGoNext}
+                onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
+                nextEpisodeLabel="Próximo Episódio"
               />
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-neutral-400">
