@@ -72,14 +72,12 @@
 }
 
 /* =========================================================================
-   ARTPLAYER.JS: FULLSCREEN REAL COM SUPORTE A NOTCH & OTIMIZAÇÃO MOBILE
+   MODO TELA CHEIA (FULLSCREEN) IMERSIVO TOTAL
+   Preenchimento 100% da tela, sem barras laterais, sobrepondo o notch e barras do sistema
    ========================================================================= */
-
-/* 1. Fullscreen expandido cobrindo 100% da tela, notch e cantos */
-.art-video-player.art-fullscreen,
-.art-video-player.art-fullscreen-web,
-:fullscreen .art-video-player,
-:-webkit-full-screen .art-video-player {
+.html5-video-player-container:fullscreen,
+.html5-video-player-container:-webkit-full-screen,
+.html5-video-player-container.is-fullscreen {
   position: fixed !important;
   inset: 0 !important;
   top: 0 !important;
@@ -100,11 +98,10 @@
   background-color: #000 !important;
 }
 
-/* Vídeo no fullscreen preenchendo 100% da tela sem barras laterais */
-.art-video-player.art-fullscreen .art-video,
-.art-video-player.art-fullscreen-web .art-video,
-:fullscreen .art-video,
-:-webkit-full-screen .art-video {
+/* O elemento de vídeo preenche 100% da tela */
+.html5-video-player-container:fullscreen video,
+.html5-video-player-container:-webkit-full-screen video,
+.html5-video-player-container.is-fullscreen video {
   position: absolute !important;
   inset: 0 !important;
   top: 0 !important;
@@ -112,90 +109,44 @@
   width: 100vw !important;
   height: 100vh !important;
   height: 100dvh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+/* Modo Preenchimento Total (Cover) - Sem nenhuma barra lateral */
+.html5-video-player-container:fullscreen video.fit-cover,
+.html5-video-player-container:-webkit-full-screen video.fit-cover,
+.html5-video-player-container.is-fullscreen video.fit-cover,
+.html5-video-player-container.is-fullscreen video:not(.fit-contain) {
   object-fit: cover !important;
 }
 
+/* Modo Proporção Original (Contain) */
+.html5-video-player-container:fullscreen video.fit-contain,
+.html5-video-player-container:-webkit-full-screen video.fit-contain,
+.html5-video-player-container.is-fullscreen video.fit-contain {
+  object-fit: contain !important;
+}
+
+/* No desktop, se não for cover forçado, ajusta proporcional */
 @media (min-width: 1025px) {
-  .art-video-player.art-fullscreen .art-video:not([style*="cover"]),
-  .art-video-player.art-fullscreen-web .art-video:not([style*="cover"]) {
+  .html5-video-player-container:fullscreen video:not(.fit-cover),
+  .html5-video-player-container:-webkit-full-screen video:not(.fit-cover),
+  .html5-video-player-container.is-fullscreen video:not(.fit-cover) {
     object-fit: contain !important;
   }
 }
 
-/* Barras de controle inferior e superior no fullscreen sem margens ou paddings excessivos */
-.art-video-player.art-fullscreen .art-bottom,
-.art-video-player.art-fullscreen-web .art-bottom,
-:fullscreen .art-bottom,
-:-webkit-full-screen .art-bottom {
-  padding-left: max(8px, env(safe-area-inset-left)) !important;
-  padding-right: max(8px, env(safe-area-inset-right)) !important;
-  padding-bottom: max(6px, env(safe-area-inset-bottom)) !important;
+/* Barra inferior e superior no fullscreen respeitando o entalhe da câmera (Safe Area Inset) */
+.html5-fullscreen-controls-bottom {
+  padding-left: max(16px, env(safe-area-inset-left)) !important;
+  padding-right: max(16px, env(safe-area-inset-right)) !important;
+  padding-bottom: max(12px, env(safe-area-inset-bottom)) !important;
 }
 
-.art-video-player.art-fullscreen .art-top,
-.art-video-player.art-fullscreen-web .art-top,
-:fullscreen .art-top,
-:-webkit-full-screen .art-top {
-  padding-left: max(8px, env(safe-area-inset-left)) !important;
-  padding-right: max(8px, env(safe-area-inset-right)) !important;
-  padding-top: max(6px, env(safe-area-inset-top)) !important;
-}
-
-/* 2. Otimizações de tamanho e espaçamento dos controles no mobile e telas pequenas */
-@media (max-width: 768px) {
-  .art-video-player {
-    --art-control-height: 38px !important;
-    --art-control-icon-size: 24px !important;
-    --art-control-icon-scale: 1 !important;
-    --art-padding: 6px !important;
-    --art-bottom-gap: 2px !important;
-    --art-progress-height: 4px !important;
-  }
-
-  .art-video-player.art-fullscreen,
-  .art-video-player.art-fullscreen-web {
-    --art-control-height: 44px !important;
-    --art-control-icon-size: 26px !important;
-    --art-control-icon-scale: 1 !important;
-    --art-padding: 8px !important;
-  }
-
-  /* Reduzir o espaçamento entre botões para não espremer a barra */
-  .art-video-player .art-control {
-    padding: 0 4px !important;
-  }
-
-  /* Reduzir os ícones SVG dentro dos controles */
-  .art-video-player .art-control svg {
-    width: 20px !important;
-    height: 20px !important;
-    max-width: 20px !important;
-    max-height: 20px !important;
-  }
-
-  /* No mobile, o slider horizontal de volume é ocultado da barra para liberar 80px+ */
-  .art-video-player .art-control-volume .art-volume-slider {
-    display: none !important;
-  }
-
-  /* Ajustar tipografia do tempo de reprodução no mobile */
-  .art-video-player .art-control-time {
-    font-size: 11px !important;
-    padding: 0 4px !important;
-    line-height: 1 !important;
-  }
-
-  /* Botão de Próximo / Anterior mais compacto no mobile */
-  .art-video-player .art-control-prev-chapter .art-icon svg,
-  .art-video-player .art-control-next-chapter .art-icon svg {
-    width: 18px !important;
-    height: 18px !important;
-  }
-
-  /* Esconder PIP no mobile se a tela for menor que 480px para evitar aperto */
-  @media (max-width: 480px) {
-    .art-video-player:not(.art-fullscreen):not(.art-fullscreen-web) .art-control-pip {
-      display: none !important;
-    }
-  }
+.html5-fullscreen-controls-top {
+  padding-left: max(16px, env(safe-area-inset-left)) !important;
+  padding-right: max(16px, env(safe-area-inset-right)) !important;
+  padding-top: max(12px, env(safe-area-inset-top)) !important;
 }
