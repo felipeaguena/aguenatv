@@ -209,14 +209,21 @@ body:has(.art-fullscreen-web) nav {
 
 /* Quando os controles estão visíveis (.art-control-show), exibe normalmente */
 .artplayer-app .art-video-player.art-control-show .art-bottom,
-.art-video-player.art-control-show .art-bottom,
+.art-video-player.art-control-show .art-bottom {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: none !important; /* CRÍTICO: .art-bottom cobre a tela toda (inset: 0); DEVE ser 'none' para não bloquear cliques na área do vídeo! */
+  transform: translateY(0) !important;
+  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease !important;
+}
+
 .artplayer-app .art-video-player.art-control-show .art-controls,
 .art-video-player.art-control-show .art-controls,
 .artplayer-app .art-video-player.art-control-show .art-progress,
 .art-video-player.art-control-show .art-progress {
   opacity: 1 !important;
   visibility: visible !important;
-  pointer-events: auto !important;
+  pointer-events: auto !important; /* Apenas botões de comando e a barra de progresso recebem eventos */
   transform: translateY(0) !important;
   transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease !important;
 }

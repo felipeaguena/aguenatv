@@ -299,6 +299,18 @@ export default function VideoPlayer({
           e.stopPropagation();
           toggleFullscreen(artInstanceRef.current);
         }
+      } else if (e.code === 'Space' || e.key === ' ') {
+        if (artInstanceRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          artInstanceRef.current.toggle();
+        }
+      } else if (e.key === 'Escape') {
+        if (artInstanceRef.current && isFullscreenRef.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleFullscreen(artInstanceRef.current);
+        }
       }
     };
 
@@ -742,7 +754,11 @@ export default function VideoPlayer({
 
       if (e) {
         const target = (e.target || (e as any).srcElement) as HTMLElement | null;
-        if (target?.closest?.('.art-controls, .art-bottom, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu')) {
+        if (
+          target?.closest?.(
+            '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, .art-state, button, input'
+          )
+        ) {
           return;
         }
       }
@@ -764,6 +780,41 @@ export default function VideoPlayer({
     const handleMouseDown = () => {
       wasPlayingBeforeClickRef.current = art.playing;
       resetInactivityTimer();
+    };
+
+    // Suporte a clique simples / duplo clique em áreas vazias fora do <video> (ex: letterbox em tela cheia)
+    let clickTimeout: NodeJS.Timeout | null = null;
+    let singleClickCount = 0;
+
+    const handlePlayerClick = (e: MouseEvent) => {
+      const target = (e.target || (e as any).srcElement) as HTMLElement | null;
+      if (
+        target?.closest?.(
+          '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, .art-state, button, input'
+        )
+      ) {
+        return;
+      }
+
+      // Se clicou na área do player fora do elemento <video>
+      if (target !== videoEl && !videoEl?.contains(target)) {
+        singleClickCount++;
+        if (singleClickCount === 1) {
+          clickTimeout = setTimeout(() => {
+            singleClickCount = 0;
+            try {
+              art.toggle();
+            } catch (err) {}
+          }, 260);
+        } else if (singleClickCount >= 2) {
+          if (clickTimeout) {
+            clearTimeout(clickTimeout);
+            clickTimeout = null;
+          }
+          singleClickCount = 0;
+          handleDoubleAction(e);
+        }
+      }
     };
 
     let lastTouchTime = 0;
@@ -788,6 +839,7 @@ export default function VideoPlayer({
 
     // Registra listeners de interação no container e janela
     if (playerEl) {
+      playerEl.addEventListener('click', handlePlayerClick);
       playerEl.addEventListener('mousemove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('mousedown', handleMouseDown, { passive: true });
       playerEl.addEventListener('touchstart', handleUserInteraction, { passive: true });
@@ -826,19 +878,15 @@ export default function VideoPlayer({
       if (state) {
         resetInactivityTimer();
       }
-      if (isFullscreenRef.current && !state) {
-        const bottom = art.template?.$bottom;
-        if (bottom) {
+      const bottom = art.template?.$bottom;
+      if (bottom) {
+        bottom.style.pointerEvents = 'none';
+        if (isFullscreenRef.current && !state) {
           bottom.style.opacity = '0';
           bottom.style.visibility = 'hidden';
-          bottom.style.pointerEvents = 'none';
-        }
-      } else if (state) {
-        const bottom = art.template?.$bottom;
-        if (bottom) {
+        } else if (state) {
           bottom.style.opacity = '';
           bottom.style.visibility = '';
-          bottom.style.pointerEvents = '';
         }
       }
     });
@@ -962,12 +1010,12 @@ export default function VideoPlayer({
         art.video.style.backgroundColor = 'transparent';
       }
       resetInactivityTimer();
-      if (!state) {
-        const bottom = art.template?.$bottom;
-        if (bottom) {
+      const bottom = art.template?.$bottom;
+      if (bottom) {
+        bottom.style.pointerEvents = 'none';
+        if (!state) {
           bottom.style.opacity = '';
           bottom.style.visibility = '';
-          bottom.style.pointerEvents = '';
         }
       }
       try {
@@ -987,12 +1035,12 @@ export default function VideoPlayer({
         art.video.style.backgroundColor = 'transparent';
       }
       resetInactivityTimer();
-      if (!state) {
-        const bottom = art.template?.$bottom;
-        if (bottom) {
+      const bottom = art.template?.$bottom;
+      if (bottom) {
+        bottom.style.pointerEvents = 'none';
+        if (!state) {
           bottom.style.opacity = '';
           bottom.style.visibility = '';
-          bottom.style.pointerEvents = '';
         }
       }
     });
@@ -1002,7 +1050,12 @@ export default function VideoPlayer({
         clearTimeout(inactivityTimer);
         inactivityTimer = null;
       }
+      if (clickTimeout) {
+        clearTimeout(clickTimeout);
+        clickTimeout = null;
+      }
       if (playerEl) {
+        playerEl.removeEventListener('click', handlePlayerClick);
         playerEl.removeEventListener('mousemove', handleUserInteraction);
         playerEl.removeEventListener('mousedown', handleMouseDown);
         playerEl.removeEventListener('touchstart', handleUserInteraction);
