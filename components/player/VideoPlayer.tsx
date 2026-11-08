@@ -160,10 +160,20 @@ export default function VideoPlayer({
 
   // Estados para exibição e dinâmica dos controles no mobile/touch e desktop (estilo Netflix / YouTube Mobile)
   const [playerMountNode, setPlayerMountNode] = useState<HTMLDivElement | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
   const [isControlsVisible, setIsControlsVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
   const isControlsVisibleRef = useRef(true);
   const isPlayingRef = useRef(true);
+
+  useEffect(() => {
+    setIsMobile(isMobileDevice());
+  }, []);
+
+  const triedExtensionsRef = useRef<Set<string>>(new Set());
+  const retryCountRef = useRef(0);
+  const showControlsRef = useRef<() => void>(() => {});
+  const resetInactivityTimerRef = useRef<(delay?: number) => void>(() => {});
 
   // Estados e controle de Pular Abertura (Intro) e Encerramento (Outro)
   const [showSkipIntro, setShowSkipIntro] = useState(false);
@@ -263,6 +273,8 @@ export default function VideoPlayer({
     } else {
       art.play().catch(() => {});
     }
+    showControlsRef.current?.();
+    resetInactivityTimerRef.current?.();
   }, []);
 
   const handleHideControls = useCallback((e?: React.MouseEvent | Event) => {
@@ -534,6 +546,8 @@ export default function VideoPlayer({
     if (currentArt && !currentArt.isDestroy && prevStreamTypeRef.current === streamType) {
       if (prevStreamUrlRef.current !== streamUrl) {
         prevStreamUrlRef.current = streamUrl;
+        triedExtensionsRef.current.clear();
+        retryCountRef.current = 0;
         hasRestoredRef.current = false;
         hasMarkedRef.current = false;
         hasAutoAdvancedRef.current = false;
@@ -572,6 +586,8 @@ export default function VideoPlayer({
 
     prevStreamUrlRef.current = streamUrl;
     prevStreamTypeRef.current = streamType;
+    triedExtensionsRef.current.clear();
+    retryCountRef.current = 0;
     hasRestoredRef.current = false;
     hasMarkedRef.current = false;
     hasAutoAdvancedRef.current = false;
@@ -1010,6 +1026,9 @@ export default function VideoPlayer({
       }, delay);
     };
 
+    showControlsRef.current = showControls;
+    resetInactivityTimerRef.current = resetInactivityTimer;
+
     const handleUserInteraction = () => {
       if (isMobile) return;
       resetInactivityTimer();
@@ -1112,26 +1131,31 @@ export default function VideoPlayer({
         return;
       }
 
-      // Se acabamos de ocultar os controles há menos de 350ms (ex: por touch ou click), ignora para evitar reabertura
-      if (Date.now() - lastHideControlsTimeRef.current < 350) {
-        return;
-      }
-
-      // Se os controles estão visíveis, qualquer clique na área vazia oculta imediatamente
-      if (isControlsVisibleRef.current) {
-        hideControls();
-        return;
-      }
-
-      // Se os controles estão ocultos:
       if (isMobile) {
-        // No mobile, um toque exibe os controles confortavelmente sem pausar
+        // --- DINÂMICA MOBILE / TOUCH / APK ---
+        // Se acabamos de ocultar os controles há menos de 350ms (ex: por touch ou click), ignora para evitar reabertura
+        if (Date.now() - lastHideControlsTimeRef.current < 350) {
+          return;
+        }
+
+        // Se os controles estão visíveis, qualquer toque na área vazia oculta imediatamente (estilo Netflix / YouTube Mobile)
+        if (isControlsVisibleRef.current) {
+          hideControls();
+          return;
+        }
+
+        // Se os controles estão ocultos, um toque exibe os controles confortavelmente sem pausar
         showControls();
         resetInactivityTimer();
       } else {
-        // No desktop, clique no vídeo alterna reprodução
+        // --- DINÂMICA DESKTOP (MOUSE) ---
+        // No desktop onde temos o mouse: com um clique faz pause/play no perímetro todo
         try {
-          art.toggle();
+          if (art.playing) {
+            art.pause();
+          } else {
+            art.play().catch(() => {});
+          }
         } catch (err) {}
         showControls();
         resetInactivityTimer();
@@ -1417,7 +1441,52 @@ export default function VideoPlayer({
     });
 
     art.on('video:error', () => {
-      setError('Falha na reprodução do stream de vídeo. Tente novamente mais tarde.');
+      const currentUrl = art.url || streamUrl;
+      const mediaErr = art.video?.error;
+      console.warn('[VideoPlayer] Erro no stream de vídeo:', {
+        code: mediaErr?.code,
+        message: mediaErr?.message,
+        url: currentUrl,
+        type: streamTypeRef.current,
+      });
+
+      // Se não for transmissão ao vivo e for arquivo de mídia, tenta alternar extensões candidatas (.mp4, .mkv, .ts)
+      if (streamTypeRef.current !== 'live' && !currentUrl.includes('.m3u8')) {
+        const extMatch = currentUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+        const currentExt = extMatch ? extMatch[1].toLowerCase() : 'mp4';
+        triedExtensionsRef.current.add(currentExt);
+
+        const candidates = ['mp4', 'mkv', 'ts', 'avi'];
+        const nextExt = candidates.find((ext) => !triedExtensionsRef.current.has(ext));
+
+        if (nextExt) {
+          triedExtensionsRef.current.add(nextExt);
+          const nextUrl = currentUrl.replace(/\.[a-zA-Z0-9]+(?:\?.*)?$/, `.${nextExt}`);
+          console.info(`[VideoPlayer] Tentando extensão alternativa de fallback: .${nextExt}`);
+          try {
+            art.switchUrl(nextUrl).catch(() => {});
+            return;
+          } catch (e) {
+            console.warn('[VideoPlayer] Falha ao alternar URL de fallback:', e);
+          }
+        }
+      }
+
+      // Se falhar e ainda não tiver tentado 1 reconexão rápida
+      if (retryCountRef.current < 1) {
+        retryCountRef.current += 1;
+        console.info('[VideoPlayer] Tentando reconexão rápida do stream...');
+        setTimeout(() => {
+          try {
+            if (!art.isDestroy) {
+              art.switchUrl(currentUrl).catch(() => {});
+            }
+          } catch (e) {}
+        }, 1200);
+        return;
+      }
+
+      setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
     });
 
     art.on('fullscreenWeb', (state) => {
@@ -1509,15 +1578,27 @@ export default function VideoPlayer({
                 : 'opacity-0 pointer-events-none bg-transparent'
             }`}
             onClick={(e) => {
-              // Tocar no fundo vazio fora do botão oculta os controles imediatamente (padrão Netflix / YouTube)
               if (e.target === e.currentTarget) {
-                handleHideControls(e);
+                if (isMobile) {
+                  // No mobile/touch: Tocar no fundo vazio fora do botão oculta os controles imediatamente (padrão Netflix / YouTube)
+                  handleHideControls(e);
+                } else {
+                  // No desktop: Um clique simples em qualquer lugar do perímetro alterna Play/Pause
+                  handleTogglePlay(e);
+                }
               }
             }}
           >
             <div
               className="flex items-center justify-center pointer-events-auto select-none"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                // No desktop, clicar na área ao redor do botão também segue o mesmo comando simples de play/pause
+                if (!isMobile && e.target === e.currentTarget) {
+                  handleTogglePlay(e);
+                } else {
+                  e.stopPropagation();
+                }
+              }}
             >
               {/* Botão Central Play / Pause - Cinza claro suave com ícone preto */}
               <button

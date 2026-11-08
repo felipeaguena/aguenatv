@@ -192,6 +192,44 @@ export default function WatchView({ type, id }: WatchViewProps) {
         if (!isMounted) return;
         setConfig(savedCfg);
 
+        // Se o item não foi encontrado no Dexie local, busca metadados sob demanda na API do IPTV
+        if (!foundItem && savedCfg) {
+          if (targetType === 'movie') {
+            try {
+              const vodData = await fetchIPTVApi(savedCfg, {
+                action: 'get_vod_info',
+                params: { vod_id: currentStreamId },
+              });
+              if (vodData?.movie_data && isMounted) {
+                foundItem = {
+                  id: `movie_${currentStreamId}`,
+                  stream_id: String(currentStreamId),
+                  name: vodData.movie_data.name || 'Filme',
+                  title: vodData.movie_data.name || 'Filme',
+                  stream_type: 'movie',
+                  stream_icon: vodData.info?.movie_image || vodData.movie_data.stream_icon,
+                  category_id: String(vodData.movie_data.category_id || ''),
+                  container_extension: vodData.movie_data.container_extension || 'mp4',
+                };
+              }
+            } catch (err) {
+              console.warn('Erro ao buscar metadados do filme online:', err);
+            }
+          }
+
+          // Fallback resiliente: cria item com IDs do stream para permitir que o player carregue a URL
+          if (!foundItem && isMounted) {
+            foundItem = {
+              id: `${targetType}_${currentStreamId}`,
+              stream_id: String(currentStreamId),
+              name: targetType === 'movie' ? 'Filme' : targetType === 'series' ? 'Série' : 'Canal',
+              title: targetType === 'movie' ? 'Filme' : targetType === 'series' ? 'Série' : 'Canal',
+              stream_type: targetType,
+              container_extension: 'mp4',
+            };
+          }
+        }
+
         if (foundItem) {
           setItem(foundItem as unknown as BaseStreamItem);
 
