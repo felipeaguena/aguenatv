@@ -48,6 +48,7 @@ import {
   SeriesInfoResponse,
   EnrichedMetadata,
   EnrichedEpisodeMetadata,
+  SkipTimesData,
 } from '@/lib/types';
 import { getWatchUrl, getInfoUrl, getRouteType } from '@/lib/routes';
 import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle } from '@/lib/series';
@@ -89,6 +90,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [episodeSearch, setEpisodeSearch] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
   const [seasonEpisodesMeta, setSeasonEpisodesMeta] = useState<Record<string | number, EnrichedEpisodeMetadata>>({});
+  const [skipTimes, setSkipTimes] = useState<SkipTimesData | null>(null);
   const [techVideoStats, setTechVideoStats] = useState<{
     duration?: string;
     size?: string;
@@ -600,6 +602,60 @@ export default function WatchView({ type, id }: WatchViewProps) {
       isMounted = false;
     };
   }, [item?.title, item?.name, item?.stream_type, selectedSeason, enrichedMetadata?.tmdbId, type]);
+
+  // 6. Efeito: Busca Tempos de Abertura e Encerramento (TheIntroDB / AniSkip)
+  useEffect(() => {
+    if (type !== 'series' && item?.stream_type !== 'series') {
+      setSkipTimes(null);
+      return;
+    }
+    if (!activeEpisode) {
+      setSkipTimes(null);
+      return;
+    }
+
+    let isMounted = true;
+    async function loadSkipTimes() {
+      try {
+        const titleToSearch = item?.title || item?.name || '';
+        const categoryParam = item?.category_name ? `&category=${encodeURIComponent(item.category_name)}` : '';
+        const tmdbParam = enrichedMetadata?.tmdbId ? `&tmdbId=${enrichedMetadata.tmdbId}` : '';
+        const seasonNum = selectedSeason.replace(/\D/g, '') || '1';
+        const epNum = String(activeEpisode!.episode_num);
+
+        const res = await fetch(
+          `/api/skip-times?season=${seasonNum}&episode=${epNum}&title=${encodeURIComponent(titleToSearch)}${tmdbParam}${categoryParam}`
+        );
+
+        if (res.ok && isMounted) {
+          const data: SkipTimesData = await res.json();
+          if (data.found) {
+            setSkipTimes(data);
+          } else {
+            setSkipTimes(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Falha ao buscar tempos de abertura/encerramento:', err);
+        if (isMounted) setSkipTimes(null);
+      }
+    }
+
+    loadSkipTimes();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    type,
+    item?.stream_type,
+    item?.title,
+    item?.name,
+    item?.category_name,
+    activeEpisode?.id,
+    activeEpisode?.episode_num,
+    selectedSeason,
+    enrichedMetadata?.tmdbId,
+  ]);
 
   // =========================================================================
   // 2. TODOS OS USEMEMO SÃO CALCULADOS AQUI NO TOPO (INCONDICIONAIS)
@@ -1210,6 +1266,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 posterUrl={playerPoster}
                 autoPlay={true}
                 initialTime={initialTime}
+                skipTimes={skipTimes}
                 onProgress={handlePlayerProgress}
                 onVideoInfo={handlePlayerVideoInfo}
                 hasPrevEpisode={canGoPrev}

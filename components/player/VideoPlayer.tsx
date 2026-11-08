@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { SkipForward, AlertTriangle, RotateCcw } from 'lucide-react';
+import { SkipForward, FastForward, AlertTriangle, RotateCcw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { StatusBar } from '@capacitor/status-bar';
 import { useWatched } from '@/hooks/useWatched';
-import { StreamType } from '@/lib/types';
+import { StreamType, SkipTimesData } from '@/lib/types';
 
 export interface PlayerVideoInfo {
   duration?: number;
@@ -27,6 +27,7 @@ interface VideoPlayerProps {
   posterUrl?: string;
   autoPlay?: boolean;
   initialTime?: number;
+  skipTimes?: SkipTimesData | null;
   onEnded?: () => void;
   onVideoInfo?: (info: PlayerVideoInfo) => void;
   onProgress?: (progress: { currentTime: number; duration: number }) => void;
@@ -134,6 +135,7 @@ export default function VideoPlayer({
   posterUrl,
   autoPlay = true,
   initialTime,
+  skipTimes,
   onEnded,
   onVideoInfo,
   onProgress,
@@ -154,6 +156,30 @@ export default function VideoPlayer({
   const hasAutoAdvancedRef = useRef(false);
   const hasRestoredRef = useRef(false);
   const isFullscreenRef = useRef(false);
+
+  // Estados e controle de Pular Abertura (Intro) e Encerramento (Outro)
+  const [showSkipIntro, setShowSkipIntro] = useState(false);
+  const [showSkipOutro, setShowSkipOutro] = useState(false);
+  const [autoSkipIntro, setAutoSkipIntro] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('iptv_autoskip_intro') === 'true';
+    }
+    return false;
+  });
+  const [autoSkipOutro, setAutoSkipOutro] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('iptv_autoskip_outro') === 'true';
+    }
+    return false;
+  });
+
+  const skipTimesRef = useRef(skipTimes);
+  const showSkipIntroRef = useRef(false);
+  const showSkipOutroRef = useRef(false);
+  const autoSkipIntroRef = useRef(autoSkipIntro);
+  const autoSkipOutroRef = useRef(autoSkipOutro);
+  const hasAutoSkippedIntroRef = useRef(false);
+  const hasAutoSkippedOutroRef = useRef(false);
 
   const { markWatched } = useWatched();
   const hasMarkedRef = useRef(false);
@@ -176,6 +202,11 @@ export default function VideoPlayer({
   const prevStreamTypeRef = useRef(streamType);
 
   useEffect(() => {
+    skipTimesRef.current = skipTimes;
+    showSkipIntroRef.current = showSkipIntro;
+    showSkipOutroRef.current = showSkipOutro;
+    autoSkipIntroRef.current = autoSkipIntro;
+    autoSkipOutroRef.current = autoSkipOutro;
     markWatchedRef.current = markWatched;
     onEndedRef.current = onEnded;
     onVideoInfoRef.current = onVideoInfo;
@@ -206,6 +237,31 @@ export default function VideoPlayer({
       }
     }
   });
+
+  const handleSkipIntro = useCallback(() => {
+    const art = artInstanceRef.current;
+    const intro = skipTimesRef.current?.intro;
+    if (art && intro) {
+      art.currentTime = intro.end;
+      art.notice.show = 'Abertura pulada';
+      setShowSkipIntro(false);
+      showSkipIntroRef.current = false;
+    }
+  }, []);
+
+  const handleSkipOutro = useCallback(() => {
+    const art = artInstanceRef.current;
+    if (hasNextEpisodeRef.current && onNextEpisodeRef.current) {
+      setShowSkipOutro(false);
+      showSkipOutroRef.current = false;
+      onNextEpisodeRef.current();
+    } else if (art && skipTimesRef.current?.outro) {
+      art.currentTime = skipTimesRef.current.outro.end || art.duration;
+      art.notice.show = 'Encerramento pulado';
+      setShowSkipOutro(false);
+      showSkipOutroRef.current = false;
+    }
+  }, []);
 
   // Alterna tela cheia: suporta tanto desktop (fullscreen nativo e web) quanto mobile (fullscreenWeb imersivo)
   const toggleFullscreen = useCallback((art: Artplayer) => {
@@ -310,7 +366,7 @@ export default function VideoPlayer({
     };
   }, []);
 
-  // Atalho de teclado: tecla "f" ou "F" ativa/alterna o Fullscreen do player
+  // Atalhos de teclado centralizados para reprodução e comandos
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignora atalho se o usuário estiver digitando em campos de texto/input
@@ -321,25 +377,73 @@ export default function VideoPlayer({
         if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable === 'true' || isEditable === '') {
           return;
         }
+        // Se o elemento em foco for um botão ou link, desfoque para que a barra de espaço não acione o clique repetido
+        if (tag === 'BUTTON' || tag === 'A') {
+          target.blur();
+        }
       }
 
+      const art = artInstanceRef.current;
+      if (!art || art.isDestroy) return;
+
       if (e.key === 'f' || e.key === 'F') {
-        if (artInstanceRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFullscreen(art);
+      } else if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.keyCode === 32) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (art.playing) {
+          art.pause();
+        } else {
+          art.play().catch(() => {});
+        }
+      } else if (e.key === 'k' || e.key === 'K') {
+        // Padrão universal do YouTube
+        e.preventDefault();
+        e.stopPropagation();
+        if (art.playing) {
+          art.pause();
+        } else {
+          art.play().catch(() => {});
+        }
+      } else if (e.key === 's' || e.key === 'S') {
+        // Atalho 'S' para Pular Abertura ou Pular Encerramento
+        if (showSkipIntroRef.current) {
           e.preventDefault();
           e.stopPropagation();
-          toggleFullscreen(artInstanceRef.current);
-        }
-      } else if (e.code === 'Space' || e.key === ' ') {
-        if (artInstanceRef.current) {
+          handleSkipIntro();
+        } else if (showSkipOutroRef.current) {
           e.preventDefault();
           e.stopPropagation();
-          artInstanceRef.current.toggle();
+          handleSkipOutro();
         }
+      } else if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.muted = !art.muted;
+        art.notice.show = art.muted ? 'Mudo' : 'Som ativado';
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.forward = 10;
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.backward = 10;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.volume = Math.min(1, Number((art.volume + 0.1).toFixed(2)));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        art.volume = Math.max(0, Number((art.volume - 0.1).toFixed(2)));
       } else if (e.key === 'Escape') {
-        if (artInstanceRef.current && isFullscreenRef.current) {
+        if (isFullscreenRef.current) {
           e.preventDefault();
           e.stopPropagation();
-          toggleFullscreen(artInstanceRef.current);
+          toggleFullscreen(art);
         }
       }
     };
@@ -348,7 +452,7 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [toggleFullscreen]);
+  }, [toggleFullscreen, handleSkipIntro, handleSkipOutro]);
 
   const handleTriggerNextEpisode = useCallback((e?: React.MouseEvent) => {
     if (e) {
@@ -373,6 +477,10 @@ export default function VideoPlayer({
         hasRestoredRef.current = false;
         hasMarkedRef.current = false;
         hasAutoAdvancedRef.current = false;
+        hasAutoSkippedIntroRef.current = false;
+        hasAutoSkippedOutroRef.current = false;
+        setShowSkipIntro(false);
+        setShowSkipOutro(false);
         setNextEpisodeCountdown(null);
         setError(null);
         try {
@@ -407,6 +515,10 @@ export default function VideoPlayer({
     hasRestoredRef.current = false;
     hasMarkedRef.current = false;
     hasAutoAdvancedRef.current = false;
+    hasAutoSkippedIntroRef.current = false;
+    hasAutoSkippedOutroRef.current = false;
+    setShowSkipIntro(false);
+    setShowSkipOutro(false);
     setNextEpisodeCountdown(null);
     setError(null);
 
@@ -434,6 +546,44 @@ export default function VideoPlayer({
       autoMini: false,
       screenshot: false, // Sem screenshot para manter controles limpos
       setting: true,
+      settings: [
+        {
+          name: 'autoskip-intro',
+          width: 260,
+          html: 'Pular Abertura Automático',
+          tooltip: autoSkipIntroRef.current ? 'Ativado' : 'Desativado',
+          switch: autoSkipIntroRef.current,
+          onSwitch: (item: any) => {
+            const nextState = !item.switch;
+            item.tooltip = nextState ? 'Ativado' : 'Desativado';
+            setAutoSkipIntro(nextState);
+            autoSkipIntroRef.current = nextState;
+            try {
+              localStorage.setItem('iptv_autoskip_intro', String(nextState));
+            } catch (e) {}
+            art.notice.show = nextState ? 'Pular Abertura: Automático' : 'Pular Abertura: Manual';
+            return nextState;
+          },
+        },
+        {
+          name: 'autoskip-outro',
+          width: 260,
+          html: 'Pular Encerramento Automático',
+          tooltip: autoSkipOutroRef.current ? 'Ativado' : 'Desativado',
+          switch: autoSkipOutroRef.current,
+          onSwitch: (item: any) => {
+            const nextState = !item.switch;
+            item.tooltip = nextState ? 'Ativado' : 'Desativado';
+            setAutoSkipOutro(nextState);
+            autoSkipOutroRef.current = nextState;
+            try {
+              localStorage.setItem('iptv_autoskip_outro', String(nextState));
+            } catch (e) {}
+            art.notice.show = nextState ? 'Pular Encerramento: Automático' : 'Pular Encerramento: Manual';
+            return nextState;
+          },
+        },
+      ],
       playbackRate: true,
       aspectRatio: true,
       fullscreen: !isMobile, // No desktop usa o botão nativo do Artplayer; no mobile usa mobile-fullscreen
@@ -442,7 +592,7 @@ export default function VideoPlayer({
       miniProgressBar: true,
       playsInline: true,
       autoOrientation: false, // Desabilitado para evitar corrida de rotação com Capacitor
-      hotkey: true,
+      hotkey: false, // Centralizado no handleKeyDown do React para evitar double-toggle e conflito no Espaço
       airplay: true,
       lang: 'pt-BR',
       i18n: {
@@ -1026,6 +1176,63 @@ export default function VideoPlayer({
         }
       }
 
+      // Verificação e exibição de Pular Abertura (Intro)
+      const currentSkip = skipTimesRef.current;
+      if (currentSkip?.intro && streamType === 'series') {
+        const inIntro = currentTime >= currentSkip.intro.start && currentTime < currentSkip.intro.end;
+        if (inIntro) {
+          if (autoSkipIntroRef.current && !hasAutoSkippedIntroRef.current) {
+            hasAutoSkippedIntroRef.current = true;
+            art.currentTime = currentSkip.intro.end;
+            art.notice.show = 'Abertura pulada automaticamente';
+            setShowSkipIntro(false);
+            showSkipIntroRef.current = false;
+          } else if (!hasAutoSkippedIntroRef.current) {
+            if (!showSkipIntroRef.current) {
+              showSkipIntroRef.current = true;
+              setShowSkipIntro(true);
+            }
+          }
+        } else if (showSkipIntroRef.current) {
+          showSkipIntroRef.current = false;
+          setShowSkipIntro(false);
+        }
+      } else if (showSkipIntroRef.current) {
+        showSkipIntroRef.current = false;
+        setShowSkipIntro(false);
+      }
+
+      // Verificação e exibição de Pular Encerramento (Outro)
+      if (currentSkip?.outro && streamType === 'series') {
+        const outroStart = currentSkip.outro.start;
+        const outroEnd = currentSkip.outro.end || (duration > 0 ? duration : outroStart + 90);
+        const inOutro = currentTime >= outroStart && (outroEnd > outroStart ? currentTime < outroEnd - 1 : true);
+        if (inOutro) {
+          if (autoSkipOutroRef.current && !hasAutoSkippedOutroRef.current) {
+            hasAutoSkippedOutroRef.current = true;
+            if (hasNextEpisodeRef.current && onNextEpisodeRef.current) {
+              onNextEpisodeRef.current();
+            } else {
+              art.currentTime = outroEnd;
+              art.notice.show = 'Encerramento pulado';
+            }
+            setShowSkipOutro(false);
+            showSkipOutroRef.current = false;
+          } else if (!hasAutoSkippedOutroRef.current) {
+            if (!showSkipOutroRef.current) {
+              showSkipOutroRef.current = true;
+              setShowSkipOutro(true);
+            }
+          }
+        } else if (showSkipOutroRef.current) {
+          showSkipOutroRef.current = false;
+          setShowSkipOutro(false);
+        }
+      } else if (showSkipOutroRef.current) {
+        showSkipOutroRef.current = false;
+        setShowSkipOutro(false);
+      }
+
       // Autoplay e botão do Próximo Episódio (30s antes do final para séries)
       if (hasNextEpisodeRef.current && onNextEpisodeRef.current && duration > 30 && streamType === 'series') {
         const remainingSeconds = Math.max(0, Math.ceil(duration - currentTime));
@@ -1153,6 +1360,56 @@ export default function VideoPlayer({
     <div className="relative w-full h-full bg-black select-none overflow-hidden">
       {/* Container onde o Artplayer.js é injetado */}
       <div ref={artContainerRef} className="artplayer-app w-full h-full" />
+
+      {/* Botão Flutuante de Pular Abertura (Intro) */}
+      {showSkipIntro && (
+        <div className="absolute left-4 sm:left-6 bottom-16 sm:bottom-20 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <button
+            type="button"
+            onClick={handleSkipIntro}
+            tabIndex={0}
+            title="Pular abertura agora (Atalho: S)"
+            className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+          >
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+              <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+            </div>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                Pular Abertura
+              </span>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
+                S
+              </span>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Botão Flutuante de Pular Encerramento (Outro) */}
+      {showSkipOutro && nextEpisodeCountdown === null && (
+        <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <button
+            type="button"
+            onClick={handleSkipOutro}
+            tabIndex={0}
+            title={hasNextEpisode ? 'Pular encerramento e ir para o próximo episódio (Atalho: S)' : 'Pular encerramento'}
+            className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+          >
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+              <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+            </div>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                {hasNextEpisode ? 'Pular Encerramento' : 'Pular Créditos'}
+              </span>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
+                S
+              </span>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Botão Flutuante de Próximo Episódio com Contagem Regressiva de 30s */}
       {nextEpisodeCountdown !== null && hasNextEpisode && (

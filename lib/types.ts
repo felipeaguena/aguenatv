@@ -248,3 +248,18 @@ export interface EnrichedMetadata {
   trailerEmbedUrl?: string;
   ageRating?: string;
 }
+
+export interface SkipTimeInterval {
+  start: number;
+  end: number;
+}
+
+export interface SkipTimesData {
+  found: boolean;
+  source?: 'theintrodb' | 'aniskip' | 'local';
+  intro?: SkipTimeInterval | null;
+  outro?: SkipTimeInterval | null;
+  recap?: SkipTimeInterval | null;
+  preview?: SkipTimeInterval | null;
+}
+
