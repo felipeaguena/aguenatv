@@ -10,8 +10,8 @@ android {
         applicationId isTv ? "com.aguenatv.tv" : "com.aguenatv.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
-        versionName "0.2.6"
+        versionCode 9
+        versionName "0.3.0"
         resValue "string", "app_name", isTv ? "AGUENATV TV" : "AGUENATV"
         resValue "string", "title_activity_main", isTv ? "AGUENATV TV" : "AGUENATV"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"

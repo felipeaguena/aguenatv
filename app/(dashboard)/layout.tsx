@@ -10,11 +10,15 @@ import { DownloadProgressBar } from '@/components/ui/DownloadProgressBar';
 import { OfflineBanner } from '@/components/ui/OfflineBanner';
 import PullToRefresh from '@/components/ui/PullToRefresh';
 import Footer from '@/components/ui/Footer';
+import ScrollToTopOnNavigate from '@/components/ui/ScrollToTopOnNavigate';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <PlayerProvider>
       <div className="min-h-screen bg-[#0b0c10] text-[#f8fafc] flex flex-col selection:bg-violet-600 selection:text-white">
+        <Suspense fallback={null}>
+          <ScrollToTopOnNavigate />
+        </Suspense>
         <PullToRefresh />
         <OfflineBanner />
         <Suspense fallback={<header className="h-16 w-full glass-nav" />}>

@@ -289,7 +289,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return () => {
       isMounted = false;
     };
-  }, [currentStreamId, type, selectedSeason, seasonParam, activeEpisode, episodeParam, item]);
+  }, [currentStreamId, type, selectedSeason, activeEpisode?.id, activeEpisode?.episode_num, item]);
 
   // 2. Efeito: Se for série, busca os detalhes completos, temporadas e episódios via API do IPTV
   useEffect(() => {
@@ -393,9 +393,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
     };
   }, [id, type, config, item?.stream_type]);
 
-  // 3. Efeito: Sincroniza o episódio ativo com base no parâmetro `?ep=...` ou padrão (Episódio 1)
+  // 3. Efeito: Sincroniza o episódio ativo inicial com base no parâmetro `?ep=...` ou padrão (Episódio 1)
+  const hasInitializedEpisodeRef = useRef(false);
   useEffect(() => {
     if (!seriesInfo?.episodes) return;
+    if (hasInitializedEpisodeRef.current) return;
 
     let targetEp: SeriesEpisode | null = null;
     let targetSeason = seasonParam || selectedSeason;
@@ -431,10 +433,48 @@ export default function WatchView({ type, id }: WatchViewProps) {
     }
 
     if (targetEp) {
+      hasInitializedEpisodeRef.current = true;
       setActiveEpisode(targetEp);
       setSelectedSeason(targetSeason);
     }
-  }, [seriesInfo, episodeParam, seasonParam]);
+  }, [seriesInfo, episodeParam, seasonParam, selectedSeason]);
+
+  // 3b. Efeito: Sincroniza com botões nativos Voltar/Avançar do navegador (History API)
+  useEffect(() => {
+    if (type !== 'series') return;
+    const handlePopState = () => {
+      if (typeof window === 'undefined' || !seriesInfo?.episodes) return;
+      const sp = new URLSearchParams(window.location.search);
+      const epQuery = sp.get('ep');
+      const sQuery = sp.get('season');
+
+      if (epQuery) {
+        let targetEp: SeriesEpisode | null = null;
+        let targetSeason = sQuery || selectedSeason;
+
+        if (seriesInfo.episodes[targetSeason]) {
+          targetEp = seriesInfo.episodes[targetSeason].find((e) => String(e.id) === String(epQuery)) || null;
+        }
+        if (!targetEp) {
+          for (const sKey of Object.keys(seriesInfo.episodes)) {
+            const match = seriesInfo.episodes[sKey].find((e) => String(e.id) === String(epQuery));
+            if (match) {
+              targetEp = match;
+              targetSeason = sKey;
+              break;
+            }
+          }
+        }
+        if (targetEp) {
+          setActiveEpisode(targetEp);
+          setSelectedSeason(targetSeason);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [type, seriesInfo, selectedSeason]);
 
   // 4. Efeito: Busca Metadados Enriquecidos (TMDb / Kitsu / TVMaze) e Gera Sugestões Relacionadas
   useEffect(() => {
@@ -847,16 +887,44 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return 'H.264 (AVC) / AAC';
   }, [techVideoStats.codec, item?.title, item?.name]);
 
+  // Helper de rolagem suave para manter o player sempre visível ao trocar de episódio
+  const scrollToPlayer = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (playerContainerRef.current) {
+      playerContainerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, []);
+
+  // Atualiza a URL do navegador com o episódio e temporada selecionados
+  // usando a History API nativa, sem acionar o roteador interno do Next.js
+  // (Zero requisições RSC ao servidor e sem ativar Suspense fallback).
+  const updateWatchUrl = useCallback(
+    (epId?: string | number, seasonNum?: string | number) => {
+      if (typeof window === 'undefined') return;
+      const targetUrl = getWatchUrl('series', id, epId, seasonNum);
+      window.history.replaceState({ seriesId: id, epId, season: seasonNum }, '', targetUrl);
+    },
+    [id]
+  );
+
   // Callbacks para troca de item
   const handleSwitchStream = useCallback((newStream: BaseStreamItem) => {
     setCurrentStreamId(newStream.stream_id);
     router.replace(getWatchUrl(newStream.stream_type, newStream.stream_id));
   }, [router]);
 
-  const handleSelectEpisode = useCallback((ep: SeriesEpisode) => {
-    setActiveEpisode(ep);
-    router.replace(getWatchUrl('series', id, ep.id, selectedSeason));
-  }, [id, router, selectedSeason]);
+  const handleSelectEpisode = useCallback(
+    (ep: SeriesEpisode, shouldScroll = true) => {
+      setActiveEpisode(ep);
+      updateWatchUrl(ep.id, selectedSeason);
+      if (shouldScroll) {
+        scrollToPlayer();
+      }
+    },
+    [selectedSeason, updateWatchUrl, scrollToPlayer]
+  );
 
   // Lista de episódios sem filtro de busca para navegação sequencial entre capítulos
   const allCurrentSeasonEpisodes: SeriesEpisode[] = useMemo(() => {
@@ -909,7 +977,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const handlePrevChapter = useCallback(() => {
     if (isSeries) {
       if (activeEpisodeIndex > 0) {
-        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex - 1]);
+        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex - 1], true);
       } else if (currentSeasonIndex > 0) {
         const prevSeason = seasonList[currentSeasonIndex - 1];
         const prevSeasonNum = String(prevSeason.season_number);
@@ -918,7 +986,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
           const lastEp = prevEps[prevEps.length - 1];
           setSelectedSeason(prevSeasonNum);
           setActiveEpisode(lastEp);
-          router.replace(getWatchUrl('series', id, lastEp.id, prevSeasonNum));
+          updateWatchUrl(lastEp.id, prevSeasonNum);
+          scrollToPlayer();
         }
       }
       return;
@@ -930,12 +999,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
         handleSwitchStream(filteredRelated[idx - 1]);
       }
     }
-  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, allCurrentSeasonEpisodes, handleSelectEpisode, seasonList, seriesInfo, id, router, filteredRelated, currentStreamId, handleSwitchStream]);
+  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, allCurrentSeasonEpisodes, handleSelectEpisode, seasonList, seriesInfo, updateWatchUrl, scrollToPlayer, filteredRelated, currentStreamId, handleSwitchStream]);
 
   const handleNextChapter = useCallback(() => {
     if (isSeries) {
       if (activeEpisodeIndex >= 0 && activeEpisodeIndex < allCurrentSeasonEpisodes.length - 1) {
-        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex + 1]);
+        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex + 1], true);
       } else if (currentSeasonIndex >= 0 && currentSeasonIndex < seasonList.length - 1) {
         const nextSeason = seasonList[currentSeasonIndex + 1];
         const nextSeasonNum = String(nextSeason.season_number);
@@ -944,7 +1013,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
           const firstEp = nextEps[0];
           setSelectedSeason(nextSeasonNum);
           setActiveEpisode(firstEp);
-          router.replace(getWatchUrl('series', id, firstEp.id, nextSeasonNum));
+          updateWatchUrl(firstEp.id, nextSeasonNum);
+          scrollToPlayer();
         }
       }
       return;
@@ -956,7 +1026,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
         handleSwitchStream(filteredRelated[idx + 1]);
       }
     }
-  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, id, router, filteredRelated, currentStreamId, handleSwitchStream]);
+  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, updateWatchUrl, scrollToPlayer, filteredRelated, currentStreamId, handleSwitchStream]);
 
   // =========================================================================
   // 3. RETORNOS CONDICIONAIS DE RENDERIZAÇÃO (SEGUROS - APÓS TODOS OS HOOKS)
@@ -1366,7 +1436,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
                               if (seriesInfo?.episodes && seriesInfo.episodes[newSeason]?.length > 0) {
                                 const firstEp = seriesInfo.episodes[newSeason][0];
                                 setActiveEpisode(firstEp);
-                                router.replace(getWatchUrl('series', id, firstEp.id, newSeason));
+                                updateWatchUrl(firstEp.id, newSeason);
+                                scrollToPlayer();
                               }
                             }}
                             className={`w-full px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between text-left transition cursor-pointer ${

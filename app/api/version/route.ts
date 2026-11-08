@@ -10,19 +10,15 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.2.6';
+  let latestVersion = '0.3.0';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
-    'Ajuste na proporção cinema do player no desktop e barra lateral acompanhando a altura com média de 5 capítulos visíveis',
-    'Nova página de Vídeos Baixados (Offline) no estilo Watch Séries com player local no topo e lista sequencial abaixo',
-    'Instalação automática do APK nativo sem sair do aplicativo com barra de progresso em tempo real (%)',
-    'Abertura de links externos do GitHub no navegador padrão do aparelho celular',
-    'Persistência total na página ativa ao desconectar da internet ou retomar do segundo plano',
-    'Notificação discreta de modo offline no topo com confirmação prévia antes de alternar',
-    'Correção do cabeçalho no notch da câmera em aparelhos móveis no portal offline',
-    'Carregamento otimizado do catálogo em cache do IndexedDB no modo offline',
-    'Separação estrita de abas e gerenciamento entre Favoritos e Concluídos sem abas de TV ao Vivo',
-  ];
+    "Transição instantânea entre capítulos e episódios sem recarregar a página (History API nativa)",
+    "Player de vídeo com troca suave de mídia contínua sem tela preta ou destruição do DOM",
+    "Rolagem automática inteligente para o player ao selecionar capítulos na lista",
+    "Scroll-to-top imediato padronizado em todas as rotas e navegações do sistema",
+    "Otimização de consumo no servidor com 100% de redução de requisições desnecessárias na reprodução"
+];
 
   try {
     const ghRes = await fetch('https://api.github.com/repos/felipeaguena/aguenatv/releases/latest', {

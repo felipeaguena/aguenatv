@@ -166,6 +166,15 @@ export default function VideoPlayer({
   const onPrevEpisodeRef = useRef(onPrevEpisode);
   const hasPrevEpisodeRef = useRef(hasPrevEpisode);
 
+  const streamIdRef = useRef(streamId);
+  const titleRef = useRef(title);
+  const streamTypeRef = useRef(streamType);
+  const posterUrlRef = useRef(posterUrl);
+  const prevEpisodeLabelRef = useRef(prevEpisodeLabel);
+  const nextEpisodeLabelRef = useRef(nextEpisodeLabel);
+  const prevStreamUrlRef = useRef(streamUrl);
+  const prevStreamTypeRef = useRef(streamType);
+
   useEffect(() => {
     markWatchedRef.current = markWatched;
     onEndedRef.current = onEnded;
@@ -175,6 +184,27 @@ export default function VideoPlayer({
     hasNextEpisodeRef.current = hasNextEpisode;
     onPrevEpisodeRef.current = onPrevEpisode;
     hasPrevEpisodeRef.current = hasPrevEpisode;
+    streamIdRef.current = streamId;
+    titleRef.current = title;
+    streamTypeRef.current = streamType;
+    posterUrlRef.current = posterUrl;
+    prevEpisodeLabelRef.current = prevEpisodeLabel;
+    nextEpisodeLabelRef.current = nextEpisodeLabel;
+
+    // Atualiza dinamicamente os controles na barra do player se a instância já estiver ativa
+    const art = artInstanceRef.current;
+    if (art && !art.isDestroy) {
+      const prevBtn = art.template?.$controls?.querySelector('.art-control-prev-chapter') as HTMLElement | null;
+      if (prevBtn) {
+        prevBtn.style.display = hasPrevEpisode && onPrevEpisode ? '' : 'none';
+        prevBtn.setAttribute('data-tooltip', prevEpisodeLabel || 'Capítulo Anterior');
+      }
+      const nextBtn = art.template?.$controls?.querySelector('.art-control-next-chapter') as HTMLElement | null;
+      if (nextBtn) {
+        nextBtn.style.display = hasNextEpisode && onNextEpisode ? '' : 'none';
+        nextBtn.setAttribute('data-tooltip', nextEpisodeLabel || 'Próximo Capítulo');
+      }
+    }
   });
 
   // Alterna tela cheia: suporta tanto desktop (fullscreen nativo e web) quanto mobile (fullscreenWeb imersivo)
@@ -335,6 +365,45 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!artContainerRef.current || !streamUrl) return;
 
+    // Se a instância do Artplayer já está viva e o tipo de stream é o mesmo, faz a troca suave da URL
+    const currentArt = artInstanceRef.current;
+    if (currentArt && !currentArt.isDestroy && prevStreamTypeRef.current === streamType) {
+      if (prevStreamUrlRef.current !== streamUrl) {
+        prevStreamUrlRef.current = streamUrl;
+        hasRestoredRef.current = false;
+        hasMarkedRef.current = false;
+        hasAutoAdvancedRef.current = false;
+        setNextEpisodeCountdown(null);
+        setError(null);
+        try {
+          currentArt.loading.show = true;
+        } catch (e) {}
+
+        if (posterUrl) {
+          try {
+            currentArt.poster = posterUrl;
+          } catch (e) {}
+        }
+
+        try {
+          currentArt.switchUrl(streamUrl).then(() => {
+            if (autoPlay) {
+              currentArt.play().catch(() => {});
+            }
+          }).catch((err) => {
+            console.warn('Falha no switchUrl suave do Artplayer, reinicializando player:', err);
+            setRetryKey((k) => k + 1);
+          });
+        } catch (err) {
+          console.warn('Erro síncrono no switchUrl, reinicializando player:', err);
+          setRetryKey((k) => k + 1);
+        }
+      }
+      return;
+    }
+
+    prevStreamUrlRef.current = streamUrl;
+    prevStreamTypeRef.current = streamType;
     hasRestoredRef.current = false;
     hasMarkedRef.current = false;
     hasAutoAdvancedRef.current = false;
@@ -402,30 +471,28 @@ export default function VideoPlayer({
         },
       },
       controls: [
-        ...(hasPrevEpisodeRef.current && onPrevEpisodeRef.current
-          ? [
-              {
-                name: 'prev-chapter',
-                position: 'left' as const,
-                index: 10,
-                html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 3px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg></span>',
-                tooltip: prevEpisodeLabel,
-                click: () => onPrevEpisodeRef.current?.(),
-              },
-            ]
-          : []),
-        ...(hasNextEpisodeRef.current && onNextEpisodeRef.current
-          ? [
-              {
-                name: 'next-chapter',
-                position: 'left' as const,
-                index: 11,
-                html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 3px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></span>',
-                tooltip: nextEpisodeLabel,
-                click: () => onNextEpisodeRef.current?.(),
-              },
-            ]
-          : []),
+        {
+          name: 'prev-chapter',
+          position: 'left' as const,
+          index: 10,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 3px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg></span>',
+          tooltip: prevEpisodeLabelRef.current || 'Capítulo Anterior',
+          click: () => onPrevEpisodeRef.current?.(),
+          mounted: (el: HTMLElement) => {
+            el.style.display = hasPrevEpisodeRef.current && onPrevEpisodeRef.current ? '' : 'none';
+          },
+        },
+        {
+          name: 'next-chapter',
+          position: 'left' as const,
+          index: 11,
+          html: '<span class="art-icon" style="display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 3px;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg></span>',
+          tooltip: nextEpisodeLabelRef.current || 'Próximo Capítulo',
+          click: () => onNextEpisodeRef.current?.(),
+          mounted: (el: HTMLElement) => {
+            el.style.display = hasNextEpisodeRef.current && onNextEpisodeRef.current ? '' : 'none';
+          },
+        },
         // Botão para Alternar entre Ajustar (Original) e Preencher a Tela
         {
           name: 'fit-toggle',
@@ -901,7 +968,7 @@ export default function VideoPlayer({
           art.notice.show = `Continuando de onde parou (${formatSeconds(initialTime)})`;
           return;
         }
-        const raw = localStorage.getItem(`iptv_pos_${streamType}_${streamId}`);
+        const raw = localStorage.getItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`);
         if (raw) {
           const saved = parseFloat(raw);
           if (!isNaN(saved) && saved > 5) {
@@ -949,13 +1016,13 @@ export default function VideoPlayer({
       if (streamType !== 'live' && currentTime > 5 && duration > 0) {
         if (currentTime < duration - 10) {
           try {
-            localStorage.setItem(`iptv_pos_${streamType}_${streamId}`, currentTime.toFixed(1));
+            localStorage.setItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`, currentTime.toFixed(1));
           } catch (e) {}
         }
         onProgressRef.current?.({ currentTime, duration });
         if (currentTime > 60 && !hasMarkedRef.current) {
           hasMarkedRef.current = true;
-          markWatchedRef.current?.(streamId, streamType, title, false);
+          markWatchedRef.current?.(streamIdRef.current, streamTypeRef.current, titleRef.current, false);
         }
       }
 
@@ -983,11 +1050,11 @@ export default function VideoPlayer({
     art.on('video:ended', () => {
       hasMarkedRef.current = true;
       try {
-        localStorage.removeItem(`iptv_pos_${streamType}_${streamId}`);
+        localStorage.removeItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`);
       } catch (e) {}
 
       if (markWatchedRef.current) {
-        markWatchedRef.current(streamId, streamType, title, true);
+        markWatchedRef.current(streamIdRef.current, streamTypeRef.current, titleRef.current, true);
       }
       if (onEndedRef.current) onEndedRef.current();
 
@@ -1080,7 +1147,7 @@ export default function VideoPlayer({
         artInstanceRef.current = null;
       }
     };
-  }, [streamUrl, streamType, streamId, title, posterUrl, autoPlay, initialTime, retryKey, prevEpisodeLabel, nextEpisodeLabel, toggleFullscreen]);
+  }, [streamUrl, streamType, retryKey, autoPlay, initialTime, toggleFullscreen]);
 
   return (
     <div className="relative w-full h-full bg-black select-none overflow-hidden">
