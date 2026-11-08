@@ -1029,6 +1029,21 @@ export default function WatchView({ type, id }: WatchViewProps) {
     [id]
   );
 
+  // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
+  const handleBack = useCallback(() => {
+    const infoUrl = getInfoUrl(streamType, id);
+    if (typeof window !== 'undefined') {
+      const ref = document.referrer || '';
+      // Se a página anterior do histórico foi a página de info deste item, volta no histórico para desempilhar
+      if (ref.includes(`/${id}/info`) || ref.includes('/info')) {
+        router.back();
+        return;
+      }
+    }
+    // Caso contrário (acesso direto, atalho ou início), substitui a URL atual para info sem acumular watch no histórico
+    router.replace(infoUrl);
+  }, [router, streamType, id]);
+
   // Callbacks para troca de item
   const handleSwitchStream = useCallback((newStream: BaseStreamItem) => {
     setCurrentStreamId(newStream.stream_id);
@@ -1187,10 +1202,16 @@ export default function WatchView({ type, id }: WatchViewProps) {
           title: `${item?.title || item?.name || 'Série'} - ${formattedEpName}`,
           series_title: item?.title || item?.name,
           poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || item?.stream_icon,
+          backdrop_url: enrichedMetadata?.backdropUrl || item?.stream_icon,
           container_extension: ep.container_extension || 'mp4',
           season_num: Number(selectedSeason),
           episode_num: Number(ep.episode_num),
           episode_id: ep.id,
+          overview: epMeta?.overview || ep.info?.plot,
+          plot: epMeta?.overview || ep.info?.plot,
+          rating: epMeta?.rating !== undefined ? epMeta.rating : item?.rating,
+          genre: item?.category_name,
+          episode_title: epMeta?.name || ep.title,
         },
         streamUrl
       );
@@ -1236,6 +1257,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
           title: channel.title || channel.name,
           poster_url: channel.stream_icon,
           container_extension: channel.container_extension || 'mp4',
+          rating: channel.rating,
+          genre: channel.category_name,
         },
         streamUrl
       );
@@ -1302,7 +1325,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4 w-full min-w-0">
         <div className="flex items-center gap-3 min-w-0">
           <button
-            onClick={() => router.push(getInfoUrl(streamType, id))}
+            onClick={handleBack}
             className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer shrink-0"
             title="Voltar para a página de detalhes"
           >
@@ -1528,10 +1551,16 @@ export default function WatchView({ type, id }: WatchViewProps) {
                           title: playerTitle,
                           series_title: item?.title || item?.name,
                           poster_url: playerPoster,
+                          backdrop_url: enrichedMetadata?.backdropUrl || item?.stream_icon,
                           container_extension: item?.container_extension,
                           season_num: sNum,
                           episode_num: epNum,
                           episode_id: epId,
+                          overview: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview,
+                          plot: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview,
+                          rating: currentEpMeta?.rating !== undefined ? currentEpMeta.rating : item?.rating,
+                          genre: item?.category_name,
+                          episode_title: currentEpMeta?.name || activeEpisode?.title,
                         },
                         streamUrl
                       );

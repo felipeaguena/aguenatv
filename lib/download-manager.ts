@@ -4,7 +4,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { localDB } from './db-local';
 
 export interface BackgroundDownloadPluginInterface {
-  startDownload(options: { id: string; url: string; title: string; fileName: string }): Promise<{ started: boolean; id: string }>;
+  startDownload(options: { id: string; url: string; title: string; fileName: string; metadata?: string }): Promise<{ started: boolean; id: string }>;
   cancelDownload(options: { id: string }): Promise<void>;
   installApk(options: { filePath: string }): Promise<{ success: boolean }>;
   openExternalUrl(options: { url: string }): Promise<{ success: boolean }>;
@@ -83,6 +83,7 @@ export interface OfflineDownload {
   title: string;
   series_title?: string;
   poster_url?: string;
+  backdrop_url?: string;
   file_path: string;
   file_size?: number;
   downloaded_at: string;
@@ -90,6 +91,11 @@ export interface OfflineDownload {
   season_num?: number;
   episode_num?: number;
   episode_id?: string | number;
+  overview?: string;
+  plot?: string;
+  rating?: string | number;
+  genre?: string;
+  episode_title?: string;
 }
 
 export interface GroupedDownloadItem {
@@ -205,10 +211,30 @@ export async function writeManifestToDisk(manifest: Record<string, OfflineDownlo
 }
 
 /**
- * Adiciona ou atualiza um item no manifesto persistente
+ * Adiciona ou atualiza um item no manifesto persistente e salva o companion JSON
  */
 export async function saveDownloadToManifest(record: OfflineDownload): Promise<void> {
   try {
+    // 1. Salva via AndroidBridge nativo se disponível
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.saveOfflineMetadata) {
+      try {
+        (window as any).AndroidBridge.saveOfflineMetadata(record.id, JSON.stringify(record));
+      } catch {}
+    }
+
+    // 2. Salva companion JSON individual (offline_{id}.json) no disco nativo
+    if (isNativeApp()) {
+      try {
+        await Filesystem.writeFile({
+          path: `videos/offline_${record.id}.json`,
+          data: JSON.stringify(record, null, 2),
+          directory: Directory.Data,
+          encoding: 'utf8' as any,
+        });
+      } catch {}
+    }
+
+    // 3. Atualiza manifesto principal
     const manifest = await readManifestFromDisk();
     manifest[record.id] = record;
     await writeManifestToDisk(manifest);
@@ -216,10 +242,27 @@ export async function saveDownloadToManifest(record: OfflineDownload): Promise<v
 }
 
 /**
- * Remove um item do manifesto persistente
+ * Remove um item do manifesto persistente e apaga seu companion JSON
  */
 export async function removeDownloadFromManifest(id: string): Promise<void> {
   try {
+    // 1. Remove via AndroidBridge nativo
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.deleteOfflineVideo) {
+      try {
+        (window as any).AndroidBridge.deleteOfflineVideo(id, `videos/offline_${id}`);
+      } catch {}
+    }
+
+    // 2. Remove companion JSON individual
+    if (isNativeApp()) {
+      try {
+        await Filesystem.deleteFile({
+          path: `videos/offline_${id}.json`,
+          directory: Directory.Data,
+        });
+      } catch {}
+    }
+
     const manifest = await readManifestFromDisk();
     if (manifest[id]) {
       delete manifest[id];
@@ -255,10 +298,16 @@ export async function downloadVideoForOffline(
     title: string;
     series_title?: string;
     poster_url?: string;
+    backdrop_url?: string;
     container_extension?: string;
     season_num?: number;
     episode_num?: number;
     episode_id?: string | number;
+    overview?: string;
+    plot?: string;
+    rating?: string | number;
+    genre?: string;
+    episode_title?: string;
   },
   streamUrl: string,
   onProgress?: (progress: DownloadProgress) => void
@@ -272,8 +321,32 @@ export async function downloadVideoForOffline(
   );
   const fileName = `offline_${cleanId}.${extension}`;
 
+  const initialRecord: OfflineDownload = {
+    id: cleanId,
+    stream_id: item.stream_id,
+    stream_type: item.stream_type,
+    title: item.title,
+    series_title: item.series_title,
+    poster_url: item.poster_url,
+    backdrop_url: item.backdrop_url,
+    file_path: `videos/${fileName}`,
+    downloaded_at: new Date().toISOString(),
+    container_extension: extension,
+    season_num: item.season_num,
+    episode_num: item.episode_num,
+    episode_id: item.episode_id,
+    overview: item.overview,
+    plot: item.plot,
+    rating: item.rating,
+    genre: item.genre,
+    episode_title: item.episode_title,
+  };
+
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Foreground Service Nativo Resiliente)
   if (isNativeApp()) {
+    // Grava preliminarmente os metadados companion JSON no disco do celular
+    await saveDownloadToManifest(initialRecord);
+
     // Pede permissão para notificações locais se necessário (Android 13+)
     try {
       const notifPerm = await LocalNotifications.checkPermissions();
@@ -330,26 +403,17 @@ export async function downloadVideoForOffline(
 
           if (data.success) {
             const record: OfflineDownload = {
-              id: cleanId,
-              stream_id: item.stream_id,
-              stream_type: item.stream_type,
-              title: item.title,
-              series_title: item.series_title,
-              poster_url: item.poster_url,
+              ...initialRecord,
               file_path: data.path || `videos/${fileName}`,
               file_size: data.size || 0,
               downloaded_at: new Date().toISOString(),
-              container_extension: extension,
-              season_num: item.season_num,
-              episode_num: item.episode_num,
-              episode_id: item.episode_id,
             };
 
             if (localDB?.offline_downloads) {
               await localDB.offline_downloads.put(record).catch(() => {});
             }
 
-            // Persiste no manifesto resiliente para garantir disponibilidade em modo offline
+            // Persiste no manifesto resiliente e no arquivo companion JSON
             await saveDownloadToManifest(record);
 
             if (typeof window !== 'undefined') {
@@ -373,12 +437,13 @@ export async function downloadVideoForOffline(
           }
         });
 
-        // Inicia o serviço nativo com WakeLock + WifiLock e download HTTP resiliente com retries
+        // Inicia o serviço nativo com WakeLock + WifiLock, JSON de metadados e download HTTP resiliente
         await BackgroundDownload.startDownload({
           id: cleanId,
           url: streamUrl,
           title: item.title,
           fileName: fileName,
+          metadata: JSON.stringify(initialRecord),
         });
       } catch (err: any) {
         await cleanup();
@@ -399,18 +464,8 @@ export async function downloadVideoForOffline(
     document.body.removeChild(a);
 
     const record: OfflineDownload = {
-      id: cleanId,
-      stream_id: item.stream_id,
-      stream_type: item.stream_type,
-      title: item.title,
-      series_title: item.series_title,
-      poster_url: item.poster_url,
+      ...initialRecord,
       file_path: streamUrl,
-      downloaded_at: new Date().toISOString(),
-      container_extension: extension,
-      season_num: item.season_num,
-      episode_num: item.episode_num,
-      episode_id: item.episode_id,
     };
 
     if (localDB?.offline_downloads) {
@@ -522,67 +577,100 @@ async function _internalSyncOfflineDownloadsWithDisk(): Promise<void> {
             await localDB.offline_downloads.put(manifestRecord).catch(() => {});
           }
         } else {
-          // Arquivo físico no disco sem registro anterior: sintetiza registro
-          const isMovie = cleanId.startsWith('movie_');
-          const streamType = isMovie ? 'movie' : 'series';
+          // Arquivo físico no disco sem registro anterior no manifest:
+          // 1. Tenta carregar do companion JSON individual (offline_{id}.json) gravado ao lado do vídeo
+          let companionRecord: OfflineDownload | undefined;
+          try {
+            const jsonRes = await Filesystem.readFile({
+              path: `videos/offline_${cleanId}.json`,
+              directory: Directory.Data,
+            });
+            const jsonStr = typeof jsonRes.data === 'string' ? jsonRes.data : '';
+            if (jsonStr) {
+              companionRecord = JSON.parse(jsonStr);
+            }
+          } catch {}
 
-          let streamId: string | number = cleanId;
-          let seasonNum: number | undefined;
-          let episodeNum: number | undefined;
-
-          if (isMovie) {
-            streamId = cleanId.replace('movie_', '');
+          if (companionRecord) {
+            companionRecord.file_size = size;
+            companionRecord.file_path = `videos/${fileName}`;
+            if (localDB?.offline_downloads) {
+              await localDB.offline_downloads.put(companionRecord).catch(() => {});
+            }
+            manifest[cleanId] = companionRecord;
           } else {
-            const parts = cleanId.split('_');
-            streamId = parts[1] || cleanId;
-            if (parts[2]?.startsWith('s')) {
-              seasonNum = parseInt(parts[2].substring(1), 10);
-            }
-            if (parts[3]?.startsWith('e')) {
-              episodeNum = parseInt(parts[3].substring(1), 10);
-            }
-          }
+            // 2. Se não encontrou companion JSON, sintetiza com base no nome do arquivo físico
+            const isMovie = cleanId.startsWith('movie_');
+            const streamType = isMovie ? 'movie' : 'series';
 
-          let title = `Vídeo ${streamId}`;
-          let posterUrl: string | undefined;
+            let streamId: string | number = cleanId;
+            let seasonNum: number | undefined;
+            let episodeNum: number | undefined;
 
-          if (localDB?.streams) {
-            try {
-              const stream = await localDB.streams
-                .where('stream_id')
-                .equals(String(streamId))
-                .first();
-              if (stream) {
-                title = stream.title || stream.name;
-                posterUrl = stream.stream_icon;
+            if (isMovie) {
+              streamId = cleanId.replace('movie_', '');
+            } else {
+              const parts = cleanId.split('_');
+              streamId = parts[1] || cleanId;
+              if (parts[2]?.startsWith('s')) {
+                seasonNum = parseInt(parts[2].substring(1), 10);
               }
+              if (parts[3]?.startsWith('e')) {
+                episodeNum = parseInt(parts[3].substring(1), 10);
+              }
+            }
+
+            let title = isMovie ? `Filme ${streamId}` : `Série ${streamId}`;
+            let posterUrl: string | undefined;
+
+            if (localDB?.streams) {
+              try {
+                const stream = await localDB.streams
+                  .where('stream_id')
+                  .equals(String(streamId))
+                  .first();
+                if (stream) {
+                  title = stream.title || stream.name;
+                  posterUrl = stream.stream_icon;
+                }
+              } catch {}
+            }
+
+            if (!isMovie && seasonNum && episodeNum) {
+              title = `${title} - T${seasonNum}:E${episodeNum}`;
+            }
+
+            const newRecord: OfflineDownload = {
+              id: cleanId,
+              stream_id: streamId,
+              stream_type: streamType,
+              title,
+              series_title: isMovie ? undefined : title.split(' - ')[0],
+              poster_url: posterUrl,
+              file_path: `videos/${fileName}`,
+              file_size: size,
+              downloaded_at: new Date().toISOString(),
+              container_extension: extension,
+              season_num: seasonNum,
+              episode_num: episodeNum,
+              episode_id: episodeNum,
+            };
+
+            // Salva companion JSON no disco para futuras inicializações offline
+            try {
+              await Filesystem.writeFile({
+                path: `videos/offline_${cleanId}.json`,
+                data: JSON.stringify(newRecord, null, 2),
+                directory: Directory.Data,
+                encoding: 'utf8' as any,
+              });
             } catch {}
-          }
 
-          if (!isMovie && seasonNum && episodeNum) {
-            title = `${title} - T${seasonNum}:E${episodeNum}`;
+            if (localDB?.offline_downloads) {
+              await localDB.offline_downloads.put(newRecord).catch(() => {});
+            }
+            manifest[cleanId] = newRecord;
           }
-
-          const newRecord: OfflineDownload = {
-            id: cleanId,
-            stream_id: streamId,
-            stream_type: streamType,
-            title,
-            series_title: isMovie ? undefined : title.split(' - ')[0],
-            poster_url: posterUrl,
-            file_path: `videos/${fileName}`,
-            file_size: size,
-            downloaded_at: new Date().toISOString(),
-            container_extension: extension,
-            season_num: seasonNum,
-            episode_num: episodeNum,
-            episode_id: episodeNum,
-          };
-
-          if (localDB?.offline_downloads) {
-            await localDB.offline_downloads.put(newRecord).catch(() => {});
-          }
-          manifest[cleanId] = newRecord;
         }
       }
 
@@ -638,6 +726,33 @@ async function _internalSyncOfflineDownloadsWithDisk(): Promise<void> {
  * Retorna todos os vídeos salvos offline com fallback multinível resiliente
  */
 export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
+  // 1. Tenta carregar diretamente via AndroidBridge nativo (acesso direto aos arquivos do celular)
+  if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineDownloadsJson) {
+    try {
+      const raw = (window as any).AndroidBridge.getOfflineDownloadsJson();
+      if (raw && typeof raw === 'string') {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (localDB?.offline_downloads) {
+            for (const it of parsed) {
+              await localDB.offline_downloads.put(it).catch(() => {});
+            }
+          }
+          const manifest: Record<string, OfflineDownload> = {};
+          parsed.forEach((it) => {
+            if (it?.id) manifest[it.id] = it;
+          });
+          try {
+            localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
+          } catch {}
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[DownloadManager] Erro ao carregar via AndroidBridge:', e);
+    }
+  }
+
   try {
     await syncOfflineDownloadsWithDisk();
     if (localDB?.offline_downloads) {
@@ -749,7 +864,13 @@ export async function getGroupedOfflineDownloads(cachedList?: OfflineDownload[])
 export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<string> {
   if (isNativeApp()) {
     try {
-      // Se o caminho já for absoluto do sistema de arquivos ou file://
+      // 1. Se houver AndroidBridge nativo com suporte a streaming de vídeo offline
+      if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineVideoUrl) {
+        const nativeUrl = (window as any).AndroidBridge.getOfflineVideoUrl(download.file_path);
+        if (nativeUrl) return nativeUrl;
+      }
+
+      // 2. Se o caminho já for absoluto do sistema de arquivos ou file://
       if (download.file_path && (download.file_path.startsWith('/') || download.file_path.startsWith('file://'))) {
         return Capacitor.convertFileSrc(download.file_path);
       }

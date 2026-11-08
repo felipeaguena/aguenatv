@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -620,6 +620,26 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const watched = isWatched(item.stream_id, streamType);
   const isLive = streamType === 'live';
 
+  // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
+  const handleBack = useCallback(() => {
+    const categoryRoute = `/${getRouteType(streamType)}`;
+    if (typeof window !== 'undefined') {
+      const ref = document.referrer || '';
+      // REGRA ANTI-LOOPING: Se a página anterior foi o watch, NUNCA volte para o watch!
+      // O fluxo correto é: watch -> info -> categoria -> raiz.
+      if (ref.includes('/watch')) {
+        router.replace(categoryRoute);
+        return;
+      }
+      // Se veio da categoria ou início (ou se há histórico válido que não seja o watch), volta desempilhando
+      if (window.history.length > 1 && (ref.includes(categoryRoute) || ref === '' || ref.endsWith('/'))) {
+        router.back();
+        return;
+      }
+    }
+    router.push(categoryRoute);
+  }, [router, streamType]);
+
   // Imagens priorizadas (Backdrop e Poster)
   // Para TV ao Vivo, utiliza estritamente o ícone original da lista M3U, sem alteração
   const backdropImage = isLive ? item.stream_icon : (enrichedMetadata?.backdropUrl || item.stream_icon);
@@ -679,7 +699,12 @@ export default function InfoView({ type, id }: InfoViewProps) {
           stream_type: 'movie',
           title: item.title || item.name,
           poster_url: posterImage,
+          backdrop_url: backdropImage,
           container_extension: item.container_extension || 'mp4',
+          overview: plotSynopsis,
+          plot: plotSynopsis,
+          rating: item.rating,
+          genre: item.category_name,
         },
         streamUrl
       );
@@ -744,11 +769,17 @@ export default function InfoView({ type, id }: InfoViewProps) {
             stream_type: 'series',
             title: `${item.title || item.name} - ${formattedEpName}`,
             series_title: item.title || item.name,
-            poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || item.stream_icon,
+            poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || posterImage,
+            backdrop_url: backdropImage,
             container_extension: ep.container_extension || 'mp4',
             season_num: Number(selectedSeason),
             episode_num: Number(ep.episode_num),
             episode_id: ep.id,
+            overview: epMeta?.overview || ep.info?.plot || plotSynopsis,
+            plot: epMeta?.overview || ep.info?.plot || plotSynopsis,
+            rating: epMeta?.rating !== undefined ? epMeta.rating : item.rating,
+            genre: item.category_name,
+            episode_title: epMeta?.name || ep.title,
           },
           streamUrl
         );
@@ -792,11 +823,17 @@ export default function InfoView({ type, id }: InfoViewProps) {
           stream_type: 'series',
           title: `${item.title || item.name} - ${formattedEpName}`,
           series_title: item.title || item.name,
-          poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || item.stream_icon,
+          poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || posterImage,
+          backdrop_url: backdropImage,
           container_extension: ep.container_extension || 'mp4',
           season_num: Number(selectedSeason),
           episode_num: Number(ep.episode_num),
           episode_id: ep.id,
+          overview: epMeta?.overview || ep.info?.plot || plotSynopsis,
+          plot: epMeta?.overview || ep.info?.plot || plotSynopsis,
+          rating: epMeta?.rating !== undefined ? epMeta.rating : item.rating,
+          genre: item.category_name,
+          episode_title: epMeta?.name || ep.title,
         },
         streamUrl
       );
@@ -849,15 +886,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
         <div className="absolute top-6 inset-x-0 z-20 pointer-events-none">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <button
-              onClick={() => {
-                if (typeof window !== 'undefined' && window.history.length > 1) {
-                  router.back();
-                } else {
-                  router.push(`/${getRouteType(streamType)}`);
-                }
-              }}
+              onClick={handleBack}
               className="pointer-events-auto p-2 sm:px-3 sm:py-2 rounded-xl bg-[#13141b]/80 hover:bg-[#1a1c26] text-neutral-300 hover:text-white border border-white/10 hover:border-violet-500/40 transition cursor-pointer backdrop-blur-md shadow-xl flex items-center gap-2 text-xs font-semibold"
-              title="Voltar"
+              title="Voltar ao catálogo"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Voltar</span>

@@ -15,15 +15,23 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.json.JSONObject;
 
 public class DownloadForegroundService extends Service {
     private static final String TAG = "DownloadFGService";
@@ -42,6 +50,7 @@ public class DownloadForegroundService extends Service {
     public static final String EXTRA_URL = "extra_url";
     public static final String EXTRA_TITLE = "extra_title";
     public static final String EXTRA_FILE_NAME = "extra_file_name";
+    public static final String EXTRA_METADATA = "extra_metadata";
 
     private PowerManager.WakeLock wakeLock;
     private WifiManager.WifiLock wifiLock;
@@ -56,15 +65,17 @@ public class DownloadForegroundService extends Service {
         String url;
         String title;
         String fileName;
+        String metadata;
         AtomicBoolean isCancelled = new AtomicBoolean(false);
         long bytesDownloaded = 0;
         long totalBytes = 0;
 
-        DownloadTask(String id, String url, String title, String fileName) {
+        DownloadTask(String id, String url, String title, String fileName, String metadata) {
             this.id = id;
             this.url = url;
             this.title = title;
             this.fileName = fileName;
+            this.metadata = metadata;
         }
     }
 
@@ -131,9 +142,10 @@ public class DownloadForegroundService extends Service {
             String url = intent.getStringExtra(EXTRA_URL);
             String title = intent.getStringExtra(EXTRA_TITLE);
             String fileName = intent.getStringExtra(EXTRA_FILE_NAME);
+            String metadata = intent.getStringExtra(EXTRA_METADATA);
 
             if (id != null && url != null && fileName != null) {
-                startNativeDownload(id, url, title != null ? title : "Vídeo", fileName);
+                startNativeDownload(id, url, title != null ? title : "Vídeo", fileName, metadata);
             }
         } else if (ACTION_CANCEL_DOWNLOAD.equals(action)) {
             String id = intent.getStringExtra(EXTRA_ID);
@@ -185,10 +197,25 @@ public class DownloadForegroundService extends Service {
         }
     }
 
-    private void startNativeDownload(String id, String urlStr, String title, String fileName) {
+    private void startNativeDownload(String id, String urlStr, String title, String fileName, String metadata) {
         acquireLocks();
 
-        DownloadTask task = new DownloadTask(id, urlStr, title, fileName);
+        File videosDir = new File(getFilesDir(), "videos");
+        if (!videosDir.exists()) {
+            videosDir.mkdirs();
+        }
+
+        // Salva metadados companion JSON imediatamente ao iniciar
+        if (metadata != null && !metadata.trim().isEmpty()) {
+            try {
+                File companionJson = new File(videosDir, "offline_" + id + ".json");
+                writeStringToFile(companionJson, metadata);
+            } catch (Exception e) {
+                Log.w(TAG, "Falha ao gravar metadata preliminar: " + e.getMessage());
+            }
+        }
+
+        DownloadTask task = new DownloadTask(id, urlStr, title, fileName, metadata);
         activeTasks.put(id, task);
 
         // Inicializa Foreground Notification
@@ -329,20 +356,71 @@ public class DownloadForegroundService extends Service {
             }
             tempFile.renameTo(targetFile);
 
-            Log.i(TAG, "Download concluído com sucesso: " + targetFile.getAbsolutePath());
+            long actualSize = targetFile.length();
+            Log.i(TAG, "Download concluído com sucesso: " + targetFile.getAbsolutePath() + " (" + actualSize + " bytes)");
+
+            // Atualiza o arquivo companion JSON com tamanho e data final
+            try {
+                File companionJson = new File(videosDir, "offline_" + task.id + ".json");
+                JSONObject json = null;
+                if (companionJson.exists()) {
+                    try {
+                        String content = readFileToString(companionJson);
+                        if (content != null && !content.trim().isEmpty()) {
+                            json = new JSONObject(content);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                if (json == null && task.metadata != null && !task.metadata.trim().isEmpty()) {
+                    try {
+                        json = new JSONObject(task.metadata);
+                    } catch (Exception ignored) {}
+                }
+                if (json == null) {
+                    json = new JSONObject();
+                    json.put("id", task.id);
+                    json.put("title", task.title);
+                }
+
+                json.put("file_path", "videos/" + task.fileName);
+                json.put("file_size", actualSize);
+                json.put("downloaded_at", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(new Date()));
+
+                writeStringToFile(companionJson, json.toString(2));
+
+                // Também atualiza o downloads_manifest.json mestre
+                File manifestFile = new File(videosDir, "downloads_manifest.json");
+                JSONObject manifestObj = new JSONObject();
+                if (manifestFile.exists()) {
+                    try {
+                        String mContent = readFileToString(manifestFile);
+                        if (mContent != null && !mContent.trim().isEmpty()) {
+                            manifestObj = new JSONObject(mContent);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                manifestObj.put(task.id, json);
+                writeStringToFile(manifestFile, manifestObj.toString(2));
+            } catch (Exception err) {
+                Log.w(TAG, "Falha ao atualizar JSON de metadados em disco: " + err.getMessage());
+            }
 
             notifyCompletion(task.title, true);
             BackgroundDownloadPlugin.emitComplete(
                 task.id,
                 task.title,
                 targetFile.getAbsolutePath(),
-                targetFile.length(),
+                actualSize,
                 true,
                 null
             );
         } else {
             if (task.isCancelled.get()) {
                 tempFile.delete();
+                try {
+                    File companionJson = new File(videosDir, "offline_" + task.id + ".json");
+                    if (companionJson.exists()) companionJson.delete();
+                } catch (Exception ignored) {}
                 BackgroundDownloadPlugin.emitComplete(task.id, task.title, "", 0, false, "Download cancelado");
             } else {
                 notifyCompletion(task.title, false);
@@ -447,6 +525,27 @@ public class DownloadForegroundService extends Service {
             } catch (Exception ignored) {}
         }
         super.onDestroy();
+    }
+
+    private static String readFileToString(File file) throws Exception {
+        try (InputStream is = new FileInputStream(file);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            return sb.toString();
+        }
+    }
+
+    private static void writeStringToFile(File file, String content) throws Exception {
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            fos.write(content.getBytes(StandardCharsets.UTF_8));
+            fos.flush();
+        }
     }
 
     @Nullable

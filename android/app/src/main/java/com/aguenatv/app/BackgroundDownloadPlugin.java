@@ -37,6 +37,7 @@ public class BackgroundDownloadPlugin extends Plugin {
         String url = call.getString("url");
         String title = call.getString("title", "Vídeo");
         String fileName = call.getString("fileName");
+        String metadata = call.getString("metadata", call.getString("metadataJson", null));
 
         if (id == null || url == null || fileName == null) {
             call.reject("Parâmetros obrigatórios ausentes (id, url ou fileName)");
@@ -50,6 +51,9 @@ public class BackgroundDownloadPlugin extends Plugin {
         intent.putExtra(DownloadForegroundService.EXTRA_URL, url);
         intent.putExtra(DownloadForegroundService.EXTRA_TITLE, title);
         intent.putExtra(DownloadForegroundService.EXTRA_FILE_NAME, fileName);
+        if (metadata != null) {
+            intent.putExtra(DownloadForegroundService.EXTRA_METADATA, metadata);
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);

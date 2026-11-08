@@ -740,22 +740,41 @@
         });
       }
 
-      // Carrega dados locais com fallback multinível (Manifesto, Disco Nativo e IndexedDB)
+      // Carrega dados locais com fallback multinível (AndroidBridge Direto, Manifesto, Disco Nativo e IndexedDB)
       async function loadLocalData() {
         const downloadsMap = {};
         const MANIFEST_KEY = 'aguenatv_offline_downloads_manifest';
 
-        // 1. Lê do localStorage primeiro para exibição imediata
+        // 1. Prioridade Máxima no APK: Lê diretamente do AndroidBridge nativo (acessa arquivos físicos e JSONs do celular)
+        if (window.AndroidBridge && typeof window.AndroidBridge.getOfflineDownloadsJson === 'function') {
+          try {
+            const raw = window.AndroidBridge.getOfflineDownloadsJson();
+            if (raw && typeof raw === 'string') {
+              const nativeItems = JSON.parse(raw);
+              if (Array.isArray(nativeItems)) {
+                nativeItems.forEach((it) => {
+                  if (it && it.id) downloadsMap[it.id] = it;
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('[OfflinePortal] Erro ao carregar via AndroidBridge:', e);
+          }
+        }
+
+        // 2. Lê do localStorage para complementar
         try {
           const raw = localStorage.getItem(MANIFEST_KEY);
           if (raw) {
             const parsed = JSON.parse(raw);
             if (Array.isArray(parsed)) {
               parsed.forEach((it) => {
-                if (it && it.id) downloadsMap[it.id] = it;
+                if (it && it.id && !downloadsMap[it.id]) downloadsMap[it.id] = it;
               });
             } else if (typeof parsed === 'object' && parsed !== null) {
-              Object.assign(downloadsMap, parsed);
+              Object.keys(parsed).forEach((k) => {
+                if (!downloadsMap[k]) downloadsMap[k] = parsed[k];
+              });
             }
           }
         } catch {}
@@ -1117,23 +1136,31 @@
         let src = item.file_path;
 
         try {
-          const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
-          if (fs && window.Capacitor.convertFileSrc) {
-            if (item.file_path && (item.file_path.startsWith('/') || item.file_path.startsWith('file://'))) {
-              src = window.Capacitor.convertFileSrc(item.file_path);
-            } else {
-              const uriRes = await fs.getUri({
-                path: item.file_path,
-                directory: 'DATA',
-              });
-              if (uriRes && uriRes.uri) {
-                src = window.Capacitor.convertFileSrc(uriRes.uri);
-              } else {
+          if (window.AndroidBridge && typeof window.AndroidBridge.getOfflineVideoUrl === 'function') {
+            const nativeUrl = window.AndroidBridge.getOfflineVideoUrl(item.file_path);
+            if (nativeUrl) src = nativeUrl;
+          } else if (item.file_path && !item.file_path.startsWith('http')) {
+            const fileName = item.file_path.includes('/') ? item.file_path.substring(item.file_path.lastIndexOf('/') + 1) : item.file_path;
+            src = SERVER_URL + '/_local_video_/' + fileName;
+          } else {
+            const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+            if (fs && window.Capacitor.convertFileSrc) {
+              if (item.file_path && (item.file_path.startsWith('/') || item.file_path.startsWith('file://'))) {
                 src = window.Capacitor.convertFileSrc(item.file_path);
+              } else {
+                const uriRes = await fs.getUri({
+                  path: item.file_path,
+                  directory: 'DATA',
+                });
+                if (uriRes && uriRes.uri) {
+                  src = window.Capacitor.convertFileSrc(uriRes.uri);
+                } else {
+                  src = window.Capacitor.convertFileSrc(item.file_path);
+                }
               }
+            } else if (window.Capacitor && window.Capacitor.convertFileSrc) {
+              src = window.Capacitor.convertFileSrc(item.file_path);
             }
-          } else if (window.Capacitor && window.Capacitor.convertFileSrc) {
-            src = window.Capacitor.convertFileSrc(item.file_path);
           }
         } catch (err) {
           console.warn('[PlayOffline] Erro ao obter URL nativa do vídeo:', err);
@@ -1152,11 +1179,18 @@
         playerModal.classList.add('hidden');
       });
 
-      // Exclusão completa (IndexedDB, Manifesto e Disco Físico)
+      // Exclusão completa (AndroidBridge, IndexedDB, Manifesto e Disco Físico)
       async function deleteSingleDownload(id, filePath) {
         const MANIFEST_KEY = 'aguenatv_offline_downloads_manifest';
 
-        // 1. Remove do localStorage
+        // 1. Remove via AndroidBridge nativo se disponível
+        if (window.AndroidBridge && typeof window.AndroidBridge.deleteOfflineVideo === 'function') {
+          try {
+            window.AndroidBridge.deleteOfflineVideo(id, filePath);
+          } catch (e) {}
+        }
+
+        // 2. Remove do localStorage
         try {
           const raw = localStorage.getItem(MANIFEST_KEY);
           if (raw) {
@@ -1168,7 +1202,7 @@
           }
         } catch {}
 
-        // 2. Remove do IndexedDB
+        // 3. Remove do IndexedDB
         try {
           let db = await openDB(DB_NAME);
           if (!db || !db.objectStoreNames.contains('offline_downloads')) {
@@ -1180,7 +1214,7 @@
           }
         } catch {}
 
-        // 3. Tenta excluir via plugin Filesystem do disco e do manifesto em disco se nativo
+        // 4. Tenta excluir via plugin Filesystem do disco e do manifesto em disco se nativo
         const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
         if (fs) {
           try {
@@ -1189,6 +1223,10 @@
               : filePath;
             await fs.deleteFile({
               path: relativePath,
+              directory: 'DATA',
+            });
+            await fs.deleteFile({
+              path: 'videos/offline_' + id + '.json',
               directory: 'DATA',
             });
           } catch {}
@@ -1201,7 +1239,7 @@
               await fs.writeFile({
                 path: 'videos/downloads_manifest.json',
                 data: JSON.stringify(diskManifest, null, 2),
-                directory: 'DATA',
+                directory: Directory.Data,
                 encoding: 'utf8',
               });
             }

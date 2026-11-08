@@ -28,9 +28,21 @@ import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 import com.getcapacitor.WebViewListener;
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
     private static final String DEFAULT_SERVER_URL = "http://163.176.207.140";
@@ -161,6 +173,221 @@ public class MainActivity extends BridgeActivity {
             isCutoutFullscreenActive = enable;
             applyCutoutFullscreen(enable);
         }
+
+        @JavascriptInterface
+        public boolean isNetworkConnected() {
+            return MainActivity.this.isNetworkConnected();
+        }
+
+        @JavascriptInterface
+        public void loadOfflinePortal() {
+            try {
+                WebView wv = getBridge().getWebView();
+                MainActivity.this.loadOfflinePortal(wv);
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public String getOfflineDownloadsJson() {
+            try {
+                File videosDir = new File(getFilesDir(), "videos");
+                if (!videosDir.exists()) {
+                    videosDir.mkdirs();
+                }
+
+                JSONObject manifestObj = new JSONObject();
+                File manifestFile = new File(videosDir, "downloads_manifest.json");
+                if (manifestFile.exists()) {
+                    try {
+                        String manifestContent = readFileToString(manifestFile);
+                        if (manifestContent != null && !manifestContent.trim().isEmpty()) {
+                            manifestObj = new JSONObject(manifestContent);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                File[] files = videosDir.listFiles();
+                if (files != null) {
+                    for (File file : files) {
+                        String name = file.getName();
+                        if (name.startsWith("offline_") && !name.endsWith(".tmp") && !name.endsWith(".json")) {
+                            String withoutPrefix = name.substring("offline_".length());
+                            int lastDot = withoutPrefix.lastIndexOf('.');
+                            String cleanId = (lastDot != -1) ? withoutPrefix.substring(0, lastDot) : withoutPrefix;
+                            String ext = (lastDot != -1) ? withoutPrefix.substring(lastDot + 1) : "mp4";
+
+                            JSONObject item = null;
+
+                            // 1. Tenta carregar do companion JSON individual (offline_{id}.json)
+                            File companionJson = new File(videosDir, "offline_" + cleanId + ".json");
+                            if (companionJson.exists()) {
+                                try {
+                                    String cContent = readFileToString(companionJson);
+                                    if (cContent != null && !cContent.trim().isEmpty()) {
+                                        item = new JSONObject(cContent);
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+
+                            // 2. Se não encontrou, busca no manifesto mestre
+                            if (item == null && manifestObj.has(cleanId)) {
+                                try {
+                                    item = manifestObj.getJSONObject(cleanId);
+                                } catch (Exception ignored) {}
+                            }
+
+                            // 3. Se ainda não possui metadados, sintetiza com base no nome do arquivo físico
+                            if (item == null) {
+                                item = new JSONObject();
+                                boolean isMovie = cleanId.startsWith("movie_");
+                                String streamId = cleanId;
+                                Integer sNum = null;
+                                Integer eNum = null;
+
+                                if (isMovie) {
+                                    streamId = cleanId.replace("movie_", "");
+                                    item.put("stream_type", "movie");
+                                    item.put("title", "Filme " + streamId);
+                                } else {
+                                    item.put("stream_type", "series");
+                                    String[] parts = cleanId.split("_");
+                                    if (parts.length > 1) streamId = parts[1];
+                                    if (parts.length > 2 && parts[2].startsWith("s")) {
+                                        try { sNum = Integer.parseInt(parts[2].substring(1)); } catch (Exception ignored) {}
+                                    }
+                                    if (parts.length > 3 && parts[3].startsWith("e")) {
+                                        try { eNum = Integer.parseInt(parts[3].substring(1)); } catch (Exception ignored) {}
+                                    }
+                                    String epLabel = (sNum != null && eNum != null) ? " (T" + sNum + ":E" + eNum + ")" : "";
+                                    item.put("title", "Série " + streamId + epLabel);
+                                    item.put("series_title", "Série " + streamId);
+                                    if (sNum != null) item.put("season_num", sNum);
+                                    if (eNum != null) {
+                                        item.put("episode_num", eNum);
+                                        item.put("episode_id", eNum);
+                                    }
+                                }
+
+                                item.put("id", cleanId);
+                                item.put("stream_id", streamId);
+                                item.put("container_extension", ext);
+                                item.put("downloaded_at", new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(new Date(file.lastModified())));
+                            }
+
+                            item.put("file_path", "videos/" + name);
+                            item.put("file_size", file.length());
+                            if (!item.has("id")) item.put("id", cleanId);
+
+                            manifestObj.put(cleanId, item);
+
+                            if (!companionJson.exists()) {
+                                try {
+                                    writeStringToFile(companionJson, item.toString(2));
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+                }
+
+                try {
+                    writeStringToFile(manifestFile, manifestObj.toString(2));
+                } catch (Exception ignored) {}
+
+                JSONArray array = new JSONArray();
+                Iterator<String> keys = manifestObj.keys();
+                while (keys.hasNext()) {
+                    String k = keys.next();
+                    array.put(manifestObj.getJSONObject(k));
+                }
+                return array.toString();
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "[]";
+            }
+        }
+
+        @JavascriptInterface
+        public boolean saveOfflineMetadata(String id, String jsonString) {
+            try {
+                if (id == null || jsonString == null) return false;
+                File videosDir = new File(getFilesDir(), "videos");
+                if (!videosDir.exists()) videosDir.mkdirs();
+
+                File companionJson = new File(videosDir, "offline_" + id + ".json");
+                writeStringToFile(companionJson, jsonString);
+
+                File manifestFile = new File(videosDir, "downloads_manifest.json");
+                JSONObject manifestObj = new JSONObject();
+                if (manifestFile.exists()) {
+                    try {
+                        String content = readFileToString(manifestFile);
+                        if (content != null && !content.trim().isEmpty()) {
+                            manifestObj = new JSONObject(content);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                manifestObj.put(id, new JSONObject(jsonString));
+                writeStringToFile(manifestFile, manifestObj.toString(2));
+
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean deleteOfflineVideo(String id, String filePath) {
+            try {
+                File videosDir = new File(getFilesDir(), "videos");
+
+                if (id != null) {
+                    File cJson = new File(videosDir, "offline_" + id + ".json");
+                    if (cJson.exists()) cJson.delete();
+                }
+
+                if (filePath != null) {
+                    String fileName = filePath.contains("/") ? filePath.substring(filePath.lastIndexOf('/') + 1) : filePath;
+                    File vFile = new File(videosDir, fileName);
+                    if (vFile.exists()) vFile.delete();
+                } else if (id != null) {
+                    File[] list = videosDir.listFiles();
+                    if (list != null) {
+                        for (File f : list) {
+                            if (f.getName().startsWith("offline_" + id + ".")) {
+                                f.delete();
+                            }
+                        }
+                    }
+                }
+
+                File manifestFile = new File(videosDir, "downloads_manifest.json");
+                if (manifestFile.exists() && id != null) {
+                    try {
+                        String content = readFileToString(manifestFile);
+                        if (content != null && !content.trim().isEmpty()) {
+                            JSONObject manifestObj = new JSONObject(content);
+                            manifestObj.remove(id);
+                            writeStringToFile(manifestFile, manifestObj.toString(2));
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                return true;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public String getOfflineVideoUrl(String fileName) {
+            if (fileName == null) return "";
+            if (fileName.contains("/")) {
+                fileName = fileName.substring(fileName.lastIndexOf('/') + 1);
+            }
+            return DEFAULT_SERVER_URL + "/_local_video_/" + fileName;
+        }
     }
 
     public boolean isTvApp() {
@@ -266,6 +493,8 @@ public class MainActivity extends BridgeActivity {
 
                 if (!isNetworkConnected()) {
                     settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+                    // Se o aplicativo for aberto já em modo offline, ativa o portal offline imediatamente
+                    webView.post(() -> loadOfflinePortal(webView));
                 } else {
                     settings.setCacheMode(WebSettings.LOAD_DEFAULT);
                 }
@@ -281,11 +510,21 @@ public class MainActivity extends BridgeActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
                 if (url != null) {
+                    String path = url.getPath();
+
+                    // Intercepta arquivos de vídeo offline (local) para reprodução offline instantânea com busca/range
+                    if (path != null && (path.contains("/_local_video_/") || path.contains("/videos/offline_"))) {
+                        String fileName = path.substring(path.lastIndexOf('/') + 1);
+                        File videoFile = new File(new File(getFilesDir(), "videos"), fileName);
+                        if (videoFile.exists() && videoFile.isFile()) {
+                            return serveLocalVideoFile(request, videoFile);
+                        }
+                    }
+
                     String host = url.getHost();
                     if ("163.176.207.140".equals(host)) {
                         // Serve recursos estáticos locais (svg, png) quando sem rede
                         if (!isNetworkConnected()) {
-                            String path = url.getPath();
                             if (path != null && (path.endsWith(".svg") || path.endsWith(".png") || path.endsWith(".ico"))) {
                                 try {
                                     String assetPath = "public" + path;
@@ -302,15 +541,134 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                // Apenas loga erro sem sobrescrever a tela do usuário
                 super.onReceivedError(view, request, error);
+                if (request != null && request.isForMainFrame() && !isNetworkConnected()) {
+                    loadOfflinePortal(view);
+                }
             }
 
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                // Não sobrescreve a página ativa
+                super.onReceivedError(view, errorCode, description, failingUrl);
+                if (!isNetworkConnected()) {
+                    loadOfflinePortal(view);
+                }
             }
         });
+    }
+
+    private WebResourceResponse serveLocalVideoFile(WebResourceRequest request, File videoFile) {
+        try {
+            long fileLength = videoFile.length();
+            String rangeHeader = request.getRequestHeaders().get("Range");
+            if (rangeHeader == null) {
+                rangeHeader = request.getRequestHeaders().get("range");
+            }
+
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Accept-Ranges", "bytes");
+            headers.put("Access-Control-Allow-Origin", "*");
+
+            String mimeType = "video/mp4";
+            if (videoFile.getName().endsWith(".mkv")) {
+                mimeType = "video/x-matroska";
+            }
+
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                String rangeVal = rangeHeader.substring(6).trim();
+                long start = 0;
+                long end = fileLength - 1;
+
+                int dash = rangeVal.indexOf('-');
+                if (dash != -1) {
+                    String startStr = rangeVal.substring(0, dash).trim();
+                    String endStr = rangeVal.substring(dash + 1).trim();
+                    if (!startStr.isEmpty()) {
+                        start = Long.parseLong(startStr);
+                    }
+                    if (!endStr.isEmpty()) {
+                        end = Long.parseLong(endStr);
+                    }
+                }
+
+                if (end >= fileLength) {
+                    end = fileLength - 1;
+                }
+
+                long contentLength = end - start + 1;
+                InputStream fis = new FileInputStream(videoFile);
+                if (start > 0) {
+                    fis.skip(start);
+                }
+
+                final InputStream boundedIs = new BoundedInputStream(fis, contentLength);
+
+                headers.put("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+                headers.put("Content-Length", String.valueOf(contentLength));
+
+                return new WebResourceResponse(mimeType, "UTF-8", 206, "Partial Content", headers, boundedIs);
+            } else {
+                headers.put("Content-Length", String.valueOf(fileLength));
+                InputStream fis = new FileInputStream(videoFile);
+                return new WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, fis);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private static class BoundedInputStream extends InputStream {
+        private final InputStream in;
+        private long remaining;
+
+        BoundedInputStream(InputStream in, long limit) {
+            this.in = in;
+            this.remaining = limit;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (remaining <= 0) return -1;
+            int b = in.read();
+            if (b != -1) remaining--;
+            return b;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            if (remaining <= 0) return -1;
+            int toRead = (int) Math.min(len, remaining);
+            int bytesRead = in.read(b, off, toRead);
+            if (bytesRead != -1) remaining -= bytesRead;
+            return bytesRead;
+        }
+
+        @Override
+        public void close() throws IOException {
+            in.close();
+        }
+    }
+
+    private static String readFileToString(File file) throws Exception {
+        try (InputStream is = new FileInputStream(file);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line).append("\n");
+            }
+            return sb.toString();
+        }
+    }
+
+    private static void writeStringToFile(File file, String content) throws Exception {
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            fos.write(content.getBytes(StandardCharsets.UTF_8));
+            fos.flush();
+        }
     }
 
     private void setupSwipeRefresh(WebView webView) {

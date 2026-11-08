@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useMemo, Suspense } from 'react';
-import { Video, RotateCw } from 'lucide-react';
+import Link from 'next/link';
+import { Video, RotateCw, ArrowLeft } from 'lucide-react';
 import { localDB } from '@/lib/db-local';
 import { BaseStreamItem } from '@/lib/types';
 import { getSortScore, isRecentlyAdded, parseAddedTimestamp } from '@/lib/stream-utils';
@@ -108,14 +109,23 @@ function SeriesContent() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-6">
-        <div>
-          <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-            <Video className="w-6 h-6 text-violet-400" />
-            Séries
-          </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Temporadas organizadas por categoria com paginação de 50 séries.
-          </p>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/"
+            className="p-2 sm:p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white border border-white/10 transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold shrink-0"
+            title="Voltar ao início"
+          >
+            <ArrowLeft className="w-4 h-4 text-violet-400" />
+          </Link>
+          <div>
+            <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
+              <Video className="w-6 h-6 text-violet-400" />
+              Séries
+            </h1>
+            <p className="text-xs text-neutral-400 mt-1">
+              Temporadas organizadas por categoria com paginação de 50 séries.
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
