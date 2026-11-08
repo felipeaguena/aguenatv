@@ -491,13 +491,7 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                if (!isNetworkConnected()) {
-                    settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                    // Se o aplicativo for aberto já em modo offline, ativa o portal offline imediatamente
-                    webView.post(() -> loadOfflinePortal(webView));
-                } else {
-                    settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-                }
+                settings.setCacheMode(WebSettings.LOAD_DEFAULT);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -549,10 +543,7 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                super.onReceivedError(view, errorCode, description, failingUrl);
-                if (!isNetworkConnected()) {
-                    loadOfflinePortal(view);
-                }
+                // Não faz nada em APIs antigas para evitar sobrescrever a página ativa por falha em sub-recursos
             }
         });
     }
@@ -722,9 +713,11 @@ public class MainActivity extends BridgeActivity {
         if (webView == null) return;
         webView.post(() -> {
             try {
+                String current = webView.getUrl();
+                if (current != null && current.contains("offline_portal")) return;
                 webView.stopLoading();
                 String html = readAssetString("public/index.html");
-                webView.loadDataWithBaseURL(DEFAULT_SERVER_URL + "/", html, "text/html", "UTF-8", DEFAULT_SERVER_URL + "/");
+                webView.loadDataWithBaseURL(DEFAULT_SERVER_URL + "/offline_portal", html, "text/html", "UTF-8", DEFAULT_SERVER_URL + "/offline_portal");
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -823,11 +816,22 @@ public class MainActivity extends BridgeActivity {
     private boolean isNetworkConnected() {
         try {
             ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm != null) {
-                NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
-                return activeNetwork != null && activeNetwork.isConnectedOrConnecting();
+            if (cm == null) return true;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.net.Network activeNetwork = cm.getActiveNetwork();
+                if (activeNetwork != null) {
+                    android.net.NetworkCapabilities capabilities = cm.getNetworkCapabilities(activeNetwork);
+                    if (capabilities != null) {
+                        return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+                    }
+                }
+                return false;
+            } else {
+                NetworkInfo activeNetworkInfo = cm.getActiveNetworkInfo();
+                return activeNetworkInfo != null && activeNetworkInfo.isConnected();
             }
         } catch (Exception ignored) {}
-        return false;
+        return true;
     }
 }

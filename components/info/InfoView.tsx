@@ -623,21 +623,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
   // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
   const handleBack = useCallback(() => {
     const categoryRoute = `/${getRouteType(streamType)}`;
-    if (typeof window !== 'undefined') {
-      const ref = document.referrer || '';
-      // REGRA ANTI-LOOPING: Se a página anterior foi o watch, NUNCA volte para o watch!
-      // O fluxo correto é: watch -> info -> categoria -> raiz.
-      if (ref.includes('/watch')) {
-        router.replace(categoryRoute);
-        return;
-      }
-      // Se veio da categoria ou início (ou se há histórico válido que não seja o watch), volta desempilhando
-      if (window.history.length > 1 && (ref.includes(categoryRoute) || ref === '' || ref.endsWith('/'))) {
-        router.back();
-        return;
-      }
-    }
-    router.push(categoryRoute);
+    router.replace(categoryRoute);
   }, [router, streamType]);
 
   // Imagens priorizadas (Backdrop e Poster)

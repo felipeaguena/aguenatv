@@ -1032,15 +1032,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
   const handleBack = useCallback(() => {
     const infoUrl = getInfoUrl(streamType, id);
-    if (typeof window !== 'undefined') {
-      const ref = document.referrer || '';
-      // Se a página anterior do histórico foi a página de info deste item, volta no histórico para desempilhar
-      if (ref.includes(`/${id}/info`) || ref.includes('/info')) {
-        router.back();
-        return;
-      }
-    }
-    // Caso contrário (acesso direto, atalho ou início), substitui a URL atual para info sem acumular watch no histórico
     router.replace(infoUrl);
   }, [router, streamType, id]);
 

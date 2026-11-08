@@ -28,8 +28,6 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Modo standalone para deploy eficiente com Docker ou VM na Oracle Cloud / VPS
-  output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
