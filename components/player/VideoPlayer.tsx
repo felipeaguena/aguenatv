@@ -259,12 +259,23 @@ export default function VideoPlayer({
   });
 
   const lastHideControlsTimeRef = useRef(0);
+  const lastToggleTimeRef = useRef(0);
 
-  const handleTogglePlay = useCallback((e?: React.MouseEvent) => {
+  const handleTogglePlay = useCallback((e?: React.MouseEvent | Event) => {
     if (e) {
-      e.stopPropagation();
-      e.preventDefault();
+      try {
+        e.stopPropagation();
+        (e as any).preventDefault?.();
+        (e as any).nativeEvent?.stopImmediatePropagation?.();
+      } catch (err) {}
     }
+    const now = Date.now();
+    // Bloqueia rigorosamente múltiplos acionamentos no mesmo clique (debounce de 320ms)
+    if (now - lastToggleTimeRef.current < 320) {
+      return;
+    }
+    lastToggleTimeRef.current = now;
+
     const art = artInstanceRef.current;
     if (!art || art.isDestroy) return;
 
@@ -465,20 +476,12 @@ export default function VideoPlayer({
       } else if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.keyCode === 32) {
         e.preventDefault();
         e.stopPropagation();
-        if (art.playing) {
-          art.pause();
-        } else {
-          art.play().catch(() => {});
-        }
+        handleTogglePlay(e);
       } else if (e.key === 'k' || e.key === 'K') {
         // Padrão universal do YouTube
         e.preventDefault();
         e.stopPropagation();
-        if (art.playing) {
-          art.pause();
-        } else {
-          art.play().catch(() => {});
-        }
+        handleTogglePlay(e);
       } else if (e.key === 's' || e.key === 'S') {
         // Atalho 'S' para Pular Abertura ou Pular Encerramento
         if (showSkipIntroRef.current) {
@@ -1131,6 +1134,11 @@ export default function VideoPlayer({
         return;
       }
 
+      // Intercepta e interrompe a propagação imediata na fase de captura
+      // para evitar que listeners internos do Artplayer (no $video) ou do React dupliquem a ação
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
       if (isMobile) {
         // --- DINÂMICA MOBILE / TOUCH / APK ---
         // Se acabamos de ocultar os controles há menos de 350ms (ex: por touch ou click), ignora para evitar reabertura
@@ -1149,16 +1157,8 @@ export default function VideoPlayer({
         resetInactivityTimer();
       } else {
         // --- DINÂMICA DESKTOP (MOUSE) ---
-        // No desktop onde temos o mouse: com um clique faz pause/play no perímetro todo
-        try {
-          if (art.playing) {
-            art.pause();
-          } else {
-            art.play().catch(() => {});
-          }
-        } catch (err) {}
-        showControls();
-        resetInactivityTimer();
+        // No desktop onde temos o mouse: com um clique faz pause/play no perímetro todo de forma segura e sem duplicidade
+        handleTogglePlay(e);
       }
     };
 
@@ -1210,7 +1210,7 @@ export default function VideoPlayer({
 
     // Registra listeners de interação no container e janela
     if (playerEl) {
-      playerEl.addEventListener('click', handlePlayerClick);
+      playerEl.addEventListener('click', handlePlayerClick, true);
       playerEl.addEventListener('mousemove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('mousedown', handleMouseDown, { passive: true });
       playerEl.addEventListener('touchend', handleTouchEnd, { passive: true });
@@ -1537,7 +1537,7 @@ export default function VideoPlayer({
         inactivityTimer = null;
       }
       if (playerEl) {
-        playerEl.removeEventListener('click', handlePlayerClick);
+        playerEl.removeEventListener('click', handlePlayerClick, true);
         playerEl.removeEventListener('mousemove', handleUserInteraction);
         playerEl.removeEventListener('mousedown', handleMouseDown);
         playerEl.removeEventListener('touchend', handleTouchEnd);
