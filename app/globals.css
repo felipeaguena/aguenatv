@@ -228,10 +228,16 @@ body:has(.art-fullscreen-web) nav {
   transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease !important;
 }
 
-/* Ocultação do cursor do mouse após 3 segundos de inatividade */
+/* Ocultação do cursor do mouse após inatividade */
 .art-video-player.art-hide-cursor,
 .art-video-player.art-hide-cursor * {
   cursor: none !important;
+}
+
+/* Oculta o ícone nativo central de play do Artplayer (.art-state) para que os controles avançados (Play/Pause/Seeks) assumam o controle */
+.artplayer-app .art-video-player .art-state,
+.art-video-player .art-state {
+  display: none !important;
 }
 
 /* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */

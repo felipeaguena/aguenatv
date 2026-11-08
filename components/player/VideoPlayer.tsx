@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { SkipForward, FastForward, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Play, Pause, SkipForward, FastForward, AlertTriangle, RotateCcw, RotateCw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { StatusBar } from '@capacitor/status-bar';
@@ -157,6 +158,13 @@ export default function VideoPlayer({
   const hasRestoredRef = useRef(false);
   const isFullscreenRef = useRef(false);
 
+  // Estados para exibição e dinâmica dos controles no mobile/touch e desktop (estilo Netflix / YouTube Mobile)
+  const [playerMountNode, setPlayerMountNode] = useState<HTMLDivElement | null>(null);
+  const [isControlsVisible, setIsControlsVisible] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const isControlsVisibleRef = useRef(true);
+  const isPlayingRef = useRef(true);
+
   // Estados e controle de Pular Abertura (Intro) e Encerramento (Outro)
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
@@ -202,6 +210,8 @@ export default function VideoPlayer({
   const prevStreamTypeRef = useRef(streamType);
 
   useEffect(() => {
+    isControlsVisibleRef.current = isControlsVisible;
+    isPlayingRef.current = isPlaying;
     skipTimesRef.current = skipTimes;
     showSkipIntroRef.current = showSkipIntro;
     showSkipOutroRef.current = showSkipOutro;
@@ -238,7 +248,69 @@ export default function VideoPlayer({
     }
   });
 
-  const handleSkipIntro = useCallback(() => {
+  const handleTogglePlay = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    const art = artInstanceRef.current;
+    if (!art || art.isDestroy) return;
+
+    if (art.playing) {
+      art.pause();
+    } else {
+      art.play().catch(() => {});
+    }
+  }, []);
+
+  const handleRewind10 = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    const art = artInstanceRef.current;
+    if (!art || art.isDestroy) return;
+    art.backward = 10;
+    art.notice.show = '⏪ -10s';
+  }, []);
+
+  const handleForward10 = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    const art = artInstanceRef.current;
+    if (!art || art.isDestroy) return;
+    art.forward = 10;
+    art.notice.show = '⏩ +10s';
+  }, []);
+
+  const handleHideControls = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    const art = artInstanceRef.current;
+    if (!art || art.isDestroy) return;
+    if (art.setting?.show || art.contextmenu?.show) return;
+
+    try {
+      art.controls.show = false;
+    } catch (err) {}
+    const playerEl = art.template?.$player;
+    if (playerEl) {
+      playerEl.classList.remove('art-control-show');
+      playerEl.classList.add('art-hide-cursor');
+    }
+    setIsControlsVisible(false);
+    isControlsVisibleRef.current = false;
+  }, []);
+
+  const handleSkipIntro = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     const art = artInstanceRef.current;
     const intro = skipTimesRef.current?.intro;
     if (art && intro) {
@@ -249,7 +321,11 @@ export default function VideoPlayer({
     }
   }, []);
 
-  const handleSkipOutro = useCallback(() => {
+  const handleSkipOutro = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     const art = artInstanceRef.current;
     if (hasNextEpisodeRef.current && onNextEpisodeRef.current) {
       setShowSkipOutro(false);
@@ -525,9 +601,12 @@ export default function VideoPlayer({
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
     const isMobile = isMobileDevice();
 
-    // Desativa o toggle nativo automático do Artplayer para gerenciarmos o duplo clique com consistência total
+    // Configura flags nativas do Artplayer para sincronia e conforto no mobile/touch e desktop
     try {
       (Artplayer as any).DBCLICK_FULLSCREEN = false;
+      (Artplayer as any).MOBILE_CLICK_PLAY = false;
+      (Artplayer as any).MOBILE_DBCLICK_PLAY = false;
+      (Artplayer as any).CONTROL_HIDE_TIME = isMobile ? 4500 : 3500;
     } catch (e) {}
 
     // Criação da instância Artplayer.js
@@ -883,7 +962,11 @@ export default function VideoPlayer({
     const playerEl = art.template?.$player;
     const videoEl = art.template?.$video;
 
-    // Controle de inatividade do mouse e comandos (ocultação após 3 segundos)
+    if (playerEl) {
+      setPlayerMountNode(playerEl as HTMLDivElement);
+    }
+
+    // Controle de inatividade do mouse e comandos (4.5s no mobile/touch, 3.5s no desktop)
     let inactivityTimer: NodeJS.Timeout | null = null;
     let lastDblClickTimestamp = 0;
     const wasPlayingBeforeClickRef = { current: false };
@@ -898,6 +981,8 @@ export default function VideoPlayer({
         playerEl.classList.add('art-control-show');
         playerEl.classList.remove('art-hide-cursor');
       }
+      setIsControlsVisible(true);
+      isControlsVisibleRef.current = true;
     };
 
     const hideControls = () => {
@@ -915,18 +1000,29 @@ export default function VideoPlayer({
         playerEl.classList.remove('art-control-show');
         playerEl.classList.add('art-hide-cursor');
       }
+      setIsControlsVisible(false);
+      isControlsVisibleRef.current = false;
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+      }
     };
 
-    const resetInactivityTimer = () => {
+    const AUTO_HIDE_DELAY = isMobile ? 4500 : 3500;
+
+    const resetInactivityTimer = (delay = AUTO_HIDE_DELAY) => {
       showControls();
       if (inactivityTimer) {
         clearTimeout(inactivityTimer);
         inactivityTimer = null;
       }
-      // Oculta os comandos após 3 segundos de inatividade
+      // Se o vídeo estiver pausado, NUNCA auto-oculta os controles (padrão Netflix / YouTube)
+      if (!art.playing) {
+        return;
+      }
       inactivityTimer = setTimeout(() => {
         hideControls();
-      }, 3000);
+      }, delay);
     };
 
     const handleUserInteraction = () => {
@@ -938,6 +1034,9 @@ export default function VideoPlayer({
     };
 
     const handleMouseLeave = () => {
+      // Em dispositivos mobile e touch, NUNCA executa mouseleave (evita esconder controles após toque)
+      if (isMobile) return;
+
       const isFs = Boolean(
         document.fullscreenElement ||
           (document as any).webkitFullscreenElement ||
@@ -947,11 +1046,11 @@ export default function VideoPlayer({
           art.fullscreenWeb ||
           isFullscreenRef.current
       );
-      if (!isFs) {
+      if (!isFs && art.playing) {
         if (inactivityTimer) clearTimeout(inactivityTimer);
         inactivityTimer = setTimeout(() => {
           hideControls();
-        }, 1000);
+        }, 1500);
       }
     };
 
@@ -961,7 +1060,7 @@ export default function VideoPlayer({
       }
     };
 
-    // Duplo clique / duplo toque para alternar entre tela cheia e tamanho original
+    // Duplo clique / duplo toque para avançar/retroceder ou alternar tela cheia (estilo YouTube)
     const handleDoubleAction = (e?: Event) => {
       const now = Date.now();
       if (now - lastDblClickTimestamp < 350) {
@@ -973,10 +1072,28 @@ export default function VideoPlayer({
         const target = (e.target || (e as any).srcElement) as HTMLElement | null;
         if (
           target?.closest?.(
-            '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, .art-state, button, input'
+            '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, button, input'
           )
         ) {
           return;
+        }
+
+        const clientX = (e as MouseEvent).clientX ?? (e as TouchEvent)?.changedTouches?.[0]?.clientX;
+        const rect = playerEl?.getBoundingClientRect();
+        if (rect && clientX !== undefined) {
+          const x = clientX - rect.left;
+          const ratio = x / rect.width;
+          if (ratio < 0.35) {
+            art.backward = 10;
+            art.notice.show = '⏪ -10s';
+            resetInactivityTimer();
+            return;
+          } else if (ratio > 0.65) {
+            art.forward = 10;
+            art.notice.show = '⏩ +10s';
+            resetInactivityTimer();
+            return;
+          }
         }
       }
 
@@ -1007,7 +1124,7 @@ export default function VideoPlayer({
       const target = (e.target || (e as any).srcElement) as HTMLElement | null;
       if (
         target?.closest?.(
-          '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, .art-state, button, input'
+          '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, button, input'
         )
       ) {
         return;
@@ -1019,9 +1136,18 @@ export default function VideoPlayer({
         if (singleClickCount === 1) {
           clickTimeout = setTimeout(() => {
             singleClickCount = 0;
-            try {
-              art.toggle();
-            } catch (err) {}
+            if (isMobile) {
+              if (isControlsVisibleRef.current) {
+                hideControls();
+              } else {
+                showControls();
+                resetInactivityTimer();
+              }
+            } else {
+              try {
+                art.toggle();
+              } catch (err) {}
+            }
           }, 260);
         } else if (singleClickCount >= 2) {
           if (clickTimeout) {
@@ -1038,15 +1164,41 @@ export default function VideoPlayer({
     let lastTouchX = 0;
     let lastTouchY = 0;
     const handleTouchEnd = (e: TouchEvent) => {
-      resetInactivityTimer();
-      const now = Date.now();
       const touch = e.changedTouches[0];
       if (!touch) return;
+
+      const target = (e.target || (e as any).srcElement) as HTMLElement | null;
+      if (
+        target?.closest?.(
+          '.art-controls, .art-progress, .art-settings, .art-layers-setting, .art-contextmenu, button, input'
+        )
+      ) {
+        return;
+      }
+
+      const now = Date.now();
       const dx = Math.abs(touch.clientX - lastTouchX);
       const dy = Math.abs(touch.clientY - lastTouchY);
-      if (now - lastTouchTime < 350 && dx < 30 && dy < 30) {
-        handleDoubleAction(e);
+
+      if (now - lastTouchTime < 320 && dx < 40 && dy < 40) {
         lastTouchTime = 0;
+        const rect = playerEl?.getBoundingClientRect();
+        if (rect) {
+          const x = touch.clientX - rect.left;
+          const ratio = x / rect.width;
+          if (ratio < 0.35) {
+            art.backward = 10;
+            art.notice.show = '⏪ -10s';
+            resetInactivityTimer();
+            return;
+          } else if (ratio > 0.65) {
+            art.forward = 10;
+            art.notice.show = '⏩ +10s';
+            resetInactivityTimer();
+            return;
+          }
+        }
+        toggleFullscreen(art);
       } else {
         lastTouchTime = now;
         lastTouchX = touch.clientX;
@@ -1079,29 +1231,45 @@ export default function VideoPlayer({
       handleDoubleAction();
     });
 
-    // Inicia temporizador de 3 segundos
+    // Inicia temporizador de conforto
     resetInactivityTimer();
 
     art.on('video:play', () => {
+      setIsPlaying(true);
+      isPlayingRef.current = true;
       resetInactivityTimer();
     });
 
     art.on('video:pause', () => {
+      setIsPlaying(false);
+      isPlayingRef.current = false;
       showControls();
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+      }
     });
 
-    // No fullscreen, quando os botões de comando estão ocultos, oculta também a barra de progresso
+    // Sincroniza visibilidade de controles e barra de progresso
     art.on('control', (state) => {
-      if (state) {
+      const isVisible = Boolean(state);
+      setIsControlsVisible(isVisible);
+      isControlsVisibleRef.current = isVisible;
+      if (isVisible) {
         resetInactivityTimer();
+      } else {
+        if (inactivityTimer) {
+          clearTimeout(inactivityTimer);
+          inactivityTimer = null;
+        }
       }
       const bottom = art.template?.$bottom;
       if (bottom) {
         bottom.style.pointerEvents = 'none';
-        if (isFullscreenRef.current && !state) {
+        if (isFullscreenRef.current && !isVisible) {
           bottom.style.opacity = '0';
           bottom.style.visibility = 'hidden';
-        } else if (state) {
+        } else if (isVisible) {
           bottom.style.opacity = '';
           bottom.style.visibility = '';
         }
@@ -1347,6 +1515,7 @@ export default function VideoPlayer({
 
       isFullscreenRef.current = false;
       setFullscreenCutoutMode(false);
+      setPlayerMountNode(null);
       if (artInstanceRef.current) {
         try {
           artInstanceRef.current.destroy(false);
@@ -1361,79 +1530,145 @@ export default function VideoPlayer({
       {/* Container onde o Artplayer.js é injetado */}
       <div ref={artContainerRef} className="artplayer-app w-full h-full" />
 
-      {/* Botão Flutuante de Pular Abertura (Intro) */}
-      {showSkipIntro && (
-        <div className="absolute left-4 sm:left-6 bottom-16 sm:bottom-20 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <button
-            type="button"
-            onClick={handleSkipIntro}
-            tabIndex={0}
-            title="Pular abertura agora (Atalho: S)"
-            className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+      {/* Controles e botões dinâmicos renderizados diretamente dentro de $player via Portal */}
+      {playerMountNode && createPortal(
+        <>
+          {/* Overlay Central de Ação (Estilo Netflix / YouTube Mobile) */}
+          <div
+            className={`absolute inset-0 z-50 flex items-center justify-center transition-all duration-300 ${
+              isControlsVisible
+                ? 'opacity-100 pointer-events-auto bg-black/25 backdrop-blur-[1px]'
+                : 'opacity-0 pointer-events-none bg-transparent'
+            }`}
+            onClick={(e) => {
+              // Tocar no fundo vazio fora dos botões oculta os controles imediatamente (padrão Netflix / YouTube)
+              if (e.target === e.currentTarget) {
+                handleHideControls(e);
+              }
+            }}
           >
-            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
-              <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
-            </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
-                Pular Abertura
-              </span>
-              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
-                S
-              </span>
-            </div>
-          </button>
-        </div>
-      )}
+            <div
+              className="flex items-center justify-center gap-6 sm:gap-10 pointer-events-auto select-none"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Botão Retroceder 10s */}
+              <button
+                type="button"
+                onClick={handleRewind10}
+                title="Voltar 10 segundos"
+                className="group/rewind relative flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-neutral-900/80 hover:bg-neutral-800 active:bg-violet-600/90 active:scale-90 text-white/90 hover:text-white border border-white/15 backdrop-blur-md shadow-2xl transition-all duration-150 cursor-pointer"
+              >
+                <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover/rewind:-rotate-12" />
+                <span className="text-[10px] sm:text-[11px] font-black font-mono leading-none -mt-0.5 tracking-tighter">
+                  10
+                </span>
+              </button>
 
-      {/* Botão Flutuante de Pular Encerramento (Outro) */}
-      {showSkipOutro && nextEpisodeCountdown === null && (
-        <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <button
-            type="button"
-            onClick={handleSkipOutro}
-            tabIndex={0}
-            title={hasNextEpisode ? 'Pular encerramento e ir para o próximo episódio (Atalho: S)' : 'Pular encerramento'}
-            className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
-          >
-            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
-              <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
-            </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
-                {hasNextEpisode ? 'Pular Encerramento' : 'Pular Créditos'}
-              </span>
-              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
-                S
-              </span>
-            </div>
-          </button>
-        </div>
-      )}
+              {/* Botão Central Play / Pause */}
+              <button
+                type="button"
+                onClick={handleTogglePlay}
+                title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
+                className="group/play relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-violet-600/90 hover:bg-violet-500 active:bg-violet-700 active:scale-90 text-white border-2 border-violet-400/40 shadow-2xl shadow-violet-950/80 transition-all duration-200 cursor-pointer hover:scale-105"
+              >
+                {isPlaying ? (
+                  <Pause className="w-7 h-7 sm:w-9 sm:h-9 fill-current" />
+                ) : (
+                  <Play className="w-7 h-7 sm:w-9 sm:h-9 fill-current ml-1" />
+                )}
+              </button>
 
-      {/* Botão Flutuante de Próximo Episódio com Contagem Regressiva de 30s */}
-      {nextEpisodeCountdown !== null && hasNextEpisode && (
-        <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-40 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <button
-            type="button"
-            onClick={handleTriggerNextEpisode}
-            tabIndex={0}
-            title="Pular para o próximo episódio agora"
-            className="group/btn flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
-          >
-            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/btn:bg-white text-white group-hover/btn:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
-              <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+              {/* Botão Avançar 10s */}
+              <button
+                type="button"
+                onClick={handleForward10}
+                title="Avançar 10 segundos"
+                className="group/forward relative flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-neutral-900/80 hover:bg-neutral-800 active:bg-violet-600/90 active:scale-90 text-white/90 hover:text-white border border-white/15 backdrop-blur-md shadow-2xl transition-all duration-150 cursor-pointer"
+              >
+                <RotateCw className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover/forward:rotate-12" />
+                <span className="text-[10px] sm:text-[11px] font-black font-mono leading-none -mt-0.5 tracking-tighter">
+                  10
+                </span>
+              </button>
             </div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
-                {nextEpisodeLabel || 'Próximo Episódio'}
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-violet-500/25 group-hover/btn:bg-white/25 border border-violet-400/30 group-hover/btn:border-white/30 text-violet-200 group-hover/btn:text-white font-mono font-extrabold text-[11px] sm:text-xs min-w-[28px] text-center">
-                {nextEpisodeCountdown}s
-              </span>
+          </div>
+
+          {/* Botão Flutuante de Pular Abertura (Intro) */}
+          {showSkipIntro && (
+            <div className="absolute left-4 sm:left-6 bottom-16 sm:bottom-20 z-[55] animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-auto">
+              <button
+                type="button"
+                onClick={handleSkipIntro}
+                tabIndex={0}
+                title="Pular abertura agora (Atalho: S)"
+                className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+              >
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+                  <FastForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+                </div>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                    Pular Abertura
+                  </span>
+                  <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
+                    S
+                  </span>
+                </div>
+              </button>
             </div>
-          </button>
-        </div>
+          )}
+
+          {/* Botão Flutuante de Pular Encerramento (Outro) */}
+          {showSkipOutro && nextEpisodeCountdown === null && (
+            <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-[55] animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-auto">
+              <button
+                type="button"
+                onClick={handleSkipOutro}
+                tabIndex={0}
+                title={hasNextEpisode ? 'Pular encerramento e ir para o próximo episódio (Atalho: S)' : 'Pular encerramento'}
+                className="group/skip flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+              >
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/skip:bg-white text-white group-hover/skip:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+                  <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+                </div>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                    {hasNextEpisode ? 'Pular Encerramento' : 'Pular Créditos'}
+                  </span>
+                  <span className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-neutral-300 group-hover/skip:text-white">
+                    S
+                  </span>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* Botão Flutuante de Próximo Episódio com Contagem Regressiva de 30s */}
+          {nextEpisodeCountdown !== null && hasNextEpisode && (
+            <div className="absolute right-4 sm:right-6 bottom-16 sm:bottom-20 z-[55] animate-in fade-in slide-in-from-bottom-4 duration-300 pointer-events-auto">
+              <button
+                type="button"
+                onClick={handleTriggerNextEpisode}
+                tabIndex={0}
+                title="Pular para o próximo episódio agora"
+                className="group/btn flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl bg-neutral-900/95 hover:bg-violet-600 border border-violet-500/40 hover:border-violet-400 backdrop-blur-md text-white shadow-2xl shadow-violet-950/60 transition-all duration-200 cursor-pointer active:scale-95 hover:scale-105"
+              >
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-violet-600 group-hover/btn:bg-white text-white group-hover/btn:text-violet-700 flex items-center justify-center transition-colors shadow-sm shrink-0">
+                  <SkipForward className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-current" />
+                </div>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-bold text-xs sm:text-sm tracking-wide text-white">
+                    {nextEpisodeLabel || 'Próximo Episódio'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-violet-500/25 group-hover/btn:bg-white/25 border border-violet-400/30 group-hover/btn:border-white/30 text-violet-200 group-hover/btn:text-white font-mono font-extrabold text-[11px] sm:text-xs min-w-[28px] text-center">
+                    {nextEpisodeCountdown}s
+                  </span>
+                </div>
+              </button>
+            </div>
+          )}
+        </>,
+        playerMountNode
       )}
 
       {/* Painel de Erro de Reprodução */}
