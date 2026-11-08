@@ -110,12 +110,17 @@ export async function GET(req: NextRequest) {
       let contentLength = 0;
 
       // 1. Tenta HEAD request leve
+      let originUnavailable = false;
       try {
         const headRes = await fetch(streamUrl, {
           method: 'HEAD',
           headers,
-          signal: AbortSignal.timeout(3500),
+          signal: AbortSignal.timeout(2000),
         });
+
+        if (headRes.status >= 520 && headRes.status <= 526) {
+          originUnavailable = true;
+        }
 
         if (headRes.ok) {
           const cl = headRes.headers.get('content-length');
@@ -126,7 +131,7 @@ export async function GET(req: NextRequest) {
       }
 
       // 2. Se HEAD não retornou Content-Length, tenta requisição parcial GET Range: bytes=0-0
-      if (!contentLength || isNaN(contentLength)) {
+      if (!originUnavailable && (!contentLength || isNaN(contentLength))) {
         try {
           const rangeRes = await fetch(streamUrl, {
             method: 'GET',

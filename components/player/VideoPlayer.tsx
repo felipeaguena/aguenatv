@@ -31,7 +31,7 @@ interface VideoPlayerProps {
   skipTimes?: SkipTimesData | null;
   onEnded?: () => void;
   onVideoInfo?: (info: PlayerVideoInfo) => void;
-  onProgress?: (progress: { currentTime: number; duration: number }) => void;
+  onProgress?: (progress: { currentTime: number; duration: number; immediate?: boolean }) => void;
   hasPrevEpisode?: boolean;
   onPrevEpisode?: () => void;
   prevEpisodeLabel?: string;
@@ -260,6 +260,8 @@ export default function VideoPlayer({
   const nextEpisodeLabelRef = useRef(nextEpisodeLabel);
   const prevStreamUrlRef = useRef(streamUrl);
   const prevStreamTypeRef = useRef(streamType);
+  const lastReportedTimeRef = useRef(0);
+  const lastDurationRef = useRef(0);
 
   useEffect(() => {
     isControlsVisibleRef.current = isControlsVisible;
@@ -972,7 +974,18 @@ export default function VideoPlayer({
               if (errData.fatal) {
                 switch (errData.type) {
                   case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.warn('[HLS] Tentando recuperar erro de rede...');
+                    console.warn('[HLS] Tentando recuperar erro de rede...', errData);
+                    const httpCode = (errData.response as any)?.code || (errData.response as any)?.status;
+                    if (httpCode >= 520 && httpCode <= 526) {
+                      setError(`O servidor do provedor IPTV está temporariamente fora do ar (Erro Cloudflare ${httpCode} - Servidor de origem inacessível). Aguarde a recuperação pelo provedor.`);
+                      hls.destroy();
+                      break;
+                    }
+                    if (httpCode === 401 || httpCode === 403) {
+                      setError(`Conexão recusada pelo provedor IPTV (HTTP ${httpCode}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`);
+                      hls.destroy();
+                      break;
+                    }
                     hls.startLoad();
                     break;
                   case Hls.ErrorTypes.MEDIA_ERROR:
@@ -1411,7 +1424,9 @@ export default function VideoPlayer({
             localStorage.setItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`, currentTime.toFixed(1));
           } catch (e) {}
         }
-        onProgressRef.current?.({ currentTime, duration });
+        lastReportedTimeRef.current = currentTime;
+        lastDurationRef.current = duration;
+        onProgressRef.current?.({ currentTime, duration, immediate: false });
         if (currentTime > 60 && !hasMarkedRef.current) {
           hasMarkedRef.current = true;
           markWatchedRef.current?.(streamIdRef.current, streamTypeRef.current, titleRef.current, false);
@@ -1495,8 +1510,26 @@ export default function VideoPlayer({
       }
     });
 
+    // Salvamento imediato de progresso ao pausar
+    art.on('video:pause', () => {
+      if (streamTypeRef.current !== 'live' && lastReportedTimeRef.current > 5 && lastDurationRef.current > 0) {
+        onProgressRef.current?.({
+          currentTime: lastReportedTimeRef.current,
+          duration: lastDurationRef.current,
+          immediate: true,
+        });
+      }
+    });
+
     // Término do vídeo
     art.on('video:ended', () => {
+      if (streamTypeRef.current !== 'live' && lastDurationRef.current > 0) {
+        onProgressRef.current?.({
+          currentTime: lastDurationRef.current,
+          duration: lastDurationRef.current,
+          immediate: true,
+        });
+      }
       hasMarkedRef.current = true;
       try {
         localStorage.removeItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`);
@@ -1561,7 +1594,24 @@ export default function VideoPlayer({
         return;
       }
 
-      setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
+      // Diagnóstico inteligente do erro de rede do servidor IPTV
+      fetch(currentUrl, { method: 'HEAD', signal: AbortSignal.timeout(2500) })
+        .then((res) => {
+          if (res.status >= 520 && res.status <= 526) {
+            setError(
+              `O servidor do seu provedor IPTV está temporariamente fora do ar (Erro Cloudflare ${res.status} - Servidor de origem inacessível). Aguarde a normalização pelo seu provedor.`
+            );
+          } else if (res.status === 401 || res.status === 403) {
+            setError(
+              `Conexão recusada pelo provedor IPTV (HTTP ${res.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente com o mesmo usuário (limite de 1 tela atingido).`
+            );
+          } else {
+            setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
+          }
+        })
+        .catch(() => {
+          setError('Falha na reprodução do stream de vídeo. O servidor do provedor IPTV não respondeu ao fluxo.');
+        });
     });
 
     art.on('fullscreenWeb', (state) => {
@@ -1606,7 +1656,22 @@ export default function VideoPlayer({
       }
     });
 
+    const flushProgress = () => {
+      if (streamTypeRef.current !== 'live' && lastReportedTimeRef.current > 5 && lastDurationRef.current > 0) {
+        onProgressRef.current?.({
+          currentTime: lastReportedTimeRef.current,
+          duration: lastDurationRef.current,
+          immediate: true,
+        });
+      }
+    };
+    window.addEventListener('beforeunload', flushProgress);
+    window.addEventListener('pagehide', flushProgress);
+
     return () => {
+      flushProgress();
+      window.removeEventListener('beforeunload', flushProgress);
+      window.removeEventListener('pagehide', flushProgress);
       if (inactivityTimer) {
         clearTimeout(inactivityTimer);
         inactivityTimer = null;

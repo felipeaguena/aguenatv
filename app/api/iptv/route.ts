@@ -110,8 +110,8 @@ export async function GET(req: NextRequest) {
             Accept: '*/*',
             'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
           },
-          cache: 'no-store', // Evita o limite de 2MB do Data Cache da Vercel
-          signal: AbortSignal.timeout(35000), // Timeout de 35 segundos
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8000), // Timeout otimizado de 8 segundos por tentativa
         });
 
         if (upstreamRes.ok) {
@@ -119,8 +119,31 @@ export async function GET(req: NextRequest) {
           break;
         } else {
           lastError = new Error(`HTTP ${upstreamRes.status} em ${candidate} (${upstreamRes.statusText})`);
+
+          // Se a Cloudflare retornar erro de servidor de origem indisponível (520..526)
+          if (upstreamRes.status >= 520 && upstreamRes.status <= 526) {
+            return NextResponse.json(
+              {
+                error: `O servidor do seu provedor IPTV está temporariamente inacessível (Erro Cloudflare ${upstreamRes.status} - Servidor de origem desligado ou em manutenção). Aguarde o restabelecimento pelo provedor.`,
+                status: upstreamRes.status,
+              },
+              { status: 502 }
+            );
+          }
+
+          // Se for erro de conexão recusada / limite de conexões simultâneas
+          if (upstreamRes.status === 401 || (upstreamRes.status === 403 && !upstreamRes.headers.get('cf-ray'))) {
+            return NextResponse.json(
+              {
+                error: `Conexão recusada pelo provedor IPTV (HTTP ${upstreamRes.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`,
+                status: upstreamRes.status,
+              },
+              { status: 403 }
+            );
+          }
+
           if (upstreamRes.status !== 403) {
-            break; // Se não for 403, pula para o próximo host candidato
+            break; // Pula para o próximo host candidato
           }
         }
       } catch (err: any) {

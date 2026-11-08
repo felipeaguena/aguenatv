@@ -145,7 +145,7 @@ export function useContinueWatching() {
     };
   }, [fetchItems]);
 
-  const saveProgress = useCallback(async (payload: SaveProgressPayload) => {
+  const saveProgress = useCallback(async (payload: SaveProgressPayload, immediate = false) => {
     const curTime = Math.floor(payload.currentTime);
     const dur = Math.floor(payload.duration);
     if (dur <= 0 || curTime < 5) return;
@@ -191,11 +191,11 @@ export function useContinueWatching() {
     setItems(next);
     broadcastContinueUpdated(next, globalContinueUserId);
 
-    // Sincronização inteligente com throttling para evitar sobrecarga e condições de corrida
+    // Sincronização inteligente com throttling ajustado para 15 segundos
     const itemKey = `${payload.streamType}_${effectiveStreamId}`;
     const throttleInfo = syncThrottles.get(itemKey) || { lastSent: 0, timeoutId: null };
     const now = Date.now();
-    const MIN_INTERVAL_MS = 5000;
+    const MIN_INTERVAL_MS = 15000;
 
     const sendServerSync = async () => {
       try {
@@ -215,7 +215,8 @@ export function useContinueWatching() {
       throttleInfo.timeoutId = null;
     }
 
-    if (now - throttleInfo.lastSent >= MIN_INTERVAL_MS) {
+    // Se for salvamento imediato (evento de pause, ended, unmount ou saída de página)
+    if (immediate || now - throttleInfo.lastSent >= MIN_INTERVAL_MS) {
       throttleInfo.lastSent = now;
       syncThrottles.set(itemKey, throttleInfo);
       sendServerSync();

@@ -880,7 +880,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }, []);
 
   const handlePlayerProgress = useCallback(
-    ({ currentTime, duration }: { currentTime: number; duration: number }) => {
+    ({ currentTime, duration, immediate }: { currentTime: number; duration: number; immediate?: boolean }) => {
       if (!item || streamType === 'live') return;
 
       if (streamType === 'movie') {
@@ -893,7 +893,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
           categoryName: item.category_name,
           currentTime,
           duration,
-        });
+        }, immediate);
       } else if (streamType === 'series' && activeEpisode) {
         saveProgress({
           streamId: item.stream_id,
@@ -914,7 +914,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
           episodeTitle: currentEpMeta?.name || activeEpisode.title,
           currentTime,
           duration,
-        });
+        }, immediate);
       }
 
       // Marca o capítulo como assistido assim que faltar 1 minuto (<= 60s) para terminar

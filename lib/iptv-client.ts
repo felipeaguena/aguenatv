@@ -48,7 +48,7 @@ export async function fetchIPTVApi(
   account: { server_url: string; username: string; password: string },
   options: FetchIPTVOptions = {}
 ): Promise<any> {
-  const { action, params = {}, timeoutMs = 30000 } = options;
+  const { action, params = {}, timeoutMs = 12000 } = options;
 
   const buildQuery = (baseParams: Record<string, string>) => {
     const q = new URLSearchParams(baseParams);
@@ -81,6 +81,20 @@ export async function fetchIPTVApi(
         },
       });
       clearTimeout(timer);
+
+      // Detecção rápida de servidor de origem IPTV fora do ar (Cloudflare 520..526)
+      if (res.status >= 520 && res.status <= 526) {
+        throw new Error(
+          `O servidor do provedor IPTV está temporariamente inacessível (Erro Cloudflare ${res.status} - Servidor de origem fora do ar). Aguarde o provedor restabelecer o serviço.`
+        );
+      }
+
+      // Detecção de limite de conexões simultâneas ou credencial
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(
+          `Conexão recusada pelo provedor IPTV (HTTP ${res.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`
+        );
+      }
 
       if (res.ok) {
         const text = await res.text();
