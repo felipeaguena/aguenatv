@@ -61,7 +61,7 @@ export function OfflineBanner() {
     <>
       <aside
         aria-label="Aviso de Modo Offline"
-        className="bg-amber-500/15 border-b border-amber-500/30 text-amber-200 px-4 py-2.5 transition-all text-xs z-50 sticky top-0 backdrop-blur-md"
+        className="bg-amber-500/15 border-b border-amber-500/30 text-amber-200 px-4 py-2.5 transition-all text-xs z-[9998] sticky top-0 backdrop-blur-md"
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">

@@ -21,7 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </Suspense>
         <PullToRefresh />
         <OfflineBanner />
-        <Suspense fallback={<header className="h-16 w-full glass-nav" />}>
+        <Suspense fallback={<header className="h-16 w-full glass-nav sticky top-0 z-[9999]" />}>
           <Navbar />
         </Suspense>
         <Suspense

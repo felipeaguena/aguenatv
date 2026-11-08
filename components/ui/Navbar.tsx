@@ -252,7 +252,7 @@ export default function Navbar() {
   }
 
   return (
-    <header className={`sticky top-0 w-full glass-nav ${isMobileMenuOpen ? 'z-[100]' : 'z-40'}`}>
+    <header className="sticky top-0 w-full glass-nav z-[9999]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Lado Esquerdo: Hamburger Menu Mobile + Logo AGUENATV */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -329,7 +329,7 @@ export default function Navbar() {
 
           {/* Dropdown com as 5 referências mais próximas e botão Pesquisar Todos */}
           {isSearchOpen && searchQuery.trim().length > 0 && (
-            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto top-16 sm:top-full mt-2 sm:w-full bg-[#13141b]/98 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in duration-150 backdrop-blur-2xl max-w-[calc(100vw-16px)] sm:max-w-none">
+            <div className="fixed sm:absolute inset-x-2 sm:inset-x-auto top-16 sm:top-full mt-2 sm:w-full bg-[#13141b]/98 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[10000] animate-in fade-in duration-150 backdrop-blur-2xl max-w-[calc(100vw-16px)] sm:max-w-none">
               <div className="px-3.5 py-2 text-[10px] font-bold text-neutral-400 border-b border-white/5 uppercase tracking-wider flex justify-between items-center">
                 <span>5 Referências Mais Próximas</span>
                 {isSearching ? (
@@ -440,7 +440,7 @@ export default function Navbar() {
 
             {/* Menu Dropdown com Itens Solicitados */}
             {isProfileDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 bg-[#111218]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-64 bg-[#111218]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl py-2 z-[10000] animate-in fade-in slide-in-from-top-2 duration-150">
                 {/* Header do Perfil */}
                 <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center text-violet-300 font-bold text-xs uppercase shrink-0">
@@ -581,7 +581,7 @@ export default function Navbar() {
 
       {/* Popup Lateral / Drawer Menu para Mobile */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-[100] lg:hidden">
+        <div className="fixed inset-0 z-[10001] lg:hidden">
           {/* Backdrop com Blur */}
           <div
             className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
@@ -590,7 +590,7 @@ export default function Navbar() {
           />
 
           {/* Gaveta Lateral (Slide from Left) */}
-          <div className="fixed inset-y-0 left-0 w-72 sm:w-80 max-w-[85vw] bg-[#0c0d12]/95 border-r border-white/10 backdrop-blur-2xl flex flex-col shadow-2xl z-[101] animate-in slide-in-from-left duration-200">
+          <div className="fixed inset-y-0 left-0 w-72 sm:w-80 max-w-[85vw] bg-[#0c0d12]/95 border-r border-white/10 backdrop-blur-2xl flex flex-col shadow-2xl z-[10002] animate-in slide-in-from-left duration-200">
             {/* Cabeçalho da Gaveta */}
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
               <Link

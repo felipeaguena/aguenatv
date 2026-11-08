@@ -2,8 +2,11 @@ package com.aguenatv.app;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -11,6 +14,11 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.List;
 
 @CapacitorPlugin(name = "BackgroundDownload")
 public class BackgroundDownloadPlugin extends Plugin {
@@ -82,21 +90,62 @@ public class BackgroundDownloadPlugin extends Plugin {
 
         try {
             Context context = getContext();
-            File file = new File(filePath);
-            if (!file.exists()) {
+            File sourceFile = new File(filePath);
+            if (!sourceFile.exists()) {
                 call.reject("Arquivo APK não encontrado em: " + filePath);
                 return;
             }
 
+            // 1. Android 8.0+ (Oreo até Android 14+): Verifica se o app possui permissão de instalar apps desconhecidos
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!context.getPackageManager().canRequestPackageInstalls()) {
+                    Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    settingsIntent.setData(Uri.parse("package:" + context.getPackageName()));
+                    settingsIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(settingsIntent);
+                    call.reject("Permissão necessária: autorize a opção 'Permitir desta fonte' para o AGUENATV nas configurações do Android e clique em Instalar novamente.");
+                    return;
+                }
+            }
+
+            // 2. Garante que o APK esteja em um diretório com permissão de leitura para o PackageInstaller (cache externo ou cache interno)
+            File installFile = sourceFile;
+            try {
+                File targetDir = context.getExternalCacheDir();
+                if (targetDir == null) {
+                    targetDir = context.getCacheDir();
+                }
+                if (targetDir != null) {
+                    File destFile = new File(targetDir, sourceFile.getName());
+                    if (!destFile.getAbsolutePath().equals(sourceFile.getAbsolutePath())) {
+                        copyFile(sourceFile, destFile);
+                        destFile.setReadable(true, false);
+                        installFile = destFile;
+                    }
+                }
+            } catch (Exception ex) {
+                ex.printStackTrace();
+            }
+
+            // 3. Obtém a URI segura via FileProvider
             Uri apkUri = FileProvider.getUriForFile(
                 context,
                 context.getPackageName() + ".fileprovider",
-                file
+                installFile
             );
 
+            // 4. Cria a Intent de instalação do pacote Android
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+            // 5. Concede permissão explícita de leitura para todos os pacotes do sistema capazes de instalar APK
+            List<ResolveInfo> resInfoList = context.getPackageManager().queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            for (ResolveInfo resolveInfo : resInfoList) {
+                String packageName = resolveInfo.activityInfo.packageName;
+                context.grantUriPermission(packageName, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            }
+
             context.startActivity(intent);
 
             JSObject ret = new JSObject();
@@ -105,6 +154,17 @@ public class BackgroundDownloadPlugin extends Plugin {
         } catch (Exception e) {
             e.printStackTrace();
             call.reject("Falha ao abrir instalador do APK: " + e.getMessage());
+        }
+    }
+
+    private void copyFile(File src, File dst) throws Exception {
+        try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
         }
     }
 

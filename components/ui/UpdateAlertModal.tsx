@@ -49,6 +49,7 @@ export default function UpdateAlertModal({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadStatus, setDownloadStatus] = useState('');
+  const [downloadedApkPath, setDownloadedApkPath] = useState<string | null>(null);
 
   // Detecta a versão instalada no APK via Capacitor nativo
   useEffect(() => {
@@ -68,6 +69,12 @@ export default function UpdateAlertModal({
   }, []);
 
   const checkVersion = async (isManual = false) => {
+    // REGRA ESTRITA: O popup de atualização deve aparecer SOMENTE no APK!
+    // No desktop e em telas web, não deve verificar automaticamente nem abrir o popup.
+    if (!Capacitor.isNativePlatform() && !isManual) {
+      return;
+    }
+
     setChecking(true);
     try {
       let currentVer = installedVersion;
@@ -89,7 +96,7 @@ export default function UpdateAlertModal({
 
         if (isManual) {
           setIsOpen(true);
-        } else if (isStrictlyLower) {
+        } else if (isStrictlyLower && Capacitor.isNativePlatform()) {
           const dismissed = localStorage.getItem(`dismissed_update_${data.latestVersion}`);
           if (!dismissed) {
             setIsOpen(true);
@@ -104,12 +111,20 @@ export default function UpdateAlertModal({
   };
 
   useEffect(() => {
+    // Se não for APK nativo e não for verificação manual (ex: clique no botão em configurações), não executa
+    if (typeof window !== 'undefined' && !Capacitor.isNativePlatform() && !manualCheck) {
+      return;
+    }
     checkVersion(manualCheck);
   }, [manualCheck]);
 
   const cleanLatest = versionInfo?.latestVersion?.replace(/^v/i, '') || '0.2.5';
-  const directApkUrl = `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release.apk`;
-  const releasesPageUrl = `https://github.com/felipeaguena/aguenatv/releases#release-v${cleanLatest}`;
+  const directApkUrl =
+    versionInfo?.apkDownloadUrl && versionInfo.apkDownloadUrl.endsWith('.apk')
+      ? versionInfo.apkDownloadUrl
+      : `https://github.com/felipeaguena/aguenatv/releases/download/v${cleanLatest}/AGUENATV-release.apk`;
+  const releasesPageUrl =
+    versionInfo?.githubUrl || `https://github.com/felipeaguena/aguenatv/releases#release-v${cleanLatest}`;
 
   // Executa a instalação automática com barra de progresso no APK
   const handleInstallUpdate = async () => {
@@ -117,6 +132,20 @@ export default function UpdateAlertModal({
       // No navegador comum, abre o download direto
       window.open(directApkUrl, '_blank');
       return;
+    }
+
+    // Se o APK já foi baixado previamente, tenta disparar o instalador diretamente sem re-baixar
+    if (downloadedApkPath) {
+      try {
+        setDownloadStatus('Abrindo instalador do Android...');
+        await BackgroundDownload.installApk({ filePath: downloadedApkPath });
+        return;
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        setDownloadStatus(msg.includes('Permissão') ? 'Permissão necessária' : 'Erro no instalador');
+        alert(msg);
+        return;
+      }
     }
 
     try {
@@ -136,19 +165,21 @@ export default function UpdateAlertModal({
 
       const completeSub = await BackgroundDownload.addListener('complete', async (data) => {
         if (data.id === updateDownloadId) {
+          setIsDownloading(false);
           if (data.success && data.path) {
             setDownloadProgress(100);
-            setDownloadStatus('Download finalizado! Abrindo instalador...');
+            setDownloadedApkPath(data.path);
+            setDownloadStatus('Download finalizado! Abrindo instalador do Android...');
             try {
               await BackgroundDownload.installApk({ filePath: data.path });
             } catch (err: any) {
-              setDownloadStatus('Erro ao acionar instalador');
-              alert('Erro ao disparar instalador: ' + (err?.message || err));
+              const msg = err?.message || String(err);
+              setDownloadStatus(msg.includes('Permissão') ? 'Permissão necessária' : 'Erro ao acionar instalador');
+              alert(msg);
             }
           } else {
             setDownloadStatus('Falha no download');
             alert('Falha ao baixar nova versão: ' + (data.error || 'Erro de conexão'));
-            setIsDownloading(false);
           }
           try {
             progressSub.remove();
@@ -195,7 +226,11 @@ export default function UpdateAlertModal({
   };
 
   const modalVisible = controlledIsOpen !== undefined ? controlledIsOpen : isOpen;
-  if (!modalVisible) return null;
+  // REGRA ESTRITA: O popup de atualização de release deve aparecer SOMENTE no APK!
+  // No desktop e em outras telas web, não deve ser renderizado.
+  if (!modalVisible || (!Capacitor.isNativePlatform() && !manualCheck && controlledIsOpen === undefined)) {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -268,7 +303,12 @@ export default function UpdateAlertModal({
                 {isDownloading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Atualizando AGUENATV ({downloadProgress}%)...</span>
+                    <span>Baixando atualização ({downloadProgress}%)...</span>
+                  </>
+                ) : downloadedApkPath ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                    <span>Instalar Agora (Abrir Instalador do Android)</span>
                   </>
                 ) : (
                   <>
