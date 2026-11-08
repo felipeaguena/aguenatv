@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { Play, Pause, SkipForward, FastForward, AlertTriangle, RotateCcw, RotateCw } from 'lucide-react';
+import { Play, Pause, SkipForward, FastForward, AlertTriangle, RotateCcw } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
 import { StatusBar } from '@capacitor/status-bar';
@@ -248,6 +248,8 @@ export default function VideoPlayer({
     }
   });
 
+  const lastHideControlsTimeRef = useRef(0);
+
   const handleTogglePlay = useCallback((e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
@@ -263,37 +265,19 @@ export default function VideoPlayer({
     }
   }, []);
 
-  const handleRewind10 = useCallback((e?: React.MouseEvent) => {
+  const handleHideControls = useCallback((e?: React.MouseEvent | Event) => {
     if (e) {
       e.stopPropagation();
-      e.preventDefault();
-    }
-    const art = artInstanceRef.current;
-    if (!art || art.isDestroy) return;
-    art.backward = 10;
-    art.notice.show = '⏪ -10s';
-  }, []);
-
-  const handleForward10 = useCallback((e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-    const art = artInstanceRef.current;
-    if (!art || art.isDestroy) return;
-    art.forward = 10;
-    art.notice.show = '⏩ +10s';
-  }, []);
-
-  const handleHideControls = useCallback((e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
+      try {
+        (e as any).preventDefault?.();
+        (e as any).nativeEvent?.stopImmediatePropagation?.();
+      } catch (err) {}
     }
     const art = artInstanceRef.current;
     if (!art || art.isDestroy) return;
     if (art.setting?.show || art.contextmenu?.show) return;
 
+    lastHideControlsTimeRef.current = Date.now();
     try {
       art.controls.show = false;
     } catch (err) {}
@@ -991,6 +975,7 @@ export default function VideoPlayer({
         resetInactivityTimer();
         return;
       }
+      lastHideControlsTimeRef.current = Date.now();
       try {
         if (art.controls.show) {
           art.controls.show = false;
@@ -1026,6 +1011,7 @@ export default function VideoPlayer({
     };
 
     const handleUserInteraction = () => {
+      if (isMobile) return;
       resetInactivityTimer();
     };
 
@@ -1116,10 +1102,6 @@ export default function VideoPlayer({
       resetInactivityTimer();
     };
 
-    // Suporte a clique simples / duplo clique em áreas vazias fora do <video> (ex: letterbox em tela cheia)
-    let clickTimeout: NodeJS.Timeout | null = null;
-    let singleClickCount = 0;
-
     const handlePlayerClick = (e: MouseEvent) => {
       const target = (e.target || (e as any).srcElement) as HTMLElement | null;
       if (
@@ -1130,33 +1112,29 @@ export default function VideoPlayer({
         return;
       }
 
-      // Se clicou na área do player fora do elemento <video>
-      if (target !== videoEl && !videoEl?.contains(target)) {
-        singleClickCount++;
-        if (singleClickCount === 1) {
-          clickTimeout = setTimeout(() => {
-            singleClickCount = 0;
-            if (isMobile) {
-              if (isControlsVisibleRef.current) {
-                hideControls();
-              } else {
-                showControls();
-                resetInactivityTimer();
-              }
-            } else {
-              try {
-                art.toggle();
-              } catch (err) {}
-            }
-          }, 260);
-        } else if (singleClickCount >= 2) {
-          if (clickTimeout) {
-            clearTimeout(clickTimeout);
-            clickTimeout = null;
-          }
-          singleClickCount = 0;
-          handleDoubleAction(e);
-        }
+      // Se acabamos de ocultar os controles há menos de 350ms (ex: por touch ou click), ignora para evitar reabertura
+      if (Date.now() - lastHideControlsTimeRef.current < 350) {
+        return;
+      }
+
+      // Se os controles estão visíveis, qualquer clique na área vazia oculta imediatamente
+      if (isControlsVisibleRef.current) {
+        hideControls();
+        return;
+      }
+
+      // Se os controles estão ocultos:
+      if (isMobile) {
+        // No mobile, um toque exibe os controles confortavelmente sem pausar
+        showControls();
+        resetInactivityTimer();
+      } else {
+        // No desktop, clique no vídeo alterna reprodução
+        try {
+          art.toggle();
+        } catch (err) {}
+        showControls();
+        resetInactivityTimer();
       }
     };
 
@@ -1211,10 +1189,7 @@ export default function VideoPlayer({
       playerEl.addEventListener('click', handlePlayerClick);
       playerEl.addEventListener('mousemove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('mousedown', handleMouseDown, { passive: true });
-      playerEl.addEventListener('touchstart', handleUserInteraction, { passive: true });
-      playerEl.addEventListener('touchmove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('touchend', handleTouchEnd, { passive: true });
-      playerEl.addEventListener('pointermove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('mouseenter', handleMouseEnter, { passive: true });
       playerEl.addEventListener('mouseleave', handleMouseLeave, { passive: true });
       playerEl.addEventListener('dblclick', handleDoubleAction, true);
@@ -1492,18 +1467,11 @@ export default function VideoPlayer({
         clearTimeout(inactivityTimer);
         inactivityTimer = null;
       }
-      if (clickTimeout) {
-        clearTimeout(clickTimeout);
-        clickTimeout = null;
-      }
       if (playerEl) {
         playerEl.removeEventListener('click', handlePlayerClick);
         playerEl.removeEventListener('mousemove', handleUserInteraction);
         playerEl.removeEventListener('mousedown', handleMouseDown);
-        playerEl.removeEventListener('touchstart', handleUserInteraction);
-        playerEl.removeEventListener('touchmove', handleUserInteraction);
         playerEl.removeEventListener('touchend', handleTouchEnd);
-        playerEl.removeEventListener('pointermove', handleUserInteraction);
         playerEl.removeEventListener('mouseenter', handleMouseEnter);
         playerEl.removeEventListener('mouseleave', handleMouseLeave);
         playerEl.removeEventListener('dblclick', handleDoubleAction, true);
@@ -1541,54 +1509,28 @@ export default function VideoPlayer({
                 : 'opacity-0 pointer-events-none bg-transparent'
             }`}
             onClick={(e) => {
-              // Tocar no fundo vazio fora dos botões oculta os controles imediatamente (padrão Netflix / YouTube)
+              // Tocar no fundo vazio fora do botão oculta os controles imediatamente (padrão Netflix / YouTube)
               if (e.target === e.currentTarget) {
                 handleHideControls(e);
               }
             }}
           >
             <div
-              className="flex items-center justify-center gap-6 sm:gap-10 pointer-events-auto select-none"
+              className="flex items-center justify-center pointer-events-auto select-none"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Botão Retroceder 10s */}
-              <button
-                type="button"
-                onClick={handleRewind10}
-                title="Voltar 10 segundos"
-                className="group/rewind relative flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-neutral-900/80 hover:bg-neutral-800 active:bg-violet-600/90 active:scale-90 text-white/90 hover:text-white border border-white/15 backdrop-blur-md shadow-2xl transition-all duration-150 cursor-pointer"
-              >
-                <RotateCcw className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover/rewind:-rotate-12" />
-                <span className="text-[10px] sm:text-[11px] font-black font-mono leading-none -mt-0.5 tracking-tighter">
-                  10
-                </span>
-              </button>
-
-              {/* Botão Central Play / Pause */}
+              {/* Botão Central Play / Pause - Cinza claro suave com ícone preto */}
               <button
                 type="button"
                 onClick={handleTogglePlay}
                 title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
-                className="group/play relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-violet-600/90 hover:bg-violet-500 active:bg-violet-700 active:scale-90 text-white border-2 border-violet-400/40 shadow-2xl shadow-violet-950/80 transition-all duration-200 cursor-pointer hover:scale-105"
+                className="group/play relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-neutral-200/90 hover:bg-white active:bg-neutral-300 active:scale-90 text-neutral-900 border border-white/60 shadow-xl shadow-black/40 backdrop-blur-md transition-all duration-200 cursor-pointer hover:scale-105"
               >
                 {isPlaying ? (
-                  <Pause className="w-7 h-7 sm:w-9 sm:h-9 fill-current" />
+                  <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-current text-black" />
                 ) : (
-                  <Play className="w-7 h-7 sm:w-9 sm:h-9 fill-current ml-1" />
+                  <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current text-black ml-1" />
                 )}
-              </button>
-
-              {/* Botão Avançar 10s */}
-              <button
-                type="button"
-                onClick={handleForward10}
-                title="Avançar 10 segundos"
-                className="group/forward relative flex flex-col items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-neutral-900/80 hover:bg-neutral-800 active:bg-violet-600/90 active:scale-90 text-white/90 hover:text-white border border-white/15 backdrop-blur-md shadow-2xl transition-all duration-150 cursor-pointer"
-              >
-                <RotateCw className="w-5 h-5 sm:w-6 sm:h-6 transition-transform group-hover/forward:rotate-12" />
-                <span className="text-[10px] sm:text-[11px] font-black font-mono leading-none -mt-0.5 tracking-tighter">
-                  10
-                </span>
               </button>
             </div>
           </div>
