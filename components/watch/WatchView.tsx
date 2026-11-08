@@ -35,8 +35,10 @@ import {
   checkIsDownloaded,
   getPlayableOfflineUrl,
   deleteOfflineDownload,
+  getOfflineDownloadsList,
   OfflineDownload,
 } from '@/lib/download-manager';
+import { useDownloadProgress } from '@/hooks/useDownloadProgress';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
 import { fetchIPTVApi } from '@/lib/iptv-client';
 import {
@@ -108,6 +110,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const { saveProgress } = useContinueWatching();
 
   // Estados de Download Offline (Capacitor / Celular)
+  const { getProgress } = useDownloadProgress();
+  const [downloadedMap, setDownloadedMap] = useState<Record<string, OfflineDownload>>({});
+  const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
   const [localPlayableUrl, setLocalPlayableUrl] = useState<string | null>(null);
@@ -119,9 +124,30 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [isDesktop, setIsDesktop] = useState(false);
   const autoMarkedEpisodesRef = useRef<Set<string>>(new Set());
 
+  const refreshDownloads = useCallback(async () => {
+    try {
+      const list = await getOfflineDownloadsList();
+      const map: Record<string, OfflineDownload> = {};
+      for (const d of list) {
+        map[d.id] = d;
+      }
+      setDownloadedMap(map);
+    } catch (e) {
+      console.warn('Erro ao listar downloads offline:', e);
+    }
+  }, []);
+
   useEffect(() => {
     setIsNative(isNativeApp());
-  }, []);
+    refreshDownloads();
+    const handleDownloadsChanged = () => {
+      refreshDownloads();
+    };
+    window.addEventListener('offline-downloads-changed', handleDownloadsChanged);
+    return () => {
+      window.removeEventListener('offline-downloads-changed', handleDownloadsChanged);
+    };
+  }, [refreshDownloads]);
 
   useEffect(() => {
     const checkSize = () => {
@@ -1122,6 +1148,108 @@ export default function WatchView({ type, id }: WatchViewProps) {
     }
   }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, updateWatchUrl, scrollToPlayer, filteredRelated, currentStreamId, handleSwitchStream]);
 
+  // Gerenciadores de download offline idênticos à página info (capítulos e títulos)
+  const handleToggleEpisodeDownload = async (ep: SeriesEpisode, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const currentStreamId = item?.stream_id || id;
+    if (!currentStreamId) return;
+    const epId = buildDownloadId('series', currentStreamId, selectedSeason, ep.episode_num ?? ep.id);
+
+    if (downloadedMap[epId]) {
+      if (confirm(`Deseja excluir o episódio ${ep.episode_num} da memória do celular?`)) {
+        await deleteOfflineDownload(epId);
+        await refreshDownloads();
+        if (activeEpisode && String(activeEpisode.id) === String(ep.id)) {
+          setIsCurrentDownloaded(false);
+          setLocalPlayableUrl(null);
+          setIsOfflineMode(false);
+        }
+      }
+      return;
+    }
+
+    if (!config?.server_url) {
+      alert('Configuração de IPTV não encontrada.');
+      return;
+    }
+
+    setDownloadingIds((prev) => ({ ...prev, [epId]: true }));
+    try {
+      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
+      const streamUrl = `${cleanHost}/series/${config.username}/${config.password}/${ep.id}.${ep.container_extension || 'mp4'}`;
+      const epMeta = seasonEpisodesMeta[Number(ep.episode_num)];
+      const formattedEpName = formatEpisodeTitle(ep.episode_num, selectedSeason, epMeta?.name || ep.title);
+      await downloadVideoForOffline(
+        {
+          stream_id: String(currentStreamId),
+          stream_type: 'series',
+          title: `${item?.title || item?.name || 'Série'} - ${formattedEpName}`,
+          series_title: item?.title || item?.name,
+          poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || item?.stream_icon,
+          container_extension: ep.container_extension || 'mp4',
+          season_num: Number(selectedSeason),
+          episode_num: Number(ep.episode_num),
+          episode_id: ep.id,
+        },
+        streamUrl
+      );
+      await refreshDownloads();
+      if (activeEpisode && String(activeEpisode.id) === String(ep.id)) {
+        setIsCurrentDownloaded(true);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao baixar episódio.');
+    } finally {
+      setDownloadingIds((prev) => ({ ...prev, [epId]: false }));
+    }
+  };
+
+  const handleToggleRelatedMovieDownload = async (channel: BaseStreamItem, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const downId = buildDownloadId('movie', channel.stream_id);
+    if (downloadedMap[downId]) {
+      if (confirm(`Deseja excluir o filme "${channel.title || channel.name}" da memória do celular?`)) {
+        await deleteOfflineDownload(downId);
+        await refreshDownloads();
+        if (item && item.stream_id === channel.stream_id) {
+          setIsCurrentDownloaded(false);
+          setLocalPlayableUrl(null);
+          setIsOfflineMode(false);
+        }
+      }
+      return;
+    }
+    if (!config?.server_url) {
+      alert('Configuração de IPTV não encontrada.');
+      return;
+    }
+    setDownloadingIds((prev) => ({ ...prev, [downId]: true }));
+    try {
+      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
+      const streamUrl = `${cleanHost}/movie/${config.username}/${config.password}/${channel.stream_id}.${channel.container_extension || 'mp4'}`;
+      await downloadVideoForOffline(
+        {
+          stream_id: channel.stream_id,
+          stream_type: 'movie',
+          title: channel.title || channel.name,
+          poster_url: channel.stream_icon,
+          container_extension: channel.container_extension || 'mp4',
+        },
+        streamUrl
+      );
+      await refreshDownloads();
+      if (item && item.stream_id === channel.stream_id) {
+        setIsCurrentDownloaded(true);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao baixar filme.');
+    } finally {
+      setDownloadingIds((prev) => ({ ...prev, [downId]: false }));
+    }
+  };
+
   // =========================================================================
   // 3. RETORNOS CONDICIONAIS DE RENDERIZAÇÃO (SEGUROS - APÓS TODOS OS HOOKS)
   // =========================================================================
@@ -1382,6 +1510,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     if (isCurrentDownloaded) {
                       if (confirm('Deseja excluir este vídeo baixado para liberar espaço no celular?')) {
                         await deleteOfflineDownload(downId);
+                        await refreshDownloads();
                         setIsCurrentDownloaded(false);
                         setLocalPlayableUrl(null);
                         setIsOfflineMode(false);
@@ -1406,6 +1535,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                         },
                         streamUrl
                       );
+                      await refreshDownloads();
                       setIsCurrentDownloaded(true);
                       setDownloadDone(true);
                       setTimeout(() => setDownloadDone(false), 5000);
@@ -1644,8 +1774,53 @@ export default function WatchView({ type, id }: WatchViewProps) {
                             </div>
                           </div>
 
-                          {/* Indicadores de Status (Assistido com Botão de Olho e Tocando Agora) */}
+                          {/* Indicadores de Status (Download Offline e Assistido) */}
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Botão de Download do Episódio (No APK / App Nativo) */}
+                            {isNative && (() => {
+                              const epDownloadId = buildDownloadId('series', item?.stream_id || id, selectedSeason, ep.episode_num ?? ep.id);
+                              const isEpDownloaded = !!downloadedMap[epDownloadId];
+                              const epProgress = getProgress(epDownloadId);
+                              const isEpDownloading = !!downloadingIds[epDownloadId] || !!epProgress;
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleEpisodeDownload(ep, e)}
+                                  disabled={isEpDownloading}
+                                  className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shadow-md min-w-[28px] ${
+                                    isEpDownloaded
+                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-rose-500/25 hover:border-rose-500/40 hover:text-rose-300'
+                                      : isEpDownloading
+                                      ? 'bg-violet-600/30 text-violet-300 border-violet-500/50 px-2'
+                                      : 'bg-white/5 text-neutral-400 border-white/5 hover:text-white hover:border-violet-500/40 hover:bg-white/10'
+                                  }`}
+                                  title={
+                                    isEpDownloaded
+                                      ? 'Episódio baixado no celular (clique para excluir da memória)'
+                                      : isEpDownloading
+                                      ? `Baixando episódio (${epProgress?.percentage ?? 0}%)`
+                                      : 'Baixar este episódio para assistir offline'
+                                  }
+                                  aria-label={isEpDownloaded ? 'Excluir Episódio Baixado' : 'Baixar Episódio'}
+                                >
+                                  {isEpDownloading ? (
+                                    <div className="flex items-center gap-1">
+                                      <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                                      <span className="text-[9px] font-black text-violet-300">
+                                        {epProgress?.percentage ?? 0}%
+                                      </span>
+                                    </div>
+                                  ) : isEpDownloaded ? (
+                                    <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                                  ) : (
+                                    <Download className="w-3.5 h-3.5 text-neutral-400" />
+                                  )}
+                                </button>
+                              );
+                            })()}
+
+                            {/* Botão de Marcar como Assistido */}
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1666,9 +1841,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
                             >
                               <Eye className={`w-3.5 h-3.5 ${isEpWatched ? 'text-emerald-400' : ''}`} />
                             </button>
-                            {isCurrent && (
-                              <span className="w-2 h-2 rounded-full bg-violet-400 animate-ping" />
-                            )}
                           </div>
                         </div>
                       );
@@ -1749,11 +1921,52 @@ export default function WatchView({ type, id }: WatchViewProps) {
                           </div>
 
                           <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Botão de Download para Filmes Relacionados (No APK / App Nativo) */}
+                            {isNative && !isLive && (() => {
+                              const movieDownloadId = buildDownloadId('movie', channel.stream_id);
+                              const isItemDownloaded = !!downloadedMap[movieDownloadId];
+                              const itemProgress = getProgress(movieDownloadId);
+                              const isItemDownloading = !!downloadingIds[movieDownloadId] || !!itemProgress;
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleRelatedMovieDownload(channel, e)}
+                                  disabled={isItemDownloading}
+                                  className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shadow-md min-w-[28px] ${
+                                    isItemDownloaded
+                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-rose-500/25 hover:border-rose-500/40 hover:text-rose-300'
+                                      : isItemDownloading
+                                      ? 'bg-violet-600/30 text-violet-300 border-violet-500/50 px-2'
+                                      : 'bg-white/5 text-neutral-400 border-white/5 hover:text-white hover:border-violet-500/40 hover:bg-white/10'
+                                  }`}
+                                  title={
+                                    isItemDownloaded
+                                      ? 'Filme baixado no celular (clique para excluir da memória)'
+                                      : isItemDownloading
+                                      ? `Baixando filme (${itemProgress?.percentage ?? 0}%)`
+                                      : 'Baixar este filme para assistir offline'
+                                  }
+                                  aria-label={isItemDownloaded ? 'Excluir Filme Baixado' : 'Baixar Filme'}
+                                >
+                                  {isItemDownloading ? (
+                                    <div className="flex items-center gap-1">
+                                      <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                                      <span className="text-[9px] font-black text-violet-300">
+                                        {itemProgress?.percentage ?? 0}%
+                                      </span>
+                                    </div>
+                                  ) : isItemDownloaded ? (
+                                    <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                                  ) : (
+                                    <Download className="w-3.5 h-3.5 text-neutral-400" />
+                                  )}
+                                </button>
+                              );
+                            })()}
+
                             {isItemWatched && (
                               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-500/20" />
-                            )}
-                            {isCurrent && (
-                              <span className="w-2 h-2 rounded-full bg-violet-400 animate-ping" />
                             )}
                           </div>
                         </div>
