@@ -51,13 +51,41 @@ function formatSeconds(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+export type DeviceCategory = 'mobile' | 'tablet' | 'desktop';
+
+export function getDeviceCategory(): DeviceCategory {
+  if (typeof window === 'undefined') return 'desktop';
+
+  // 1. APK nativo Capacitor
+  if (Capacitor.isNativePlatform()) {
+    const minD = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+    return minD < 600 ? 'mobile' : 'tablet';
+  }
+
+  // 2. User Agent e capacidades de toque
+  const ua = navigator.userAgent || '';
+  const isPhoneUA = /iPhone|iPod|Android.*Mobile|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const isTabletUA = /iPad|Android(?!.*Mobile)/i.test(ua);
+  const minDim = Math.min(window.innerWidth, window.innerHeight);
+  const maxDim = Math.max(window.innerWidth, window.innerHeight);
+  const hasTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+
+  // Smartphone em qualquer orientação (largura em retrato ou altura em paisagem < 550px)
+  if (isPhoneUA || (hasTouch && minDim < 550)) {
+    return 'mobile';
+  }
+
+  // Tablet (iPad, Android tablet com tela média touch)
+  if (isTabletUA || (hasTouch && minDim >= 550 && maxDim <= 1366)) {
+    return 'tablet';
+  }
+
+  // Desktop (mouse com cursor fino e tela ampla)
+  return 'desktop';
+}
+
 function isMobileDevice(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (Capacitor.isNativePlatform()) return true;
-  return (
-    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-    (window.matchMedia && window.matchMedia('(max-width: 1024px) and (hover: none) and (pointer: coarse)').matches)
-  );
+  return getDeviceCategory() !== 'desktop';
 }
 
 function setDynamicViewportCover(enable: boolean) {
@@ -158,16 +186,30 @@ export default function VideoPlayer({
   const hasRestoredRef = useRef(false);
   const isFullscreenRef = useRef(false);
 
-  // Estados para exibição e dinâmica dos controles no mobile/touch e desktop (estilo Netflix / YouTube Mobile)
+  // Estados para exibição e dinâmica dos controles adaptados por categoria de aparelho (Mobile, Tablet, Desktop)
   const [playerMountNode, setPlayerMountNode] = useState<HTMLDivElement | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const [deviceCategory, setDeviceCategory] = useState<DeviceCategory>('desktop');
+  const deviceCategoryRef = useRef<DeviceCategory>('desktop');
   const [isControlsVisible, setIsControlsVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
   const isControlsVisibleRef = useRef(true);
   const isPlayingRef = useRef(true);
+  const lastTouchTimestampRef = useRef(0);
+  const lastDoubleActionTimeRef = useRef(0);
 
   useEffect(() => {
-    setIsMobile(isMobileDevice());
+    const updateCategory = () => {
+      const cat = getDeviceCategory();
+      setDeviceCategory(cat);
+      deviceCategoryRef.current = cat;
+    };
+    updateCategory();
+    window.addEventListener('resize', updateCategory, { passive: true });
+    window.addEventListener('orientationchange', updateCategory, { passive: true });
+    return () => {
+      window.removeEventListener('resize', updateCategory);
+      window.removeEventListener('orientationchange', updateCategory);
+    };
   }, []);
 
   const triedExtensionsRef = useRef<Set<string>>(new Set());
@@ -602,14 +644,16 @@ export default function VideoPlayer({
     setError(null);
 
     const isHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
-    const isMobile = isMobileDevice();
+    const currentDeviceCategory = deviceCategoryRef.current;
+    const isTouchDevice = currentDeviceCategory !== 'desktop';
 
-    // Configura flags nativas do Artplayer para sincronia e conforto no mobile/touch e desktop
+    // Configura flags nativas do Artplayer para sincronia e conforto por categoria de aparelho
     try {
       (Artplayer as any).DBCLICK_FULLSCREEN = false;
       (Artplayer as any).MOBILE_CLICK_PLAY = false;
       (Artplayer as any).MOBILE_DBCLICK_PLAY = false;
-      (Artplayer as any).CONTROL_HIDE_TIME = isMobile ? 4500 : 3500;
+      (Artplayer as any).CONTROL_HIDE_TIME =
+        currentDeviceCategory === 'mobile' ? 5000 : currentDeviceCategory === 'tablet' ? 4500 : 3500;
     } catch (e) {}
 
     // Criação da instância Artplayer.js
@@ -668,7 +712,7 @@ export default function VideoPlayer({
       ],
       playbackRate: true,
       aspectRatio: true,
-      fullscreen: !isMobile, // No desktop usa o botão nativo do Artplayer; no mobile usa mobile-fullscreen
+      fullscreen: !isTouchDevice, // No desktop usa o botão nativo do Artplayer; no mobile/tablet usa mobile-fullscreen
       fullscreenWeb: false,
       subtitleOffset: true,
       miniProgressBar: true,
@@ -758,8 +802,8 @@ export default function VideoPlayer({
             }
           },
         },
-        // Botão de Fullscreen exclusivo para Mobile (no Desktop o Artplayer já insere o controle nativo na barra)
-        ...(isMobile
+        // Botão de Fullscreen exclusivo para Mobile e Tablet (no Desktop o Artplayer já insere o controle nativo na barra)
+        ...(isTouchDevice
           ? [
               {
                 name: 'mobile-fullscreen',
@@ -1012,9 +1056,14 @@ export default function VideoPlayer({
       }
     };
 
-    const AUTO_HIDE_DELAY = isMobile ? 4500 : 3500;
+    const getInactivityDelay = () => {
+      const currentCat = deviceCategoryRef.current;
+      if (currentCat === 'mobile') return 5000;
+      if (currentCat === 'tablet') return 4500;
+      return 3500;
+    };
 
-    const resetInactivityTimer = (delay = AUTO_HIDE_DELAY) => {
+    const resetInactivityTimer = (delay?: number) => {
       showControls();
       if (inactivityTimer) {
         clearTimeout(inactivityTimer);
@@ -1024,26 +1073,35 @@ export default function VideoPlayer({
       if (!art.playing) {
         return;
       }
+      const effectiveDelay = delay ?? getInactivityDelay();
       inactivityTimer = setTimeout(() => {
         hideControls();
-      }, delay);
+      }, effectiveDelay);
     };
 
     showControlsRef.current = showControls;
     resetInactivityTimerRef.current = resetInactivityTimer;
 
+    const isTouchOrRecentTouch = () => {
+      return (
+        deviceCategoryRef.current !== 'desktop' ||
+        Date.now() - lastTouchTimestampRef.current < 1500
+      );
+    };
+
     const handleUserInteraction = () => {
-      if (isMobile) return;
+      if (isTouchOrRecentTouch()) return;
       resetInactivityTimer();
     };
 
     const handleMouseEnter = () => {
+      if (isTouchOrRecentTouch()) return;
       resetInactivityTimer();
     };
 
     const handleMouseLeave = () => {
       // Em dispositivos mobile e touch, NUNCA executa mouseleave (evita esconder controles após toque)
-      if (isMobile) return;
+      if (isTouchOrRecentTouch()) return;
 
       const isFs = Boolean(
         document.fullscreenElement ||
@@ -1063,7 +1121,7 @@ export default function VideoPlayer({
     };
 
     const handleWindowMouseMove = () => {
-      if (isFullscreenRef.current) {
+      if (isFullscreenRef.current && !isTouchOrRecentTouch()) {
         resetInactivityTimer();
       }
     };
@@ -1075,6 +1133,7 @@ export default function VideoPlayer({
         return;
       }
       lastDblClickTimestamp = now;
+      lastDoubleActionTimeRef.current = now;
 
       if (e) {
         const target = (e.target || (e as any).srcElement) as HTMLElement | null;
@@ -1121,7 +1180,9 @@ export default function VideoPlayer({
 
     const handleMouseDown = () => {
       wasPlayingBeforeClickRef.current = art.playing;
-      resetInactivityTimer();
+      if (!isTouchOrRecentTouch()) {
+        resetInactivityTimer();
+      }
     };
 
     const handlePlayerClick = (e: MouseEvent) => {
@@ -1139,8 +1200,15 @@ export default function VideoPlayer({
       e.stopPropagation();
       e.stopImmediatePropagation();
 
-      if (isMobile) {
-        // --- DINÂMICA MOBILE / TOUCH / APK ---
+      const currentCategory = deviceCategoryRef.current;
+
+      // Se acabou de ocorrer uma ação de duplo clique ou duplo toque, ignora o clique simples
+      if (Date.now() - lastDoubleActionTimeRef.current < 450) {
+        return;
+      }
+
+      if (currentCategory !== 'desktop') {
+        // --- DINÂMICA MOBILE / TABLET / TOUCH / APK ---
         // Se acabamos de ocultar os controles há menos de 350ms (ex: por touch ou click), ignora para evitar reabertura
         if (Date.now() - lastHideControlsTimeRef.current < 350) {
           return;
@@ -1162,10 +1230,15 @@ export default function VideoPlayer({
       }
     };
 
+    const handleTouchStart = () => {
+      lastTouchTimestampRef.current = Date.now();
+    };
+
     let lastTouchTime = 0;
     let lastTouchX = 0;
     let lastTouchY = 0;
     const handleTouchEnd = (e: TouchEvent) => {
+      lastTouchTimestampRef.current = Date.now();
       const touch = e.changedTouches[0];
       if (!touch) return;
 
@@ -1184,6 +1257,7 @@ export default function VideoPlayer({
 
       if (now - lastTouchTime < 320 && dx < 40 && dy < 40) {
         lastTouchTime = 0;
+        lastDoubleActionTimeRef.current = now;
         const rect = playerEl?.getBoundingClientRect();
         if (rect) {
           const x = touch.clientX - rect.left;
@@ -1211,6 +1285,7 @@ export default function VideoPlayer({
     // Registra listeners de interação no container e janela
     if (playerEl) {
       playerEl.addEventListener('click', handlePlayerClick, true);
+      playerEl.addEventListener('touchstart', handleTouchStart, { passive: true });
       playerEl.addEventListener('mousemove', handleUserInteraction, { passive: true });
       playerEl.addEventListener('mousedown', handleMouseDown, { passive: true });
       playerEl.addEventListener('touchend', handleTouchEnd, { passive: true });
@@ -1538,6 +1613,7 @@ export default function VideoPlayer({
       }
       if (playerEl) {
         playerEl.removeEventListener('click', handlePlayerClick, true);
+        playerEl.removeEventListener('touchstart', handleTouchStart);
         playerEl.removeEventListener('mousemove', handleUserInteraction);
         playerEl.removeEventListener('mousedown', handleMouseDown);
         playerEl.removeEventListener('touchend', handleTouchEnd);
@@ -1570,16 +1646,20 @@ export default function VideoPlayer({
       {/* Controles e botões dinâmicos renderizados diretamente dentro de $player via Portal */}
       {playerMountNode && createPortal(
         <>
-          {/* Overlay Central de Ação (Estilo Netflix / YouTube Mobile) */}
+          {/* Overlay Central de Ação (Distinção por categoria: Mobile, Tablet, Desktop) */}
           <div
             className={`absolute inset-0 z-50 flex items-center justify-center transition-all duration-300 ${
               isControlsVisible
-                ? 'opacity-100 pointer-events-auto bg-black/25 backdrop-blur-[1px]'
+                ? deviceCategory === 'desktop'
+                  ? isPlaying
+                    ? 'opacity-0 pointer-events-none bg-transparent'
+                    : 'opacity-100 pointer-events-auto bg-black/25 backdrop-blur-[1px]'
+                  : 'opacity-100 pointer-events-auto bg-black/35 backdrop-blur-[1px]'
                 : 'opacity-0 pointer-events-none bg-transparent'
             }`}
             onClick={(e) => {
               if (e.target === e.currentTarget) {
-                if (isMobile) {
+                if (deviceCategory !== 'desktop') {
                   // No mobile/touch: Tocar no fundo vazio fora do botão oculta os controles imediatamente (padrão Netflix / YouTube)
                   handleHideControls(e);
                 } else {
@@ -1593,24 +1673,28 @@ export default function VideoPlayer({
               className="flex items-center justify-center pointer-events-auto select-none"
               onClick={(e) => {
                 // No desktop, clicar na área ao redor do botão também segue o mesmo comando simples de play/pause
-                if (!isMobile && e.target === e.currentTarget) {
+                if (deviceCategory === 'desktop' && e.target === e.currentTarget) {
                   handleTogglePlay(e);
                 } else {
                   e.stopPropagation();
                 }
               }}
             >
-              {/* Botão Central Play / Pause - Cinza claro suave com ícone preto */}
+              {/* Botão Central Play / Pause - Cinza claro suave com ícone preto, dimensionado por categoria */}
               <button
                 type="button"
                 onClick={handleTogglePlay}
                 title={isPlaying ? 'Pausar (Espaço)' : 'Reproduzir (Espaço)'}
-                className="group/play relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-neutral-200/90 hover:bg-white active:bg-neutral-300 active:scale-90 text-neutral-900 border border-white/60 shadow-xl shadow-black/40 backdrop-blur-md transition-all duration-200 cursor-pointer hover:scale-105"
+                className={`group/play relative flex items-center justify-center rounded-full bg-neutral-200/90 hover:bg-white active:bg-neutral-300 active:scale-90 text-neutral-900 border border-white/60 shadow-xl shadow-black/40 backdrop-blur-md transition-all duration-200 cursor-pointer hover:scale-105 ${
+                  deviceCategory === 'mobile'
+                    ? 'w-16 h-16'
+                    : 'w-20 h-20'
+                }`}
               >
                 {isPlaying ? (
-                  <Pause className="w-7 h-7 sm:w-8 sm:h-8 fill-current text-black" />
+                  <Pause className={`${deviceCategory === 'mobile' ? 'w-7 h-7' : 'w-8 h-8'} fill-current text-black`} />
                 ) : (
-                  <Play className="w-7 h-7 sm:w-8 sm:h-8 fill-current text-black ml-1" />
+                  <Play className={`${deviceCategory === 'mobile' ? 'w-7 h-7' : 'w-8 h-8'} fill-current text-black ml-1`} />
                 )}
               </button>
             </div>
