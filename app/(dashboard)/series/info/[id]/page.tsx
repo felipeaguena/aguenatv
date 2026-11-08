@@ -1,12 +1,17 @@
 'use client';
-import { use, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 
-export default function SeriesInfoRedirect({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function SeriesInfoRedirect() {
+  const params = useParams();
+  const id = (params?.id as string) || '';
   const router = useRouter();
+
   useEffect(() => {
-    router.replace(`/series/${id}/info`);
+    if (id) {
+      router.replace(`/series/${id}/info`);
+    }
   }, [id, router]);
+
   return null;
 }

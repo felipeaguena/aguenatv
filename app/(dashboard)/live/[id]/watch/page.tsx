@@ -1,13 +1,11 @@
 'use client';
-import { use, Suspense } from 'react';
+import { Suspense } from 'react';
+import { useParams } from 'next/navigation';
 import WatchView from '@/components/watch/WatchView';
 
-export default function LiveWatchPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = use(params);
+export default function LiveWatchPage() {
+  const params = useParams();
+  const id = (params?.id as string) || '';
 
   return (
     <Suspense

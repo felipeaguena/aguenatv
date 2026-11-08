@@ -1,14 +1,17 @@
 'use client';
-import { use, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect } from 'react';
+import { useRouter, useParams } from 'next/navigation';
 
-export default function LiveWatchRedirect({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const searchParams = useSearchParams();
+export default function LiveWatchRedirect() {
+  const params = useParams();
+  const id = (params?.id as string) || '';
   const router = useRouter();
+
   useEffect(() => {
-    const q = searchParams.toString();
-    router.replace(`/live/${id}/watch${q ? `?${q}` : ''}`);
-  }, [id, router, searchParams]);
+    if (id) {
+      router.replace(`/live/${id}/watch`);
+    }
+  }, [id, router]);
+
   return null;
 }

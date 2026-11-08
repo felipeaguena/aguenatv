@@ -523,6 +523,13 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const isSeries = (streamType as string) === 'series' || type === 'series';
   const isMovie = (streamType as string) === 'movie' || (streamType as string) === 'movies' || type === 'movie' || type === 'movies';
 
+  // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
+  const handleBack = useCallback(() => {
+    const categoryRoute = `/${getRouteType(streamType)}`;
+    router.replace(categoryRoute);
+  }, [router, streamType]);
+
+
   const currentSeasonDownloadedCount = useMemo(() => {
     if (!isSeries || !item) return 0;
     return currentSeasonEpisodes.filter((ep) => {
@@ -620,11 +627,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const watched = isWatched(item.stream_id, streamType);
   const isLive = streamType === 'live';
 
-  // Navegação de retorno anti-looping: watch -> info -> categoria -> raiz
-  const handleBack = useCallback(() => {
-    const categoryRoute = `/${getRouteType(streamType)}`;
-    router.replace(categoryRoute);
-  }, [router, streamType]);
 
   // Imagens priorizadas (Backdrop e Poster)
   // Para TV ao Vivo, utiliza estritamente o ícone original da lista M3U, sem alteração

@@ -1,13 +1,11 @@
 'use client';
-import { use, Suspense } from 'react';
+import { Suspense } from 'react';
+import { useParams } from 'next/navigation';
 import InfoView from '@/components/info/InfoView';
 
-export default function LiveInfoPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = use(params);
+export default function LiveInfoPage() {
+  const params = useParams();
+  const id = (params?.id as string) || '';
 
   return (
     <Suspense

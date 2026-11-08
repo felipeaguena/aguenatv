@@ -1,7 +1,7 @@
 'use client';
 
-import { use, useState, useEffect, useMemo, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -29,12 +29,9 @@ import { getInfoUrl, getWatchUrl } from '@/lib/routes';
 import MediaCard from '@/components/media/MediaCard';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
 
-interface PersonPageProps {
-  params: Promise<{ id: string }>;
-}
-
-export default function PersonPage({ params }: PersonPageProps) {
-  const { id } = use(params);
+export default function PersonPage() {
+  const routeParams = useParams();
+  const id = (routeParams?.id as string) || '';
   const searchParams = useSearchParams();
   const nameParam = searchParams.get('name') || '';
 

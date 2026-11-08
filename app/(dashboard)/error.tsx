@@ -24,6 +24,11 @@ export default function ErrorBoundary({
       <p className="text-xs sm:text-sm text-neutral-400 max-w-md">
         Ocorreu um erro temporário ao carregar as informações. Tente recarregar ou volte para o catálogo.
       </p>
+      {error?.message && (
+        <pre className="text-[11px] text-rose-300 font-mono bg-rose-950/40 border border-rose-800/40 p-2.5 rounded-lg max-w-lg overflow-x-auto text-left whitespace-pre-wrap break-all">
+          {error.message}
+        </pre>
+      )}
       <div className="flex items-center gap-3 pt-2">
         <button
           onClick={() => reset()}
