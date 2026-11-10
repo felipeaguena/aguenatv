@@ -36,6 +36,8 @@ import {
   getPlayableOfflineUrl,
   deleteOfflineDownload,
   getOfflineDownloadsList,
+  findCachedOfflineDownload,
+  findOfflineDownloadRecord,
   OfflineDownload,
 } from '@/lib/download-manager';
 import { useDownloadProgress } from '@/hooks/useDownloadProgress';
@@ -115,9 +117,27 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadDone, setDownloadDone] = useState(false);
-  const [localPlayableUrl, setLocalPlayableUrl] = useState<string | null>(null);
-  const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(false);
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [localPlayableUrl, setLocalPlayableUrl] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const targetType = (type === 'movies' || type === 'movie') ? 'movie' : 'series';
+    const cached = findCachedOfflineDownload(targetType, id, seasonParam || '1', episodeParam ? Number(episodeParam) : undefined, episodeParam || undefined);
+    if (cached) {
+      if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineVideoUrl) {
+        return (window as any).AndroidBridge.getOfflineVideoUrl(cached.file_path);
+      }
+    }
+    return null;
+  });
+  const [isCurrentDownloaded, setIsCurrentDownloaded] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const targetType = (type === 'movies' || type === 'movie') ? 'movie' : 'series';
+    return Boolean(findCachedOfflineDownload(targetType, id, seasonParam || '1', episodeParam ? Number(episodeParam) : undefined, episodeParam || undefined));
+  });
+  const [isOfflineMode, setIsOfflineMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const targetType = (type === 'movies' || type === 'movie') ? 'movie' : 'series';
+    return Boolean(findCachedOfflineDownload(targetType, id, seasonParam || '1', episodeParam ? Number(episodeParam) : undefined, episodeParam || undefined));
+  });
   const [isNative, setIsNative] = useState(false);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerHeight, setPlayerHeight] = useState<number | null>(null);
@@ -292,35 +312,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
         const epNum = activeEpisode?.episode_num ?? (episodeParam ? Number(episodeParam) : undefined);
         const epId = activeEpisode?.id ?? (episodeParam || undefined);
         const sNum = selectedSeason || seasonParam || '1';
+        const targetType = (type === 'movies' || type === 'movie' || item?.stream_type === 'movie') ? 'movie' : 'series';
 
-        let offlineRec: OfflineDownload | undefined;
-        if (localDB?.offline_downloads) {
-          if (type === 'movies' || type === 'movie' || item?.stream_type === 'movie') {
-            const downId = buildDownloadId('movie', currentStreamId);
-            offlineRec = await localDB.offline_downloads.get(downId);
-            if (!offlineRec) {
-              offlineRec = await localDB.offline_downloads
-                .where('stream_id')
-                .equals(currentStreamId)
-                .filter((i) => i.stream_type === 'movie')
-                .first();
-            }
-          } else if (type === 'series' || item?.stream_type === 'series') {
-            const downId = buildDownloadId('series', currentStreamId, sNum, epNum ?? epId);
-            offlineRec = await localDB.offline_downloads.get(downId);
-            if (!offlineRec) {
-              offlineRec = await localDB.offline_downloads
-                .where('stream_id')
-                .equals(currentStreamId)
-                .filter(
-                  (i) =>
-                    i.stream_type === 'series' &&
-                    (String(i.episode_id) === String(epId) || Number(i.episode_num) === Number(epNum))
-                )
-                .first();
-            }
-          }
-        }
+        const offlineRec = await findOfflineDownloadRecord(targetType, currentStreamId, sNum, epNum, epId);
 
         if (!isMounted) return;
 
@@ -841,7 +835,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   // 6. Efeito: Busca Dados Técnicos do Vídeo (Tamanho em MB, Codec, Dimensões e Duração da CDN)
   useEffect(() => {
-    if (!streamUrl) return;
+    if (!streamUrl || isCurrentDownloaded) return;
 
     let isMounted = true;
     async function fetchStreamTechStats() {
@@ -1041,15 +1035,42 @@ export default function WatchView({ type, id }: WatchViewProps) {
     router.replace(getWatchUrl(newStream.stream_type, newStream.stream_id));
   }, [router]);
 
+  const isCurrentlyInFullscreen = useCallback(() => {
+    if (typeof document === 'undefined') return false;
+    return Boolean(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      document.querySelector('.art-fullscreen') ||
+      document.querySelector('.art-fullscreen-web') ||
+      document.documentElement.classList.contains('art-immersive-active') ||
+      document.body.classList.contains('art-immersive-active')
+    );
+  }, []);
+
   const handleSelectEpisode = useCallback(
-    (ep: SeriesEpisode, shouldScroll = true) => {
+    async (ep: SeriesEpisode, shouldScroll = true) => {
+      // 1. Imediatamente verifica se este episódio está salvo offline
+      const sNum = selectedSeason.replace(/\D/g, '') || '1';
+      const offRec = await findOfflineDownloadRecord('series', currentStreamId, sNum, ep.episode_num, ep.id);
+      if (offRec) {
+        setIsCurrentDownloaded(true);
+        const localUrl = await getPlayableOfflineUrl(offRec);
+        setLocalPlayableUrl(localUrl);
+        setIsOfflineMode(true);
+      } else {
+        setIsCurrentDownloaded(false);
+        setLocalPlayableUrl(null);
+        setIsOfflineMode(false);
+      }
+
       setActiveEpisode(ep);
       updateWatchUrl(ep.id, selectedSeason);
-      if (shouldScroll) {
+      if (shouldScroll && !isCurrentlyInFullscreen()) {
         scrollToPlayer();
       }
     },
-    [selectedSeason, updateWatchUrl, scrollToPlayer]
+    [selectedSeason, currentStreamId, updateWatchUrl, scrollToPlayer, isCurrentlyInFullscreen]
   );
 
   // Lista de episódios sem filtro de busca para navegação sequencial entre capítulos
@@ -1100,10 +1121,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return false;
   }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes.length, currentSeasonIndex, seasonList, seriesInfo, filteredRelated, currentStreamId]);
 
-  const handlePrevChapter = useCallback(() => {
+  const handlePrevChapter = useCallback(async () => {
     if (isSeries) {
       if (activeEpisodeIndex > 0) {
-        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex - 1], true);
+        await handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex - 1], !isCurrentlyInFullscreen());
       } else if (currentSeasonIndex > 0) {
         const prevSeason = seasonList[currentSeasonIndex - 1];
         const prevSeasonNum = String(prevSeason.season_number);
@@ -1111,9 +1132,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
         if (prevEps.length > 0) {
           const lastEp = prevEps[prevEps.length - 1];
           setSelectedSeason(prevSeasonNum);
-          setActiveEpisode(lastEp);
-          updateWatchUrl(lastEp.id, prevSeasonNum);
-          scrollToPlayer();
+          await handleSelectEpisode(lastEp, !isCurrentlyInFullscreen());
         }
       }
       return;
@@ -1125,12 +1144,12 @@ export default function WatchView({ type, id }: WatchViewProps) {
         handleSwitchStream(filteredRelated[idx - 1]);
       }
     }
-  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, allCurrentSeasonEpisodes, handleSelectEpisode, seasonList, seriesInfo, updateWatchUrl, scrollToPlayer, filteredRelated, currentStreamId, handleSwitchStream]);
+  }, [isSeries, activeEpisodeIndex, currentSeasonIndex, allCurrentSeasonEpisodes, handleSelectEpisode, seasonList, seriesInfo, isCurrentlyInFullscreen, filteredRelated, currentStreamId, handleSwitchStream]);
 
-  const handleNextChapter = useCallback(() => {
+  const handleNextChapter = useCallback(async () => {
     if (isSeries) {
       if (activeEpisodeIndex >= 0 && activeEpisodeIndex < allCurrentSeasonEpisodes.length - 1) {
-        handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex + 1], true);
+        await handleSelectEpisode(allCurrentSeasonEpisodes[activeEpisodeIndex + 1], !isCurrentlyInFullscreen());
       } else if (currentSeasonIndex >= 0 && currentSeasonIndex < seasonList.length - 1) {
         const nextSeason = seasonList[currentSeasonIndex + 1];
         const nextSeasonNum = String(nextSeason.season_number);
@@ -1138,9 +1157,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
         if (nextEps.length > 0) {
           const firstEp = nextEps[0];
           setSelectedSeason(nextSeasonNum);
-          setActiveEpisode(firstEp);
-          updateWatchUrl(firstEp.id, nextSeasonNum);
-          scrollToPlayer();
+          await handleSelectEpisode(firstEp, !isCurrentlyInFullscreen());
         }
       }
       return;
@@ -1152,7 +1169,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
         handleSwitchStream(filteredRelated[idx + 1]);
       }
     }
-  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, updateWatchUrl, scrollToPlayer, filteredRelated, currentStreamId, handleSwitchStream]);
+  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, handleSelectEpisode, currentSeasonIndex, seasonList, seriesInfo, isCurrentlyInFullscreen, filteredRelated, currentStreamId, handleSwitchStream]);
 
   // Gerenciadores de download offline idênticos à página info (capítulos e títulos)
   const handleToggleEpisodeDownload = async (ep: SeriesEpisode, e: React.MouseEvent) => {

@@ -807,6 +807,118 @@ export async function checkIsDownloaded(id: string): Promise<boolean> {
 }
 
 /**
+ * Busca de forma síncrona/imediata do cache local de manifesto (0ms de espera)
+ */
+export function findCachedOfflineDownload(
+  streamType: 'movie' | 'series',
+  streamId: string | number,
+  seasonNum?: number | string,
+  episodeNum?: number | string,
+  episodeId?: string | number
+): OfflineDownload | undefined {
+  const cached = getCachedManifestSync();
+  if (!cached || cached.length === 0) return undefined;
+
+  const targetCleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNum ?? episodeId);
+  const exact = cached.find((d) => d.id === targetCleanId);
+  if (exact) return exact;
+
+  const strStreamId = String(streamId);
+  if (streamType === 'movie') {
+    return cached.find((d) => d.stream_type === 'movie' && String(d.stream_id) === strStreamId);
+  } else {
+    const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
+    const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
+    const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
+
+    return cached.find((d) => {
+      if (d.stream_type !== 'series') return false;
+      if (String(d.stream_id) !== strStreamId) return false;
+      if (strEpId && (String(d.episode_id) === strEpId || d.id === strEpId)) return true;
+      if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
+      if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
+      return false;
+    });
+  }
+}
+
+/**
+ * Busca robusta e multinível de download salvo offline (Cache -> Dexie -> Manifesto em Disco)
+ */
+export async function findOfflineDownloadRecord(
+  streamType: 'movie' | 'series',
+  streamId: string | number,
+  seasonNum?: number | string,
+  episodeNum?: number | string,
+  episodeId?: string | number
+): Promise<OfflineDownload | undefined> {
+  // 1. Tenta cache síncrono imediato de 0ms
+  const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNum, episodeId);
+  if (cached) return cached;
+
+  const targetCleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNum ?? episodeId);
+
+  // 2. Tenta IndexedDB Dexie
+  if (localDB?.offline_downloads) {
+    try {
+      const exact = await localDB.offline_downloads.get(targetCleanId);
+      if (exact) return exact;
+
+      const strStreamId = String(streamId);
+      const allForStream = await localDB.offline_downloads
+        .where('stream_id')
+        .equals(strStreamId)
+        .toArray();
+
+      if (streamType === 'movie') {
+        const movieRec = allForStream.find((i) => i.stream_type === 'movie');
+        if (movieRec) return movieRec;
+      } else {
+        const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
+        const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
+        const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
+
+        const seriesRec = allForStream.find((i) => {
+          if (i.stream_type !== 'series') return false;
+          if (strEpId && (String(i.episode_id) === strEpId || i.id === strEpId)) return true;
+          if (sNum !== undefined && i.season_num !== undefined && Number(i.season_num) !== sNum) return false;
+          if (eNum !== undefined && i.episode_num !== undefined && Number(i.episode_num) === eNum) return true;
+          return false;
+        });
+        if (seriesRec) return seriesRec;
+      }
+    } catch (e) {}
+  }
+
+  // 3. Fallback: manifesto completo do disco nativo / AndroidBridge
+  try {
+    const list = await getOfflineDownloadsList();
+    const exact = list.find((d) => d.id === targetCleanId);
+    if (exact) return exact;
+
+    const strStreamId = String(streamId);
+    if (streamType === 'movie') {
+      return list.find((d) => d.stream_type === 'movie' && String(d.stream_id) === strStreamId);
+    } else {
+      const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
+      const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
+      const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
+
+      return list.find((d) => {
+        if (d.stream_type !== 'series') return false;
+        if (String(d.stream_id) !== strStreamId) return false;
+        if (strEpId && (String(d.episode_id) === strEpId || d.id === strEpId)) return true;
+        if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
+        if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
+        return false;
+      });
+    }
+  } catch {}
+
+  return undefined;
+}
+
+/**
  * Retorna itens baixados agrupados por Título / Série (ideal para a aba Offline e Favoritos)
  */
 export async function getGroupedOfflineDownloads(cachedList?: OfflineDownload[]): Promise<GroupedDownloadItem[]> {

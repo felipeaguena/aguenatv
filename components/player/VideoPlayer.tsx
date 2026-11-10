@@ -585,51 +585,9 @@ export default function VideoPlayer({
     }
   }, []);
 
+  // 1. Efeito de Ciclo de Vida do Player: Monta a instância do Artplayer (somente quando streamType ou retryKey mudam)
   useEffect(() => {
     if (!artContainerRef.current || !streamUrl) return;
-
-    // Se a instância do Artplayer já está viva e o tipo de stream é o mesmo, faz a troca suave da URL
-    const currentArt = artInstanceRef.current;
-    if (currentArt && !currentArt.isDestroy && prevStreamTypeRef.current === streamType) {
-      if (prevStreamUrlRef.current !== streamUrl) {
-        prevStreamUrlRef.current = streamUrl;
-        triedExtensionsRef.current.clear();
-        retryCountRef.current = 0;
-        hasRestoredRef.current = false;
-        hasMarkedRef.current = false;
-        hasAutoAdvancedRef.current = false;
-        hasAutoSkippedIntroRef.current = false;
-        hasAutoSkippedOutroRef.current = false;
-        setShowSkipIntro(false);
-        setShowSkipOutro(false);
-        setNextEpisodeCountdown(null);
-        setError(null);
-        try {
-          currentArt.loading.show = true;
-        } catch (e) {}
-
-        if (posterUrl) {
-          try {
-            currentArt.poster = posterUrl;
-          } catch (e) {}
-        }
-
-        try {
-          currentArt.switchUrl(streamUrl).then(() => {
-            if (autoPlay) {
-              currentArt.play().catch(() => {});
-            }
-          }).catch((err) => {
-            console.warn('Falha no switchUrl suave do Artplayer, reinicializando player:', err);
-            setRetryKey((k) => k + 1);
-          });
-        } catch (err) {
-          console.warn('Erro síncrono no switchUrl, reinicializando player:', err);
-          setRetryKey((k) => k + 1);
-        }
-      }
-      return;
-    }
 
     prevStreamUrlRef.current = streamUrl;
     prevStreamTypeRef.current = streamType;
@@ -1558,7 +1516,30 @@ export default function VideoPlayer({
         type: streamTypeRef.current,
       });
 
-      // Se não for transmissão ao vivo e for arquivo de mídia, tenta alternar extensões candidatas (.mp4, .mkv, .ts)
+      const isLocalUrl =
+        currentUrl.includes('_local_video_') ||
+        currentUrl.includes('/videos/offline_') ||
+        currentUrl.includes('_capacitor_file_') ||
+        currentUrl.startsWith('file://');
+
+      if (isLocalUrl) {
+        if (retryCountRef.current < 2) {
+          retryCountRef.current += 1;
+          setTimeout(() => {
+            try {
+              if (!art.isDestroy && art.video) {
+                art.video.load();
+                art.video.play().catch(() => {});
+              }
+            } catch (e) {}
+          }, 800);
+          return;
+        }
+        setError('Não foi possível reproduzir o arquivo de vídeo baixado na memória. Verifique se o download foi concluído com sucesso.');
+        return;
+      }
+
+      // Se não for transmissão ao vivo e for arquivo de mídia remoto, tenta alternar extensões candidatas (.mp4, .mkv, .ts)
       if (streamTypeRef.current !== 'live' && !currentUrl.includes('.m3u8')) {
         const extMatch = currentUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
         const currentExt = extMatch ? extMatch[1].toLowerCase() : 'mp4';
@@ -1701,7 +1682,126 @@ export default function VideoPlayer({
         artInstanceRef.current = null;
       }
     };
-  }, [streamUrl, streamType, retryKey, autoPlay, initialTime, toggleFullscreen]);
+  }, [streamType, retryKey, toggleFullscreen]);
+
+  // 2. Efeito de Atualização da URL: quando o capítulo muda (autoplay/manual) ou URL local é resolvida,
+  // atualiza o Artplayer suavemente SEM destruir a instância, mantendo 100% o fullscreen e a orientação.
+  useEffect(() => {
+    const art = artInstanceRef.current;
+    if (!art || art.isDestroy) return;
+    if (!streamUrl || prevStreamUrlRef.current === streamUrl) return;
+
+    prevStreamUrlRef.current = streamUrl;
+    triedExtensionsRef.current.clear();
+    retryCountRef.current = 0;
+    hasRestoredRef.current = false;
+    hasMarkedRef.current = false;
+    hasAutoAdvancedRef.current = false;
+    hasAutoSkippedIntroRef.current = false;
+    hasAutoSkippedOutroRef.current = false;
+    setShowSkipIntro(false);
+    setShowSkipOutro(false);
+    setNextEpisodeCountdown(null);
+    setError(null);
+
+    // Identifica e preserva se o player estava em tela cheia (APK / WebView / Navegador)
+    const wasFullscreen = Boolean(
+      isFullscreenRef.current ||
+      art.fullscreen ||
+      art.fullscreenWeb ||
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      document.documentElement.classList.contains('art-immersive-active') ||
+      document.body.classList.contains('art-immersive-active')
+    );
+
+    if (wasFullscreen) {
+      isFullscreenRef.current = true;
+      setFullscreenCutoutMode(true);
+    }
+
+    try {
+      art.loading.show = true;
+    } catch (e) {}
+
+    if (posterUrl) {
+      try {
+        art.poster = posterUrl;
+      } catch (e) {}
+    }
+
+    // Se o stream anterior era HLS e o novo não é, limpa a instância anterior do Hls.js
+    const isNewHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
+    if (!isNewHls && (art as any).hls) {
+      try {
+        (art as any).hls.destroy();
+        (art as any).hls = null;
+      } catch (e) {}
+    }
+
+    try {
+      art.switchUrl(streamUrl).then(() => {
+        if (wasFullscreen) {
+          if (isMobileDevice()) {
+            art.fullscreenWeb = true;
+          } else {
+            try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
+          }
+          isFullscreenRef.current = true;
+          setFullscreenCutoutMode(true);
+        }
+        if (autoPlay) {
+          art.play().catch(() => {});
+        }
+      }).catch((err) => {
+        console.warn('[VideoPlayer] Falha no switchUrl do Artplayer, aplicando fallback suave:', err);
+        try {
+          if (art.video) {
+            art.video.src = streamUrl;
+            if (wasFullscreen) {
+              if (isMobileDevice()) {
+                art.fullscreenWeb = true;
+              } else {
+                try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
+              }
+              isFullscreenRef.current = true;
+              setFullscreenCutoutMode(true);
+            }
+            if (autoPlay) {
+              art.video.play().catch(() => {});
+            }
+          } else {
+            setRetryKey((k) => k + 1);
+          }
+        } catch {
+          setRetryKey((k) => k + 1);
+        }
+      });
+    } catch (err) {
+      console.warn('[VideoPlayer] Erro síncrono no switchUrl, aplicando fallback suave:', err);
+      try {
+        if (art.video) {
+          art.video.src = streamUrl;
+          if (wasFullscreen) {
+            if (isMobileDevice()) {
+              art.fullscreenWeb = true;
+            } else {
+              try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
+            }
+            isFullscreenRef.current = true;
+            setFullscreenCutoutMode(true);
+          }
+          if (autoPlay) {
+            art.video.play().catch(() => {});
+          }
+        } else {
+          setRetryKey((k) => k + 1);
+        }
+      } catch {
+        setRetryKey((k) => k + 1);
+      }
+    }
+  }, [streamUrl, posterUrl, autoPlay, streamType]);
 
   return (
     <div className="relative w-full h-full bg-black select-none overflow-hidden">

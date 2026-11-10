@@ -509,6 +509,9 @@ public class MainActivity extends BridgeActivity {
                     // Intercepta arquivos de vídeo offline (local) para reprodução offline instantânea com busca/range
                     if (path != null && (path.contains("/_local_video_/") || path.contains("/videos/offline_"))) {
                         String fileName = path.substring(path.lastIndexOf('/') + 1);
+                        try {
+                            fileName = java.net.URLDecoder.decode(fileName, "UTF-8");
+                        } catch (Exception ignored) {}
                         File videoFile = new File(new File(getFilesDir(), "videos"), fileName);
                         if (videoFile.exists() && videoFile.isFile()) {
                             return serveLocalVideoFile(request, videoFile);
@@ -551,18 +554,38 @@ public class MainActivity extends BridgeActivity {
     private WebResourceResponse serveLocalVideoFile(WebResourceRequest request, File videoFile) {
         try {
             long fileLength = videoFile.length();
-            String rangeHeader = request.getRequestHeaders().get("Range");
-            if (rangeHeader == null) {
-                rangeHeader = request.getRequestHeaders().get("range");
+            String mimeType = "video/mp4";
+            String lowerName = videoFile.getName().toLowerCase(Locale.ROOT);
+            if (lowerName.endsWith(".mkv")) {
+                mimeType = "video/x-matroska";
+            } else if (lowerName.endsWith(".ts")) {
+                mimeType = "video/mp2t";
+            } else if (lowerName.endsWith(".webm")) {
+                mimeType = "video/webm";
+            } else if (lowerName.endsWith(".avi")) {
+                mimeType = "video/x-msvideo";
             }
 
             Map<String, String> headers = new HashMap<>();
             headers.put("Accept-Ranges", "bytes");
             headers.put("Access-Control-Allow-Origin", "*");
+            headers.put("Access-Control-Allow-Headers", "*");
+            headers.put("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
+            headers.put("Content-Type", mimeType);
+            headers.put("Cache-Control", "no-cache");
 
-            String mimeType = "video/mp4";
-            if (videoFile.getName().endsWith(".mkv")) {
-                mimeType = "video/x-matroska";
+            // Resposta para requisição HEAD (verificação preliminar do player sem consumir dados)
+            if (request != null && "HEAD".equalsIgnoreCase(request.getMethod())) {
+                headers.put("Content-Length", String.valueOf(fileLength));
+                return new WebResourceResponse(mimeType, null, 200, "OK", headers, new java.io.ByteArrayInputStream(new byte[0]));
+            }
+
+            String rangeHeader = null;
+            if (request != null && request.getRequestHeaders() != null) {
+                rangeHeader = request.getRequestHeaders().get("Range");
+                if (rangeHeader == null) {
+                    rangeHeader = request.getRequestHeaders().get("range");
+                }
             }
 
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
@@ -585,11 +608,17 @@ public class MainActivity extends BridgeActivity {
                 if (end >= fileLength) {
                     end = fileLength - 1;
                 }
+                if (start < 0) {
+                    start = 0;
+                }
+                if (start > end) {
+                    start = end;
+                }
 
                 long contentLength = end - start + 1;
-                InputStream fis = new FileInputStream(videoFile);
+                FileInputStream fis = new FileInputStream(videoFile);
                 if (start > 0) {
-                    fis.skip(start);
+                    fis.getChannel().position(start);
                 }
 
                 final InputStream boundedIs = new BoundedInputStream(fis, contentLength);
@@ -597,11 +626,12 @@ public class MainActivity extends BridgeActivity {
                 headers.put("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
                 headers.put("Content-Length", String.valueOf(contentLength));
 
-                return new WebResourceResponse(mimeType, "UTF-8", 206, "Partial Content", headers, boundedIs);
+                // Para recursos binários (áudio/vídeo), encoding deve ser obrigatoriamente null
+                return new WebResourceResponse(mimeType, null, 206, "Partial Content", headers, boundedIs);
             } else {
                 headers.put("Content-Length", String.valueOf(fileLength));
-                InputStream fis = new FileInputStream(videoFile);
-                return new WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, fis);
+                FileInputStream fis = new FileInputStream(videoFile);
+                return new WebResourceResponse(mimeType, null, 200, "OK", headers, fis);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -633,6 +663,11 @@ public class MainActivity extends BridgeActivity {
             int bytesRead = in.read(b, off, toRead);
             if (bytesRead != -1) remaining -= bytesRead;
             return bytesRead;
+        }
+
+        @Override
+        public int available() throws IOException {
+            return (int) Math.min(in.available(), remaining);
         }
 
         @Override
