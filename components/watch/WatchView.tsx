@@ -34,6 +34,7 @@ import {
   buildDownloadId,
   checkIsDownloaded,
   getPlayableOfflineUrl,
+  getPlayableOfflineUrlSync,
   deleteOfflineDownload,
   getOfflineDownloadsList,
   findCachedOfflineDownload,
@@ -122,9 +123,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     const targetType = (type === 'movies' || type === 'movie') ? 'movie' : 'series';
     const cached = findCachedOfflineDownload(targetType, id, seasonParam || '1', episodeParam ? Number(episodeParam) : undefined, episodeParam || undefined);
     if (cached) {
-      if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineVideoUrl) {
-        return (window as any).AndroidBridge.getOfflineVideoUrl(cached.file_path);
-      }
+      return getPlayableOfflineUrlSync(cached);
     }
     return null;
   });
@@ -796,7 +795,61 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return { streamUrl: url, playerTitle: title, playerPoster: poster, currentActiveId: activeId };
   }, [config, cleanHost, item, isLive, isMovie, isSeries, activeEpisode, id, enrichedMetadata, seasonEpisodesMeta, selectedSeason]);
 
-  const finalPlayUrl = localPlayableUrl || streamUrl;
+  // Regra Estrita de Priorização: Se o item/capítulo possui download concluído,
+  // reproduz EXCLUSIVAMENTE pelo arquivo baixado local, sem requisitar internet.
+  // Caso não esteja baixado, recorre à reprodução via internet.
+  const activeOfflineDownload = useMemo(() => {
+    if (typeof window === 'undefined') return undefined;
+    const targetType = (type === 'movies' || type === 'movie' || item?.stream_type === 'movie') ? 'movie' : 'series';
+    const sNum = selectedSeason || seasonParam || '1';
+    const epNum = activeEpisode?.episode_num ?? (episodeParam ? Number(episodeParam) : undefined);
+    const epId = activeEpisode?.id ?? (episodeParam || undefined);
+
+    const fast = findCachedOfflineDownload(targetType, currentStreamId, sNum, epNum, epId);
+    if (fast) return fast;
+
+    if (downloadedMap && Object.keys(downloadedMap).length > 0) {
+      const cleanId = buildDownloadId(targetType, currentStreamId, sNum, epNum ?? epId);
+      if (downloadedMap[cleanId]) return downloadedMap[cleanId];
+
+      const strStreamId = String(currentStreamId);
+      const strEpId = epId !== undefined ? String(epId) : undefined;
+      const numEp = epNum !== undefined ? Number(epNum) : undefined;
+      const numSeason = sNum !== undefined ? Number(String(sNum).replace(/\D/g, '')) : undefined;
+
+      const found = Object.values(downloadedMap).find((d) => {
+        if (d.stream_type !== targetType) return false;
+        if (targetType === 'movie') {
+          return String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId);
+        }
+        const matchesStream =
+          String(d.stream_id) === strStreamId ||
+          String(d.episode_id) === strStreamId ||
+          d.id.includes(`_${strStreamId}_`) ||
+          d.id === strStreamId;
+        if (strEpId && (String(d.episode_id) === strEpId || d.id === strEpId || d.id.includes(`_${strEpId}`))) {
+          return true;
+        }
+        if (numSeason !== undefined && d.season_num !== undefined && Number(d.season_num) !== numSeason) return false;
+        if (numEp !== undefined && d.episode_num !== undefined && Number(d.episode_num) === numEp) return true;
+        return matchesStream && numEp === undefined && strEpId === undefined;
+      });
+      if (found) return found;
+    }
+    return undefined;
+  }, [type, item?.stream_type, selectedSeason, seasonParam, activeEpisode?.episode_num, activeEpisode?.id, episodeParam, currentStreamId, downloadedMap]);
+
+  const resolvedLocalPlayableUrl = useMemo(() => {
+    if (activeOfflineDownload) {
+      return getPlayableOfflineUrlSync(activeOfflineDownload);
+    }
+    return localPlayableUrl;
+  }, [activeOfflineDownload, localPlayableUrl]);
+
+  // REGRA MESTRA DE PRIORIZAÇÃO:
+  // Se houver arquivo baixado, finalPlayUrl É O ARQUIVO LOCAL (sem consumir internet).
+  // A URL remota via internet (streamUrl) só é utilizada se NÃO houver arquivo baixado!
+  const finalPlayUrl = resolvedLocalPlayableUrl || streamUrl;
 
   // Metadados do episódio atualmente em reprodução
   const currentEpMeta = useMemo(() => {
@@ -835,7 +888,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   // 6. Efeito: Busca Dados Técnicos do Vídeo (Tamanho em MB, Codec, Dimensões e Duração da CDN)
   useEffect(() => {
-    if (!streamUrl || isCurrentDownloaded) return;
+    if (!streamUrl || isCurrentDownloaded || activeOfflineDownload) return;
 
     let isMounted = true;
     async function fetchStreamTechStats() {
@@ -862,7 +915,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return () => {
       isMounted = false;
     };
-  }, [streamUrl]);
+  }, [streamUrl, isCurrentDownloaded, activeOfflineDownload]);
 
   const handlePlayerVideoInfo = useCallback((info: PlayerVideoInfo) => {
     setTechVideoStats((prev) => ({
@@ -1049,13 +1102,20 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }, []);
 
   const handleSelectEpisode = useCallback(
-    async (ep: SeriesEpisode, shouldScroll = true) => {
-      // 1. Imediatamente verifica se este episódio está salvo offline
+    (ep: SeriesEpisode, shouldScroll = true) => {
+      // 1. Imediatamente verifica se este episódio está salvo offline de forma síncrona
       const sNum = selectedSeason.replace(/\D/g, '') || '1';
-      const offRec = await findOfflineDownloadRecord('series', currentStreamId, sNum, ep.episode_num, ep.id);
+      const offRec =
+        findCachedOfflineDownload('series', currentStreamId, sNum, ep.episode_num, ep.id) ||
+        Object.values(downloadedMap).find((d) =>
+          d.stream_type === 'series' &&
+          (String(d.stream_id) === String(currentStreamId) || String(d.episode_id) === String(ep.id) || d.id.includes(String(ep.id))) &&
+          (Number(d.episode_num) === Number(ep.episode_num) || String(d.episode_id) === String(ep.id))
+        );
+
       if (offRec) {
         setIsCurrentDownloaded(true);
-        const localUrl = await getPlayableOfflineUrl(offRec);
+        const localUrl = getPlayableOfflineUrlSync(offRec);
         setLocalPlayableUrl(localUrl);
         setIsOfflineMode(true);
       } else {
@@ -1070,7 +1130,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
         scrollToPlayer();
       }
     },
-    [selectedSeason, currentStreamId, updateWatchUrl, scrollToPlayer, isCurrentlyInFullscreen]
+    [selectedSeason, currentStreamId, downloadedMap, updateWatchUrl, scrollToPlayer, isCurrentlyInFullscreen]
   );
 
   // Lista de episódios sem filtro de busca para navegação sequencial entre capítulos
@@ -1211,15 +1271,21 @@ export default function WatchView({ type, id }: WatchViewProps) {
           series_title: item?.title || item?.name,
           poster_url: epMeta?.thumbnailUrl || ep.info?.movie_image || item?.stream_icon,
           backdrop_url: enrichedMetadata?.backdropUrl || item?.stream_icon,
+          thumbnail_url: epMeta?.thumbnailUrl || ep.info?.movie_image,
           container_extension: ep.container_extension || 'mp4',
           season_num: Number(selectedSeason),
           episode_num: Number(ep.episode_num),
           episode_id: ep.id,
-          overview: epMeta?.overview || ep.info?.plot,
-          plot: epMeta?.overview || ep.info?.plot,
-          rating: epMeta?.rating !== undefined ? epMeta.rating : item?.rating,
-          genre: item?.category_name,
+          overview: epMeta?.overview || ep.info?.plot || enrichedMetadata?.overview || '',
+          plot: epMeta?.overview || ep.info?.plot || enrichedMetadata?.overview || '',
+          rating: epMeta?.rating !== undefined ? epMeta.rating : (enrichedMetadata?.rating || item?.rating),
+          genre: genresList.join(', ') || item?.category_name,
           episode_title: epMeta?.name || ep.title,
+          release_date: epMeta?.airDate ? epMeta.airDate.split('-').reverse().join('/') : enrichedMetadata?.releaseDate,
+          year: enrichedMetadata?.year || (item as any)?.year,
+          duration: displayDuration || techVideoStats.duration,
+          dimensions: displayDimensions || techVideoStats.dimensions,
+          codec: displayCodec || techVideoStats.codec,
         },
         streamUrl
       );
@@ -1531,9 +1597,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     const epNum = activeEpisode?.episode_num !== undefined ? Number(activeEpisode.episode_num) : undefined;
                     const epId = activeEpisode?.id;
                     const sNum = selectedSeason ? Number(selectedSeason) : undefined;
+                    const seriesOrMovieId = String(item?.stream_id || id);
                     const downId = buildDownloadId(
                       streamType === 'series' ? 'series' : 'movie',
-                      currentActiveId || id,
+                      seriesOrMovieId,
                       sNum,
                       epNum ?? epId
                     );
@@ -1554,21 +1621,27 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     try {
                       await downloadVideoForOffline(
                         {
-                          stream_id: String(currentActiveId || id),
+                          stream_id: seriesOrMovieId,
                           stream_type: streamType === 'series' ? 'series' : 'movie',
                           title: playerTitle,
                           series_title: item?.title || item?.name,
                           poster_url: playerPoster,
                           backdrop_url: enrichedMetadata?.backdropUrl || item?.stream_icon,
+                          thumbnail_url: currentEpMeta?.thumbnailUrl || activeEpisode?.info?.movie_image,
                           container_extension: item?.container_extension,
                           season_num: sNum,
                           episode_num: epNum,
                           episode_id: epId,
-                          overview: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview,
-                          plot: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview,
-                          rating: currentEpMeta?.rating !== undefined ? currentEpMeta.rating : item?.rating,
-                          genre: item?.category_name,
+                          overview: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview || '',
+                          plot: currentEpMeta?.overview || activeEpisode?.info?.plot || enrichedMetadata?.overview || '',
+                          rating: currentEpMeta?.rating !== undefined ? currentEpMeta.rating : (enrichedMetadata?.rating || item?.rating),
+                          genre: genresList.join(', ') || item?.category_name,
                           episode_title: currentEpMeta?.name || activeEpisode?.title,
+                          release_date: currentEpAirDate || enrichedMetadata?.releaseDate,
+                          year: enrichedMetadata?.year || (item as any)?.year,
+                          duration: displayDuration || techVideoStats.duration,
+                          dimensions: displayDimensions || techVideoStats.dimensions,
+                          codec: displayCodec || techVideoStats.codec,
                         },
                         streamUrl
                       );

@@ -1739,6 +1739,12 @@ export default function VideoPlayer({
       } catch (e) {}
     }
 
+    if (art.video) {
+      try {
+        art.video.pause();
+      } catch (e) {}
+    }
+
     try {
       art.switchUrl(streamUrl).then(() => {
         if (wasFullscreen) {

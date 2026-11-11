@@ -513,6 +513,16 @@ public class MainActivity extends BridgeActivity {
                             fileName = java.net.URLDecoder.decode(fileName, "UTF-8");
                         } catch (Exception ignored) {}
                         File videoFile = new File(new File(getFilesDir(), "videos"), fileName);
+                        if (!videoFile.exists()) {
+                            int dot = fileName.lastIndexOf('.');
+                            String base = dot != -1 ? fileName.substring(0, dot) : fileName;
+                            File[] candidates = new File(getFilesDir(), "videos").listFiles((dir, fName) ->
+                                fName.startsWith(base) && !fName.endsWith(".tmp") && !fName.endsWith(".json")
+                            );
+                            if (candidates != null && candidates.length > 0) {
+                                videoFile = candidates[0];
+                            }
+                        }
                         if (videoFile.exists() && videoFile.isFile()) {
                             return serveLocalVideoFile(request, videoFile);
                         }

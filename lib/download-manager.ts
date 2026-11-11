@@ -84,6 +84,7 @@ export interface OfflineDownload {
   series_title?: string;
   poster_url?: string;
   backdrop_url?: string;
+  thumbnail_url?: string;
   file_path: string;
   file_size?: number;
   downloaded_at: string;
@@ -96,6 +97,11 @@ export interface OfflineDownload {
   rating?: string | number;
   genre?: string;
   episode_title?: string;
+  release_date?: string;
+  year?: string | number;
+  duration?: string;
+  dimensions?: string;
+  codec?: string;
 }
 
 export interface GroupedDownloadItem {
@@ -299,6 +305,7 @@ export async function downloadVideoForOffline(
     series_title?: string;
     poster_url?: string;
     backdrop_url?: string;
+    thumbnail_url?: string;
     container_extension?: string;
     season_num?: number;
     episode_num?: number;
@@ -308,6 +315,11 @@ export async function downloadVideoForOffline(
     rating?: string | number;
     genre?: string;
     episode_title?: string;
+    release_date?: string;
+    year?: string | number;
+    duration?: string;
+    dimensions?: string;
+    codec?: string;
   },
   streamUrl: string,
   onProgress?: (progress: DownloadProgress) => void
@@ -329,6 +341,7 @@ export async function downloadVideoForOffline(
     series_title: item.series_title,
     poster_url: item.poster_url,
     backdrop_url: item.backdrop_url,
+    thumbnail_url: item.thumbnail_url,
     file_path: `videos/${fileName}`,
     downloaded_at: new Date().toISOString(),
     container_extension: extension,
@@ -340,6 +353,11 @@ export async function downloadVideoForOffline(
     rating: item.rating,
     genre: item.genre,
     episode_title: item.episode_title,
+    release_date: item.release_date,
+    year: item.year,
+    duration: item.duration,
+    dimensions: item.dimensions,
+    codec: item.codec,
   };
 
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Foreground Service Nativo Resiliente)
@@ -807,6 +825,25 @@ export async function checkIsDownloaded(id: string): Promise<boolean> {
 }
 
 /**
+ * Retorna a URL de reprodução offline síncrona imediata (0ms de espera)
+ */
+export function getPlayableOfflineUrlSync(download: OfflineDownload): string {
+  if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineVideoUrl) {
+    try {
+      const nativeUrl = (window as any).AndroidBridge.getOfflineVideoUrl(download.file_path);
+      if (nativeUrl) return nativeUrl;
+    } catch {}
+  }
+  const fileName = download.file_path.includes('/')
+    ? download.file_path.substring(download.file_path.lastIndexOf('/') + 1)
+    : download.file_path;
+  if (isNativeApp()) {
+    return `http://163.176.207.140/_local_video_/${encodeURIComponent(fileName)}`;
+  }
+  return download.file_path;
+}
+
+/**
  * Busca de forma síncrona/imediata do cache local de manifesto (0ms de espera)
  */
 export function findCachedOfflineDownload(
@@ -825,7 +862,11 @@ export function findCachedOfflineDownload(
 
   const strStreamId = String(streamId);
   if (streamType === 'movie') {
-    return cached.find((d) => d.stream_type === 'movie' && String(d.stream_id) === strStreamId);
+    return cached.find(
+      (d) =>
+        d.stream_type === 'movie' &&
+        (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
+    );
   } else {
     const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
     const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
@@ -833,11 +874,19 @@ export function findCachedOfflineDownload(
 
     return cached.find((d) => {
       if (d.stream_type !== 'series') return false;
-      if (String(d.stream_id) !== strStreamId) return false;
-      if (strEpId && (String(d.episode_id) === strEpId || d.id === strEpId)) return true;
+      const idMatches =
+        String(d.stream_id) === strStreamId ||
+        String(d.episode_id) === strStreamId ||
+        d.id === strStreamId ||
+        d.id.includes(`_${strStreamId}_`) ||
+        d.id.endsWith(`_${strStreamId}`);
+
+      if (strEpId) {
+        if (String(d.episode_id) === strEpId || d.id === strEpId || d.id.includes(`_${strEpId}`)) return true;
+      }
       if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
       if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-      return false;
+      return idMatches && eNum === undefined && strEpId === undefined;
     });
   }
 }
@@ -865,13 +914,14 @@ export async function findOfflineDownloadRecord(
       if (exact) return exact;
 
       const strStreamId = String(streamId);
-      const allForStream = await localDB.offline_downloads
-        .where('stream_id')
-        .equals(strStreamId)
-        .toArray();
+      const allForStream = await localDB.offline_downloads.toArray();
 
       if (streamType === 'movie') {
-        const movieRec = allForStream.find((i) => i.stream_type === 'movie');
+        const movieRec = allForStream.find(
+          (i) =>
+            i.stream_type === 'movie' &&
+            (String(i.stream_id) === strStreamId || i.id === `movie_${strStreamId}` || i.id.includes(strStreamId))
+        );
         if (movieRec) return movieRec;
       } else {
         const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
@@ -880,10 +930,19 @@ export async function findOfflineDownloadRecord(
 
         const seriesRec = allForStream.find((i) => {
           if (i.stream_type !== 'series') return false;
-          if (strEpId && (String(i.episode_id) === strEpId || i.id === strEpId)) return true;
+          const idMatches =
+            String(i.stream_id) === strStreamId ||
+            String(i.episode_id) === strStreamId ||
+            i.id === strStreamId ||
+            i.id.includes(`_${strStreamId}_`) ||
+            i.id.endsWith(`_${strStreamId}`);
+
+          if (strEpId) {
+            if (String(i.episode_id) === strEpId || i.id === strEpId || i.id.includes(`_${strEpId}`)) return true;
+          }
           if (sNum !== undefined && i.season_num !== undefined && Number(i.season_num) !== sNum) return false;
           if (eNum !== undefined && i.episode_num !== undefined && Number(i.episode_num) === eNum) return true;
-          return false;
+          return idMatches && eNum === undefined && strEpId === undefined;
         });
         if (seriesRec) return seriesRec;
       }
@@ -898,7 +957,11 @@ export async function findOfflineDownloadRecord(
 
     const strStreamId = String(streamId);
     if (streamType === 'movie') {
-      return list.find((d) => d.stream_type === 'movie' && String(d.stream_id) === strStreamId);
+      return list.find(
+        (d) =>
+          d.stream_type === 'movie' &&
+          (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
+      );
     } else {
       const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
       const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
@@ -906,11 +969,19 @@ export async function findOfflineDownloadRecord(
 
       return list.find((d) => {
         if (d.stream_type !== 'series') return false;
-        if (String(d.stream_id) !== strStreamId) return false;
-        if (strEpId && (String(d.episode_id) === strEpId || d.id === strEpId)) return true;
+        const idMatches =
+          String(d.stream_id) === strStreamId ||
+          String(d.episode_id) === strStreamId ||
+          d.id === strStreamId ||
+          d.id.includes(`_${strStreamId}_`) ||
+          d.id.endsWith(`_${strStreamId}`);
+
+        if (strEpId) {
+          if (String(d.episode_id) === strEpId || d.id === strEpId || d.id.includes(`_${strEpId}`)) return true;
+        }
         if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
         if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-        return false;
+        return idMatches && eNum === undefined && strEpId === undefined;
       });
     }
   } catch {}
@@ -926,8 +997,11 @@ export async function getGroupedOfflineDownloads(cachedList?: OfflineDownload[])
   const map = new Map<string, GroupedDownloadItem>();
 
   for (const item of all) {
-    const groupKey = `${item.stream_type}_${item.stream_id}`;
     const mainTitle = item.series_title || (item.stream_type === 'series' ? item.title.split(' - ')[0] : item.title);
+    const groupKey =
+      item.stream_type === 'series'
+        ? `series_${(item.series_title || mainTitle).trim().toLowerCase()}`
+        : `movie_${item.stream_id}`;
 
     if (!map.has(groupKey)) {
       map.set(groupKey, {
@@ -974,15 +1048,13 @@ export async function getGroupedOfflineDownloads(cachedList?: OfflineDownload[])
  * Converte o arquivo local para uma URL que o player de vídeo consegue reproduzir offline
  */
 export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<string> {
+  const syncUrl = getPlayableOfflineUrlSync(download);
+  if (syncUrl && syncUrl.includes('/_local_video_/')) {
+    return syncUrl;
+  }
+
   if (isNativeApp()) {
     try {
-      // 1. Se houver AndroidBridge nativo com suporte a streaming de vídeo offline
-      if (typeof window !== 'undefined' && (window as any).AndroidBridge?.getOfflineVideoUrl) {
-        const nativeUrl = (window as any).AndroidBridge.getOfflineVideoUrl(download.file_path);
-        if (nativeUrl) return nativeUrl;
-      }
-
-      // 2. Se o caminho já for absoluto do sistema de arquivos ou file://
       if (download.file_path && (download.file_path.startsWith('/') || download.file_path.startsWith('file://'))) {
         return Capacitor.convertFileSrc(download.file_path);
       }
@@ -995,10 +1067,10 @@ export async function getPlayableOfflineUrl(download: OfflineDownload): Promise<
       }
       return Capacitor.convertFileSrc(download.file_path);
     } catch {
-      return download.file_path;
+      return syncUrl || download.file_path;
     }
   }
-  return download.file_path;
+  return syncUrl || download.file_path;
 }
 
 /**

@@ -20,6 +20,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Layers,
+  Star,
+  Calendar,
+  Monitor,
+  Cpu,
+  Info,
+  Tag,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   getGroupedOfflineDownloads,
@@ -28,6 +35,7 @@ import {
   deleteGroupDownloads,
   formatDownloadSize,
   getPlayableOfflineUrl,
+  getPlayableOfflineUrlSync,
   getCachedManifestSync,
   GroupedDownloadItem,
   OfflineDownload,
@@ -56,8 +64,12 @@ function OfflineWatchContent() {
       if (initial.length > 0) {
         const map = new Map<string, GroupedDownloadItem>();
         for (const item of initial) {
-          const groupKey = `${item.stream_type}_${item.stream_id}`;
           const mainTitle = item.series_title || (item.stream_type === 'series' ? item.title.split(' - ')[0] : item.title);
+          const groupKey =
+            item.stream_type === 'series'
+              ? `series_${(item.series_title || mainTitle).trim().toLowerCase()}`
+              : `movie_${item.stream_id}`;
+
           if (!map.has(groupKey)) {
             map.set(groupKey, {
               stream_id: item.stream_id,
@@ -87,7 +99,7 @@ function OfflineWatchContent() {
   const [selectedGroup, setSelectedGroup] = useState<GroupedDownloadItem | null>(null);
   const [activeEpisode, setActiveEpisode] = useState<OfflineDownload | null>(null);
   const [playableUrl, setPlayableUrl] = useState<string | null>(null);
-  const [isUrlResolving, setIsUrlResolving] = useState(false);
+  const [episodeSearch, setEpisodeSearch] = useState('');
   const [loading, setLoading] = useState(() => {
     if (typeof window !== 'undefined') {
       const initial = getCachedManifestSync();
@@ -99,22 +111,18 @@ function OfflineWatchContent() {
   const [filterTab, setFilterTab] = useState<'all' | 'movie' | 'series'>('all');
   const [isNative, setIsNative] = useState(false);
 
-  // Seleciona um grupo de título para abrir a página de reprodução
-  const handleOpenTitle = useCallback(async (group: GroupedDownloadItem) => {
+  // Seleciona um grupo de título para abrir a página de reprodução estilo Watch
+  const handleOpenTitle = useCallback((group: GroupedDownloadItem, targetEp?: OfflineDownload) => {
     setSelectedGroup(group);
-    if (group.episodes && group.episodes.length > 0) {
-      const firstEp = group.episodes[0];
-      setActiveEpisode(firstEp);
-      setIsUrlResolving(true);
-      try {
-        const url = await getPlayableOfflineUrl(firstEp);
-        setPlayableUrl(url);
-      } catch (err) {
-        console.warn('Erro ao resolver URL offline:', err);
-        setPlayableUrl(firstEp.file_path);
-      } finally {
-        setIsUrlResolving(false);
-      }
+    const chosenEp = targetEp || (group.episodes && group.episodes.length > 0 ? group.episodes[0] : null);
+    if (chosenEp) {
+      setActiveEpisode(chosenEp);
+      const syncUrl = getPlayableOfflineUrlSync(chosenEp);
+      setPlayableUrl(syncUrl);
+      // Confirmação assíncrona
+      getPlayableOfflineUrl(chosenEp).then((u) => {
+        if (u) setPlayableUrl(u);
+      }).catch(() => {});
     } else {
       setActiveEpisode(null);
       setPlayableUrl(null);
@@ -135,8 +143,8 @@ function OfflineWatchContent() {
       if (selectedGroup) {
         const stillGroup = grouped.find(
           (g) =>
-            String(g.stream_id) === String(selectedGroup.stream_id) &&
-            g.stream_type === selectedGroup.stream_type
+            (String(g.stream_id) === String(selectedGroup.stream_id) && g.stream_type === selectedGroup.stream_type) ||
+            g.title.toLowerCase() === selectedGroup.title.toLowerCase()
         );
         if (stillGroup) {
           setSelectedGroup(stillGroup);
@@ -144,18 +152,20 @@ function OfflineWatchContent() {
             const stillEp = stillGroup.episodes.find((e) => e.id === activeEpisode.id);
             if (stillEp) {
               setActiveEpisode(stillEp);
-              const url = await getPlayableOfflineUrl(stillEp);
-              setPlayableUrl(url);
+              setPlayableUrl(getPlayableOfflineUrlSync(stillEp));
             } else if (stillGroup.episodes.length > 0) {
               const firstEp = stillGroup.episodes[0];
               setActiveEpisode(firstEp);
-              const url = await getPlayableOfflineUrl(firstEp);
-              setPlayableUrl(url);
+              setPlayableUrl(getPlayableOfflineUrlSync(firstEp));
             }
           }
         }
       } else if (initialTitleParam) {
-        const found = grouped.find((g) => `${g.stream_type}_${g.stream_id}` === initialTitleParam);
+        const found = grouped.find(
+          (g) =>
+            `${g.stream_type}_${g.stream_id}` === initialTitleParam ||
+            g.title.toLowerCase() === initialTitleParam.toLowerCase()
+        );
         if (found) {
           handleOpenTitle(found);
         }
@@ -179,28 +189,24 @@ function OfflineWatchContent() {
     };
     window.addEventListener(PROGRESS_EVENT, handleProgress);
     return () => window.removeEventListener(PROGRESS_EVENT, handleProgress);
-  }, []);
+  }, [loadDownloads]);
 
   // Volta da tela de reprodução para a tela de catálogo de títulos
   const handleBackToCatalog = () => {
     setSelectedGroup(null);
     setActiveEpisode(null);
     setPlayableUrl(null);
+    setEpisodeSearch('');
   };
 
-  // Alterna o capítulo selecionado na tela de reprodução
-  const handleSelectEpisode = async (ep: OfflineDownload) => {
+  // Alterna o capítulo selecionado na tela de reprodução de forma 100% síncrona
+  const handleSelectEpisode = (ep: OfflineDownload) => {
     setActiveEpisode(ep);
-    setIsUrlResolving(true);
-    try {
-      const url = await getPlayableOfflineUrl(ep);
-      setPlayableUrl(url);
-    } catch {
-      setPlayableUrl(ep.file_path);
-    } finally {
-      setIsUrlResolving(false);
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const syncUrl = getPlayableOfflineUrlSync(ep);
+    setPlayableUrl(syncUrl);
+    getPlayableOfflineUrl(ep).then((u) => {
+      if (u) setPlayableUrl(u);
+    }).catch(() => {});
   };
 
   // Exclui item individual da memória
@@ -232,7 +238,7 @@ function OfflineWatchContent() {
     await deleteGroupDownloads(streamType, streamId);
     if (
       selectedGroup &&
-      String(selectedGroup.stream_id) === String(streamId) &&
+      (String(selectedGroup.stream_id) === String(streamId) || selectedGroup.title === title) &&
       selectedGroup.stream_type === streamType
     ) {
       setSelectedGroup(null);
@@ -269,6 +275,17 @@ function OfflineWatchContent() {
     return selectedGroup?.episodes || [];
   }, [selectedGroup]);
 
+  const filteredEpisodesList = useMemo(() => {
+    if (!episodeSearch.trim()) return currentEpisodesList;
+    const q = episodeSearch.toLowerCase();
+    return currentEpisodesList.filter(
+      (ep) =>
+        ep.title.toLowerCase().includes(q) ||
+        (ep.episode_title && ep.episode_title.toLowerCase().includes(q)) ||
+        String(ep.episode_num || '').includes(q)
+    );
+  }, [currentEpisodesList, episodeSearch]);
+
   const currentEpisodeIndex = useMemo(() => {
     if (!activeEpisode || !currentEpisodesList.length) return -1;
     return currentEpisodesList.findIndex((ep) => ep.id === activeEpisode.id);
@@ -304,6 +321,41 @@ function OfflineWatchContent() {
     return activeEpisode.title;
   }, [activeEpisode, selectedGroup]);
 
+  // Metadados EXIF e Descrição enriquecida do item ativo
+  const activePlot = useMemo(() => {
+    if (!activeEpisode) return '';
+    return (
+      activeEpisode.overview ||
+      activeEpisode.plot ||
+      selectedGroup?.episodes.find((e) => e.overview || e.plot)?.overview ||
+      ''
+    );
+  }, [activeEpisode, selectedGroup]);
+
+  const activeRating = useMemo(() => {
+    if (!activeEpisode) return null;
+    return activeEpisode.rating || selectedGroup?.episodes.find((e) => e.rating)?.rating || null;
+  }, [activeEpisode, selectedGroup]);
+
+  const activeGenre = useMemo(() => {
+    if (!activeEpisode) return 'Conteúdo Offline';
+    return (
+      activeEpisode.genre ||
+      selectedGroup?.episodes.find((e) => e.genre)?.genre ||
+      (activeEpisode.stream_type === 'series' ? 'Série' : 'Filme')
+    );
+  }, [activeEpisode, selectedGroup]);
+
+  const activeYear = useMemo(() => {
+    if (!activeEpisode) return null;
+    return (
+      activeEpisode.year ||
+      activeEpisode.release_date?.slice(0, 4) ||
+      selectedGroup?.episodes.find((e) => e.year || e.release_date)?.year ||
+      null
+    );
+  }, [activeEpisode, selectedGroup]);
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center space-y-3">
@@ -316,14 +368,14 @@ function OfflineWatchContent() {
   }
 
   // =========================================================================
-  // CENÁRIO 2: REPRODUÇÃO DO TÍTULO SELECIONADO (ESTILO WATCH COM CAPÍTULOS)
+  // CENÁRIO 2: REPRODUÇÃO DO TÍTULO SELECIONADO (ESTILO WATCHVIEW CINEMA 12-COLUNAS)
   // =========================================================================
   if (selectedGroup && activeEpisode) {
     const isSeries = selectedGroup.stream_type === 'series';
 
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 sm:pb-12 space-y-6 pt-[calc(1.5rem+env(safe-area-inset-top,0px))]">
-        {/* Barra Superior de Navegação para Retorno ao Catálogo de Baixados */}
+        {/* Barra Superior de Navegação idêntica à WatchView */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -340,6 +392,10 @@ function OfflineWatchContent() {
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
                   {isSeries ? 'Série Offline' : 'Filme Offline'}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  <span>Local</span>
                 </span>
                 <span className="text-xs text-neutral-400 font-medium truncate">
                   {selectedGroup.title}
@@ -372,173 +428,331 @@ function OfflineWatchContent() {
           </div>
         </div>
 
-        {/* Grid Principal: Player Central Cinema + Controles de Capítulos */}
-        <div className="flex flex-col gap-4 max-w-5xl mx-auto w-full">
-          {/* Frame do Player: Widescreen 16:9, SEM AUTOPLAY (o usuário precisa dar play primeiro) */}
-          <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative flex items-center justify-center">
-            {playableUrl ? (
-              <VideoPlayer
-                streamUrl={playableUrl}
-                title={playerDisplayTitle}
-                streamId={String(activeEpisode.stream_id)}
-                streamType={activeEpisode.stream_type}
-                posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
-                autoPlay={false}
-                hasPrevEpisode={isSeries && canGoPrev}
-                onPrevEpisode={isSeries && canGoPrev ? handlePrevChapter : undefined}
-                prevEpisodeLabel="Capítulo Anterior"
-                hasNextEpisode={isSeries && canGoNext}
-                onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
-                nextEpisodeLabel="Próximo Episódio"
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center">
-                <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-xs text-neutral-300 font-semibold tracking-wide">
-                  Carregando vídeo offline da memória local...
+        {/* Grid Principal Cinema 12 Colunas (Player + Painel Lateral de Capítulos) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0 lg:items-start">
+          {/* Lado Esquerdo: Player Cinema + Specs Técnicas + Navegação de Capítulos + Descrição EXIF (8 Colunas) */}
+          <div className="lg:col-span-8 xl:col-span-8 flex flex-col gap-3 min-w-0 self-start">
+            {/* Frame do Player Widescreen 16:9 */}
+            <div className="aspect-video w-full rounded-2xl sm:rounded-3xl overflow-hidden bg-black border border-white/10 shadow-2xl relative flex items-center justify-center">
+              {playableUrl ? (
+                <VideoPlayer
+                  streamUrl={playableUrl}
+                  title={playerDisplayTitle}
+                  streamId={String(activeEpisode.stream_id)}
+                  streamType={activeEpisode.stream_type}
+                  posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
+                  autoPlay={true}
+                  hasPrevEpisode={isSeries && canGoPrev}
+                  onPrevEpisode={isSeries && canGoPrev ? handlePrevChapter : undefined}
+                  prevEpisodeLabel="Capítulo Anterior"
+                  hasNextEpisode={isSeries && canGoNext}
+                  onNextEpisode={isSeries && canGoNext ? handleNextChapter : undefined}
+                  nextEpisodeLabel="Próximo Capítulo"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center space-y-3 p-6 text-center">
+                  <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-xs text-neutral-300 font-semibold tracking-wide">
+                    Carregando arquivo offline da memória local...
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Informações Técnicas Diretamente Abaixo do Player (Idêntico à WatchView) */}
+            <div className="pt-1 pb-1 space-y-2.5 w-full min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-neutral-300 text-[11px] w-full">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Modo Offline (Armazenamento Local)</span>
+                  </div>
+
+                  {/* Duração */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                    <Clock className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                    <span className="text-neutral-400">Duração:</span>
+                    <span className="font-bold text-white">{activeEpisode.duration || '24 min'}</span>
+                  </div>
+
+                  {/* Tamanho */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                    <HardDrive className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                    <span className="text-neutral-400">Tamanho:</span>
+                    <span className="font-bold text-white font-mono">{formatDownloadSize(activeEpisode.file_size)}</span>
+                  </div>
+
+                  {/* Dimensões */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                    <Monitor className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                    <span className="text-neutral-400">Dimensões:</span>
+                    <span className="font-bold text-white font-mono">{activeEpisode.dimensions || '1080p FHD'}</span>
+                  </div>
+
+                  {/* Codec */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+                    <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                    <span className="text-neutral-400">Codec:</span>
+                    <span className="font-bold text-white">{activeEpisode.codec || (activeEpisode.container_extension || 'mp4').toUpperCase()}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-neutral-500 font-mono">
+                    {new Date(activeEpisode.downloaded_at).toLocaleDateString('pt-BR')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Barra de Navegação entre Capítulos logo após o player */}
+            {isSeries && (
+              <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
+                <button
+                  type="button"
+                  onClick={handlePrevChapter}
+                  disabled={!canGoPrev}
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
+                    canGoPrev
+                      ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
+                      : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
+                  }`}
+                  title={canGoPrev ? 'Voltar para o capítulo anterior' : 'Não há capítulo anterior'}
+                >
+                  <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
+                  <span className="truncate">Capítulo Anterior</span>
+                </button>
+
+                <div className="flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
+                  <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
+                    Capítulo Atual
+                  </span>
+                  <span className="text-xs font-bold text-violet-300 truncate w-full">
+                    {activeEpisode.season_num && activeEpisode.episode_num
+                      ? `T${activeEpisode.season_num} • EP ${activeEpisode.episode_num}`
+                      : activeEpisode.title}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleNextChapter}
+                  disabled={!canGoNext}
+                  className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
+                    canGoNext
+                      ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
+                      : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
+                  }`}
+                  title={canGoNext ? 'Ir para o próximo capítulo' : 'Não há próximo capítulo'}
+                >
+                  <span className="truncate">Próximo Capítulo</span>
+                  <ChevronRight className="w-4 h-4 text-white shrink-0" />
+                </button>
+              </div>
+            )}
+
+            {/* Card Completo de Informações do Título, Sinopse e Metadados EXIF */}
+            <div className="p-5 sm:p-6 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-4">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                    {selectedGroup.title}
+                  </h2>
+                  {activeEpisode.episode_title && (
+                    <p className="text-xs sm:text-sm font-semibold text-violet-300 mt-0.5">
+                      {activeEpisode.episode_title}
+                    </p>
+                  )}
+                </div>
+
+                {/* Badges de Metadados EXIF: Nota, Ano, Gênero */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {activeRating && (
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold">
+                      <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                      <span>{Number(activeRating).toFixed(1)}</span>
+                    </div>
+                  )}
+                  {activeYear && (
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-neutral-300 text-xs font-medium">
+                      <Calendar className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>{activeYear}</span>
+                    </div>
+                  )}
+                  {activeGenre && (
+                    <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-300 text-xs font-semibold">
+                      <Tag className="w-3 h-3 text-violet-400" />
+                      <span>{activeGenre}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sinopse / Descrição Completa */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Sinopse / Descrição</span>
+                </h3>
+                <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed">
+                  {activePlot || 'Este vídeo baixado está pronto para reprodução local sem necessidade de conexão com a internet.'}
                 </p>
               </div>
-            )}
-          </div>
 
-          {/* Barra de Navegação entre Capítulos logo após o frame do player na mesma div */}
-          <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
-            <button
-              type="button"
-              onClick={handlePrevChapter}
-              disabled={!canGoPrev}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                canGoPrev
-                  ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
-                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-              }`}
-              title={canGoPrev ? 'Voltar para o capítulo anterior' : 'Não há capítulo anterior'}
-            >
-              <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
-              <span className="truncate">Capítulo Anterior</span>
-            </button>
-
-            {isSeries && activeEpisode && (
-              <div className="hidden sm:flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
-                <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
-                  Capítulo Atual
-                </span>
-                <span className="text-xs font-bold text-violet-300 truncate w-full">
-                  {activeEpisode.season_num && activeEpisode.episode_num
-                    ? `T${activeEpisode.season_num} • EP ${activeEpisode.episode_num}`
-                    : activeEpisode.title}
-                </span>
+              {/* Dados do Arquivo Físico Local */}
+              <div className="pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-3 text-[11px] text-neutral-500">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Arquivo verificado e disponível offline</span>
+                </div>
+                <span className="font-mono">{activeEpisode.file_path}</span>
               </div>
-            )}
-
-            <button
-              type="button"
-              onClick={handleNextChapter}
-              disabled={!canGoNext}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                canGoNext
-                  ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
-                  : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-              }`}
-              title={canGoNext ? 'Ir para o próximo capítulo' : 'Não há próximo capítulo'}
-            >
-              <span className="truncate">Próximo Capítulo</span>
-              <ChevronRight className="w-4 h-4 text-white shrink-0" />
-            </button>
+            </div>
           </div>
 
-          {/* Barra de Status do Arquivo Local */}
-          <div className="p-3 rounded-2xl bg-[#13141b] border border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-300">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>
-                Reproduzindo arquivo local (
-                <strong className="text-white font-mono">
-                  {formatDownloadSize(activeEpisode.file_size)}
-                </strong>
-                )
-              </span>
-            </div>
-            <span className="text-[11px] text-neutral-500">
-              Salvo em: {new Date(activeEpisode.downloaded_at).toLocaleDateString('pt-BR')}
-            </span>
-          </div>
+          {/* Lado Direito: Coluna de Capítulos Baixados ou Detalhes do Filme (4 Colunas) */}
+          <div className="lg:col-span-4 xl:col-span-4 flex flex-col gap-4 min-w-0">
+            {isSeries ? (
+              <div className="p-4 sm:p-5 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-violet-400" />
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                      Capítulos Baixados
+                    </h3>
+                  </div>
+                  <span className="text-xs font-bold text-violet-400 bg-violet-500/10 px-2.5 py-1 rounded-xl border border-violet-500/20">
+                    {currentEpisodesList.length} {currentEpisodesList.length === 1 ? 'capítulo' : 'capítulos'}
+                  </span>
+                </div>
 
-          {/* Sequência de Capítulos Baixados deste Título Listados Abaixo */}
-          <div className="p-4 sm:p-5 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4 mt-2">
-            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-              <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-violet-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  {isSeries ? 'Capítulos Disponíveis nesta Série' : 'Arquivo do Filme'}
-                </h3>
-              </div>
-              <span className="text-xs font-semibold text-neutral-400">
-                {currentEpisodesList.length} {currentEpisodesList.length === 1 ? 'item' : 'itens'}
-              </span>
-            </div>
+                {/* Filtro de Busca de Capítulos */}
+                {currentEpisodesList.length > 3 && (
+                  <div className="relative w-full">
+                    <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Filtrar episódios salvos..."
+                      value={episodeSearch}
+                      onChange={(e) => setEpisodeSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-black/40 border border-white/10 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-violet-500 transition"
+                    />
+                  </div>
+                )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {currentEpisodesList.map((ep, idx) => {
-                const isCurrentPlaying = activeEpisode?.id === ep.id;
-                const epLabel =
-                  isSeries && ep.season_num && ep.episode_num
-                    ? `T${ep.season_num} • EP ${ep.episode_num}`
-                    : ep.title;
+                {/* Lista de Cards de Episódios idêntica à WatchView */}
+                <div className="flex flex-col gap-2 max-h-[560px] overflow-y-auto pr-1">
+                  {filteredEpisodesList.map((ep) => {
+                    const isCurrentPlaying = activeEpisode?.id === ep.id;
+                    const epLabel =
+                      ep.season_num && ep.episode_num
+                        ? `T${ep.season_num} • EP ${ep.episode_num}`
+                        : ep.title;
 
-                return (
-                  <div
-                    key={ep.id}
-                    onClick={() => handleSelectEpisode(ep)}
-                    className={`p-3 rounded-2xl flex items-center justify-between gap-3 cursor-pointer transition border ${
-                      isCurrentPlaying
-                        ? 'bg-violet-600/25 border-violet-500 text-violet-200 shadow-lg shadow-violet-600/20'
-                        : 'bg-white/5 border-white/5 hover:bg-white/10 text-neutral-300 hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-violet-600/20 text-violet-300 flex items-center justify-center shrink-0">
-                        {isCurrentPlaying ? (
-                          <Volume2 className="w-4 h-4 animate-pulse text-violet-400" />
-                        ) : (
-                          <Play className="w-3.5 h-3.5 fill-current" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p
-                          className={`text-xs font-bold truncate ${
-                            isCurrentPlaying ? 'text-violet-300' : 'text-white'
-                          }`}
-                        >
-                          {epLabel}
-                        </p>
-                        <div className="flex items-center gap-2 text-[10px] text-neutral-400 mt-0.5">
-                          <span>{formatDownloadSize(ep.file_size)}</span>
-                          <span>•</span>
-                          <span>{ep.container_extension || 'mp4'}</span>
+                    return (
+                      <div
+                        key={ep.id}
+                        onClick={() => handleSelectEpisode(ep)}
+                        className={`p-3 rounded-2xl flex items-center justify-between gap-3 cursor-pointer transition border ${
+                          isCurrentPlaying
+                            ? 'bg-violet-600/25 border-violet-500 text-violet-200 shadow-lg shadow-violet-600/20'
+                            : 'bg-white/5 border-white/5 hover:bg-white/10 text-neutral-300 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {/* Thumbnail / Poster do Capítulo */}
+                          <div className="w-12 h-12 rounded-xl overflow-hidden bg-black/60 shrink-0 relative border border-white/10">
+                            {ep.thumbnail_url || ep.poster_url ? (
+                              <ImageWithFallback
+                                src={ep.thumbnail_url || ep.poster_url!}
+                                alt={epLabel}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-neutral-600">
+                                <Play className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                              {isCurrentPlaying ? (
+                                <Volume2 className="w-4 h-4 text-violet-400 animate-pulse" />
+                              ) : (
+                                <Play className="w-3.5 h-3.5 text-white/80 fill-current" />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="min-w-0">
+                            <p
+                              className={`text-xs font-bold truncate ${
+                                isCurrentPlaying ? 'text-violet-300' : 'text-white'
+                              }`}
+                            >
+                              {epLabel}
+                            </p>
+                            {ep.episode_title && (
+                              <p className="text-[11px] text-neutral-400 truncate">
+                                {ep.episode_title}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 text-[10px] text-neutral-500 mt-0.5">
+                              <span>{formatDownloadSize(ep.file_size)}</span>
+                              <span>•</span>
+                              <span>{ep.container_extension || 'mp4'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {isCurrentPlaying && (
+                            <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-violet-500 text-white shadow-sm">
+                              Ativo
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteItem(ep.id, ep.title, e)}
+                            className="p-1.5 rounded-lg bg-black/40 hover:bg-rose-600 text-neutral-400 hover:text-white transition cursor-pointer"
+                            title="Excluir este capítulo da memória"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* Painel Lateral para Filme */
+              <div className="p-5 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4">
+                <div className="aspect-[2/3] w-full rounded-2xl overflow-hidden bg-black/40 relative border border-white/10">
+                  {selectedGroup.poster_url ? (
+                    <ImageWithFallback
+                      src={selectedGroup.poster_url}
+                      alt={selectedGroup.title}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-neutral-600">
+                      <Film className="w-12 h-12" />
                     </div>
+                  )}
+                </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      {isCurrentPlaying && (
-                        <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-violet-500 text-white">
-                          Ativo
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteItem(ep.id, ep.title, e)}
-                        className="p-1.5 rounded-lg bg-black/40 hover:bg-rose-600 text-neutral-400 hover:text-white transition cursor-pointer"
-                        title="Excluir este capítulo da memória"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-white">{selectedGroup.title}</h4>
+                  <div className="flex items-center justify-between text-xs text-neutral-400 border-t border-white/5 pt-2">
+                    <span>Espaço em disco:</span>
+                    <strong className="text-white font-mono">{formatDownloadSize(selectedGroup.total_size)}</strong>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="flex items-center justify-between text-xs text-neutral-400 border-t border-white/5 pt-2">
+                    <span>Formato do contêiner:</span>
+                    <strong className="text-white uppercase font-mono">{activeEpisode.container_extension || 'mp4'}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -645,109 +859,113 @@ function OfflineWatchContent() {
         </div>
       )}
 
-      {/* 3. Grid de Títulos Baixados (Escolha de Título) */}
+      {/* 3. Grid de Títulos Baixados (Escolha de Título com Aparência Estilo Watch) */}
       {groupedDownloads.length === 0 ? (
         <div className="p-16 rounded-3xl bg-[#13141b] border border-white/10 text-center space-y-4">
-          <div className="w-14 h-14 rounded-3xl bg-violet-600/15 text-violet-400 border border-violet-500/30 flex items-center justify-center mx-auto shadow-lg">
+          <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-neutral-500">
             <HardDrive className="w-7 h-7" />
           </div>
-          <div className="space-y-1.5">
-            <h3 className="text-base font-bold text-white">Nenhum vídeo baixado para uso offline</h3>
-            <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
-              Você pode baixar filmes e episódios de séries enquanto estiver conectado clicando no
-              botão &quot;Baixar Offline&quot; na tela de detalhes ou no player de vídeo.
+          <div>
+            <h3 className="text-base font-bold text-white">Nenhum vídeo baixado ainda</h3>
+            <p className="text-xs text-neutral-400 mt-1 max-w-md mx-auto">
+              Ao navegar pelo catálogo de Filmes ou Séries, clique no botão de download para salvar os vídeos na memória do seu aparelho e assistir offline sem internet.
             </p>
           </div>
           <Link
             href="/"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs shadow-lg shadow-violet-600/30 transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition shadow-lg shadow-violet-600/30"
           >
-            <Play className="w-4 h-4 fill-white" />
+            <Sparkles className="w-4 h-4" />
             <span>Explorar Catálogo</span>
           </Link>
         </div>
       ) : filteredGroups.length === 0 ? (
-        <div className="p-12 rounded-3xl bg-[#13141b] border border-white/10 text-center space-y-2">
-          <Search className="w-8 h-8 text-neutral-500 mx-auto" />
-          <h3 className="text-sm font-bold text-white">Nenhum título corresponde à busca</h3>
-          <p className="text-xs text-neutral-400">Tente buscar com outro termo ou limpe o filtro.</p>
+        <div className="p-12 rounded-3xl bg-[#13141b] border border-white/10 text-center space-y-3">
+          <p className="text-sm text-neutral-400">
+            Nenhum título encontrado para &ldquo;<strong className="text-white">{search}</strong>&rdquo;.
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="text-xs font-bold text-violet-400 hover:text-violet-300"
+          >
+            Limpar busca
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {filteredGroups.map((group) => {
             const isSeries = group.stream_type === 'series';
+            const firstEp = group.episodes[0];
+            const synopsis = firstEp?.overview || firstEp?.plot || '';
 
             return (
               <div
                 key={`${group.stream_type}_${group.stream_id}`}
-                className="group relative flex flex-col rounded-2xl bg-[#13141b] border border-white/10 overflow-hidden shadow-xl hover:border-violet-500/50 hover:shadow-2xl hover:shadow-violet-600/10 transition-all duration-300"
+                onClick={() => handleOpenTitle(group)}
+                className="group flex flex-col rounded-2xl bg-[#13141b] border border-white/10 overflow-hidden hover:border-violet-500/50 hover:shadow-xl hover:shadow-violet-600/15 transition-all duration-300 cursor-pointer"
               >
-                {/* Poster do Título */}
-                <div
-                  onClick={() => handleOpenTitle(group)}
-                  className="aspect-[2/3] w-full relative bg-neutral-900 overflow-hidden cursor-pointer"
-                >
-                  <ImageWithFallback
-                    src={group.poster_url}
-                    alt={group.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                {/* Poster com Badges */}
+                <div className="aspect-[2/3] w-full bg-black/60 relative overflow-hidden">
+                  {group.poster_url ? (
+                    <ImageWithFallback
+                      src={group.poster_url}
+                      alt={group.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-neutral-700">
+                      {isSeries ? <Tv className="w-10 h-10" /> : <Film className="w-10 h-10" />}
+                    </div>
+                  )}
 
-                  {/* Badges de Categoria e Episódios */}
-                  <div className="absolute top-2 left-2 flex flex-col gap-1 items-start z-10">
-                    <span className="px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-black/80 backdrop-blur-md border border-white/10 text-white shadow-md">
+                  {/* Overlay gradiente */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#13141b] via-transparent to-transparent opacity-80" />
+
+                  {/* Badge Tipo e Quantidade de Capítulos */}
+                  <div className="absolute top-2 left-2 flex flex-col gap-1">
+                    <span className="px-2 py-0.5 rounded-lg text-[9px] font-extrabold uppercase bg-black/70 backdrop-blur-md text-violet-300 border border-violet-500/30 shadow-md">
                       {isSeries ? 'Série' : 'Filme'}
                     </span>
                     {isSeries && (
-                      <span className="px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-violet-600 text-white shadow-md">
-                        {group.items_count} {group.items_count === 1 ? 'ep' : 'eps'}
+                      <span className="px-2 py-0.5 rounded-lg text-[9px] font-bold bg-violet-600/90 text-white shadow-md">
+                        {group.items_count} {group.items_count === 1 ? 'cap.' : 'caps.'}
                       </span>
                     )}
                   </div>
 
-                  {/* Badge de Tamanho em Disco */}
-                  <div className="absolute bottom-2 right-2 z-10">
-                    <span className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-black/85 backdrop-blur-md border border-white/15 text-violet-300 shadow-md">
+                  {/* Botão Play Hover */}
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
+                    <div className="w-11 h-11 rounded-2xl bg-violet-600 text-white flex items-center justify-center shadow-xl shadow-violet-600/40 group-hover:scale-110 transition-transform">
+                      <Play className="w-5 h-5 fill-current ml-0.5" />
+                    </div>
+                  </div>
+
+                  {/* Badge de Tamanho */}
+                  <div className="absolute bottom-2 right-2">
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-black/80 text-emerald-400 border border-emerald-500/30">
                       {formatDownloadSize(group.total_size)}
                     </span>
                   </div>
-
-                  {/* Overlay de Hover com Ícone Play */}
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <div className="w-12 h-12 rounded-full bg-violet-600 text-white flex items-center justify-center shadow-lg shadow-violet-600/50 scale-90 group-hover:scale-100 transition-transform">
-                      <Play className="w-5 h-5 fill-white ml-0.5" />
-                    </div>
-                  </div>
                 </div>
 
-                {/* Detalhes do Card */}
-                <div className="p-3 flex flex-col flex-1 justify-between gap-2.5">
-                  <div className="min-w-0">
-                    <h3
-                      onClick={() => handleOpenTitle(group)}
-                      className="text-xs font-bold text-white truncate hover:text-violet-300 transition cursor-pointer"
-                      title={group.title}
-                    >
+                {/* Conteúdo do Card */}
+                <div className="p-3 flex flex-col flex-1 justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-white group-hover:text-violet-300 transition-colors line-clamp-2">
                       {group.title}
                     </h3>
-                    <p className="text-[10px] text-neutral-400 mt-0.5">
-                      {isSeries
-                        ? `${group.items_count} capítulos baixados`
-                        : `${formatDownloadSize(group.total_size)}`}
-                    </p>
+                    {synopsis && (
+                      <p className="text-[10px] text-neutral-400 line-clamp-2 mt-1">
+                        {synopsis}
+                      </p>
+                    )}
                   </div>
 
-                  {/* Botões de Ação: Assistir e Excluir */}
-                  <div className="flex items-center gap-1.5 pt-1 border-t border-white/5">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenTitle(group)}
-                      className="flex-1 py-1.5 px-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/30 cursor-pointer"
-                    >
-                      <Play className="w-3 h-3 fill-white" />
-                      <span>Assistir</span>
-                    </button>
-
+                  <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                    <span className="text-[9px] text-neutral-500">
+                      {new Date(group.last_downloaded_at).toLocaleDateString('pt-BR')}
+                    </span>
                     <button
                       type="button"
                       onClick={(e) =>
@@ -759,10 +977,10 @@ function OfflineWatchContent() {
                           e
                         )
                       }
-                      className="p-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-neutral-400 hover:text-rose-300 border border-white/5 hover:border-rose-500/30 transition cursor-pointer"
-                      title="Excluir título da memória"
+                      className="p-1 rounded-md text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                      title="Excluir da memória"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
@@ -775,12 +993,15 @@ function OfflineWatchContent() {
   );
 }
 
-export default function OfflineWatchPage() {
+export default function OfflinePage() {
   return (
     <Suspense
       fallback={
-        <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center space-y-3">
           <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-neutral-400 font-semibold tracking-wide">
+            Carregando modo offline...
+          </p>
         </div>
       }
     >

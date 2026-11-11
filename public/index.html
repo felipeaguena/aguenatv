@@ -498,26 +498,29 @@
       font-size: 24px;
     }
 
-    /* Player de Vídeo em Tela Cheia */
+    /* Player de Vídeo Estilo Watch */
     .player-modal {
       position: fixed;
       inset: 0;
-      background: #000;
+      background: #0b0c10;
       z-index: 1000;
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .player-topbar {
-      padding: 14px 18px;
-      background: linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%);
+      padding: 12px 18px;
+      background: rgba(12, 13, 18, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      position: absolute;
+      position: sticky;
       top: 0;
-      left: 0;
-      right: 0;
       z-index: 20;
     }
     .player-name {
@@ -530,7 +533,7 @@
       flex: 1;
     }
     .btn-close-player {
-      background: rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.1);
       border: 1px solid rgba(255, 255, 255, 0.2);
       color: #fff;
       padding: 6px 14px;
@@ -538,12 +541,119 @@
       font-size: 12px;
       font-weight: 700;
       cursor: pointer;
-      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    video {
+    .btn-close-player:active {
+      transform: scale(0.96);
+    }
+    .player-content-wrapper {
+      width: 100%;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding-bottom: max(32px, env(safe-area-inset-bottom, 0px));
+    }
+    .player-frame {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .player-frame video {
       width: 100%;
       height: 100%;
-      background: #000;
+      object-fit: contain;
+    }
+    .player-specs-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .player-chip {
+      padding: 4px 10px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+    .player-nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #13141b;
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .player-nav-btn {
+      flex: 1;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .player-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+    .player-details-card {
+      padding: 18px;
+      background: #13141b;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .player-details-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 10px;
+    }
+    .player-synopsis-text {
+      font-size: 12px;
+      color: #cbd5e1;
+      line-height: 1.6;
+    }
+    .player-chapters-section {
+      padding: 18px;
+      background: #13141b;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .hidden {
@@ -639,13 +749,87 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden"></div>
 
-  <!-- Player Modal Fullscreen -->
+  <!-- Player Modal Estilo Watch -->
   <div id="player-modal" class="player-modal hidden">
     <div class="player-topbar">
-      <div class="player-name" id="player-video-title">Reproduzindo</div>
-      <button type="button" class="btn-close-player" id="btn-close-player">✕ Fechar</button>
+      <div class="brand-left" style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <button type="button" class="btn-close-player" id="btn-close-player">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          <span>Voltar aos Títulos</span>
+        </button>
+        <div class="player-name" id="player-video-title">Reproduzindo</div>
+      </div>
+      <div class="badge-offline" style="flex-shrink:0;">
+        <span class="badge-dot"></span>
+        <span>Modo Offline</span>
+      </div>
     </div>
-    <video id="player-element" controls playsinline autoplay></video>
+
+    <div class="player-content-wrapper">
+      <!-- Frame do Player 16:9 -->
+      <div class="player-frame">
+        <video id="player-element" controls playsinline autoplay></video>
+      </div>
+
+      <!-- Barra de Specs Técnicas Diretamente Abaixo do Player -->
+      <div class="player-specs-bar" id="player-specs-bar">
+        <span class="player-chip" style="background:rgba(16,185,129,0.15);border-color:rgba(16,185,129,0.3);color:#6ee7b7;">
+          ✓ Armazenamento Local
+        </span>
+        <span class="player-chip" id="chip-duration">⏱ Duração: 24 min</span>
+        <span class="player-chip" id="chip-size">💾 Tamanho: --</span>
+        <span class="player-chip" id="chip-dimensions">🖥 Resolução: 1080p FHD</span>
+        <span class="player-chip" id="chip-codec">⚙ Codec: MP4</span>
+      </div>
+
+      <!-- Barra de Navegação entre Capítulos -->
+      <div class="player-nav-bar" id="player-nav-bar">
+        <button type="button" class="player-nav-btn" id="btn-player-prev">
+          ◀ Capítulo Anterior
+        </button>
+        <div style="font-size:11px;font-weight:700;color:#c4b5fd;text-align:center;" id="player-chapter-cur-label">
+          Capítulo Atual
+        </div>
+        <button type="button" class="player-nav-btn" id="btn-player-next" style="background:#8b5cf6;border-color:#8b5cf6;">
+          Próximo Capítulo ▶
+        </button>
+      </div>
+
+      <!-- Card Completo de Informações, Sinopse e Metadados EXIF -->
+      <div class="player-details-card" id="player-details-card">
+        <div class="player-details-header">
+          <div style="min-width:0;">
+            <h2 id="player-info-title" style="font-size:16px;font-weight:900;color:#fff;">Título</h2>
+            <div id="player-info-sub" style="font-size:11px;color:#a78bfa;margin-top:2px;font-weight:600;"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;" id="player-exif-chips">
+            <span class="player-chip" id="chip-rating" style="background:rgba(245,158,11,0.15);border-color:rgba(245,158,11,0.3);color:#fcd34d;">★ 8.5</span>
+            <span class="player-chip" id="chip-year">2026</span>
+            <span class="player-chip" id="chip-genre" style="background:rgba(139,92,246,0.15);border-color:rgba(139,92,246,0.3);color:#c4b5fd;">Geral</span>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-size:10px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">
+            Sinopse / Descrição
+          </div>
+          <div class="player-synopsis-text" id="player-synopsis-text">
+            Este conteúdo está baixado e armazenado localmente para reprodução offline sem conexão de rede.
+          </div>
+        </div>
+      </div>
+
+      <!-- Lista de Capítulos Baixados deste Título -->
+      <div class="player-chapters-section" id="player-chapters-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:8px;">
+          <h3 style="font-size:13px;font-weight:800;color:#fff;text-transform:uppercase;letter-spacing:0.5px;">Capítulos Baixados nesta Série</h3>
+          <span style="font-size:11px;color:#a78bfa;font-weight:700;" id="player-chapters-count">1 capítulo</span>
+        </div>
+        <div class="episodes-list" id="player-episodes-list" style="margin-top:4px;"></div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1131,8 +1315,12 @@
         secCatalog.appendChild(grid);
       }
 
-      // Reprodução de Vídeo Offline com resolução nativa robusta
+      let currentPlayingEp = null;
+      let currentPlayingGroup = null;
+
+      // Reprodução de Vídeo Offline Estilo Watch com metadados, sinopse, specs e capítulos
       async function playVideo(item) {
+        currentPlayingEp = item;
         let src = item.file_path;
 
         try {
@@ -1141,7 +1329,7 @@
             if (nativeUrl) src = nativeUrl;
           } else if (item.file_path && !item.file_path.startsWith('http')) {
             const fileName = item.file_path.includes('/') ? item.file_path.substring(item.file_path.lastIndexOf('/') + 1) : item.file_path;
-            src = SERVER_URL + '/_local_video_/' + fileName;
+            src = SERVER_URL + '/_local_video_/' + encodeURIComponent(fileName);
           } else {
             const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
             if (fs && window.Capacitor.convertFileSrc) {
@@ -1167,10 +1355,112 @@
           src = item.file_path;
         }
 
-        playerVideoTitle.innerText = item.title;
+        // Encontra o grupo ao qual este item pertence
+        const isSeries = item.stream_type === 'series';
+        const mainTitle = item.series_title || (isSeries ? item.title.split(' - ')[0] : item.title);
+        const relatedEps = isSeries
+          ? allDownloads.filter(
+              (d) =>
+                d.stream_type === 'series' &&
+                (String(d.stream_id) === String(item.stream_id) ||
+                  (d.series_title && d.series_title === mainTitle) ||
+                  d.title.startsWith(mainTitle))
+            )
+          : [item];
+
+        relatedEps.sort((a, b) => {
+          const sDiff = (a.season_num || 0) - (b.season_num || 0);
+          if (sDiff !== 0) return sDiff;
+          return (a.episode_num || 0) - (b.episode_num || 0);
+        });
+
+        currentPlayingGroup = relatedEps;
+        const curIndex = relatedEps.findIndex((e) => e.id === item.id);
+
+        // Preenche Título do Player
+        const epLabel = isSeries && item.season_num && item.episode_num ? `T${item.season_num} • EP ${item.episode_num}` : '';
+        playerVideoTitle.innerText = `${mainTitle} ${epLabel ? '- ' + epLabel : ''}`;
+
+        // Preenche Barra de Specs
+        document.getElementById('chip-duration').innerText = `⏱ Duração: ${item.duration || '24 min'}`;
+        document.getElementById('chip-size').innerText = `💾 Tamanho: ${formatSize(item.file_size || 0)}`;
+        document.getElementById('chip-dimensions').innerText = `🖥 Dimensões: ${item.dimensions || '1080p FHD'}`;
+        document.getElementById('chip-codec').innerText = `⚙ Codec: ${item.codec || (item.container_extension || 'mp4').toUpperCase()}`;
+
+        // Preenche Navegação entre Capítulos
+        const navBar = document.getElementById('player-nav-bar');
+        const btnPrev = document.getElementById('btn-player-prev');
+        const btnNext = document.getElementById('btn-player-next');
+        const curLabel = document.getElementById('player-chapter-cur-label');
+
+        if (isSeries && relatedEps.length > 1) {
+          navBar.style.display = 'flex';
+          btnPrev.disabled = curIndex <= 0;
+          btnNext.disabled = curIndex >= relatedEps.length - 1;
+          curLabel.innerText = epLabel || `Capítulo ${curIndex + 1}`;
+
+          btnPrev.onclick = () => {
+            if (curIndex > 0) playVideo(relatedEps[curIndex - 1]);
+          };
+          btnNext.onclick = () => {
+            if (curIndex < relatedEps.length - 1) playVideo(relatedEps[curIndex + 1]);
+          };
+        } else {
+          navBar.style.display = 'none';
+        }
+
+        // Preenche Card de Detalhes e Sinopse EXIF
+        document.getElementById('player-info-title').innerText = mainTitle;
+        document.getElementById('player-info-sub').innerText = epLabel || (isSeries ? 'Série Offline' : 'Filme Offline');
+        document.getElementById('chip-rating').innerText = `★ ${Number(item.rating || 8.5).toFixed(1)}`;
+        document.getElementById('chip-year').innerText = item.year || (item.downloaded_at ? item.downloaded_at.slice(0, 4) : '2026');
+        document.getElementById('chip-genre').innerText = item.genre || (isSeries ? 'Séries' : 'Filmes');
+        document.getElementById('player-synopsis-text').innerText =
+          item.overview || item.plot || 'Este título baixado está pronto para reprodução offline instantânea sem conexão de rede.';
+
+        // Preenche Lista de Capítulos Baixados
+        const chaptersSection = document.getElementById('player-chapters-section');
+        const episodesListEl = document.getElementById('player-episodes-list');
+        const countLabel = document.getElementById('player-chapters-count');
+
+        if (isSeries && relatedEps.length > 0) {
+          chaptersSection.style.display = 'flex';
+          countLabel.innerText = `${relatedEps.length} ${relatedEps.length === 1 ? 'capítulo' : 'capítulos'}`;
+          episodesListEl.innerHTML = '';
+
+          relatedEps.forEach((ep) => {
+            const isPlaying = ep.id === item.id;
+            const epBadge = ep.season_num && ep.episode_num ? `T${ep.season_num} • EP ${ep.episode_num}` : ep.title;
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'episode-card';
+            if (isPlaying) {
+              itemDiv.style.borderColor = '#8b5cf6';
+              itemDiv.style.background = 'rgba(139, 92, 246, 0.15)';
+            }
+            itemDiv.innerHTML = `
+              <div class="episode-info">
+                <div class="episode-title" style="${isPlaying ? 'color:#c4b5fd;' : ''}">${epBadge}</div>
+                <div class="episode-meta">${formatSize(ep.file_size || 0)} • ${ep.container_extension || 'mp4'}</div>
+              </div>
+              <div class="episode-actions">
+                ${isPlaying ? '<span style="font-size:9px;font-weight:800;background:#8b5cf6;color:#fff;padding:2px 6px;border-radius:6px;">ATIVO</span>' : ''}
+                <button type="button" class="btn-action-primary" style="padding:6px 10px;font-size:11px;">Play</button>
+              </div>
+            `;
+            itemDiv.querySelector('.btn-action-primary').addEventListener('click', (e) => {
+              e.stopPropagation();
+              playVideo(ep);
+            });
+            episodesListEl.appendChild(itemDiv);
+          });
+        } else {
+          chaptersSection.style.display = 'none';
+        }
+
         playerElement.src = src;
         playerModal.classList.remove('hidden');
         playerElement.play().catch(() => {});
+        playerModal.scrollTo({ top: 0, behavior: 'smooth' });
       }
 
       btnClosePlayer.addEventListener('click', () => {
