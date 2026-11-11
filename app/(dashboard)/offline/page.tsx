@@ -438,7 +438,7 @@ function OfflineWatchContent() {
                 <VideoPlayer
                   streamUrl={playableUrl}
                   title={playerDisplayTitle}
-                  streamId={String(activeEpisode.stream_id)}
+                  streamId={isSeries && activeEpisode.id ? String(activeEpisode.id) : String(activeEpisode.stream_id)}
                   streamType={activeEpisode.stream_type}
                   posterUrl={activeEpisode.poster_url || selectedGroup.poster_url}
                   autoPlay={true}

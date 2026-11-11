@@ -34,6 +34,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -564,16 +565,14 @@ public class MainActivity extends BridgeActivity {
     private WebResourceResponse serveLocalVideoFile(WebResourceRequest request, File videoFile) {
         try {
             long fileLength = videoFile.length();
+            if (fileLength <= 0) {
+                return null;
+            }
+
             String mimeType = "video/mp4";
             String lowerName = videoFile.getName().toLowerCase(Locale.ROOT);
-            if (lowerName.endsWith(".mkv")) {
-                mimeType = "video/x-matroska";
-            } else if (lowerName.endsWith(".ts")) {
-                mimeType = "video/mp2t";
-            } else if (lowerName.endsWith(".webm")) {
+            if (lowerName.endsWith(".webm")) {
                 mimeType = "video/webm";
-            } else if (lowerName.endsWith(".avi")) {
-                mimeType = "video/x-msvideo";
             }
 
             Map<String, String> headers = new HashMap<>();
@@ -582,7 +581,7 @@ public class MainActivity extends BridgeActivity {
             headers.put("Access-Control-Allow-Headers", "*");
             headers.put("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
             headers.put("Content-Type", mimeType);
-            headers.put("Cache-Control", "no-cache");
+            headers.put("Cache-Control", "no-cache, no-store, must-revalidate");
 
             // Resposta para requisição HEAD (verificação preliminar do player sem consumir dados)
             if (request != null && "HEAD".equalsIgnoreCase(request.getMethod())) {
@@ -598,91 +597,172 @@ public class MainActivity extends BridgeActivity {
                 }
             }
 
+            long start = 0;
+            long end = fileLength - 1;
+            boolean isRange = false;
+
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                 String rangeVal = rangeHeader.substring(6).trim();
-                long start = 0;
-                long end = fileLength - 1;
+                int comma = rangeVal.indexOf(',');
+                if (comma != -1) {
+                    rangeVal = rangeVal.substring(0, comma).trim();
+                }
 
                 int dash = rangeVal.indexOf('-');
                 if (dash != -1) {
                     String startStr = rangeVal.substring(0, dash).trim();
                     String endStr = rangeVal.substring(dash + 1).trim();
-                    if (!startStr.isEmpty()) {
-                        start = Long.parseLong(startStr);
+
+                    if (!startStr.isEmpty() && !endStr.isEmpty()) {
+                        // Ex: bytes=1000-2000
+                        try {
+                            start = Long.parseLong(startStr);
+                            end = Long.parseLong(endStr);
+                            isRange = true;
+                        } catch (Exception ignored) {}
+                    } else if (!startStr.isEmpty()) {
+                        // Ex: bytes=1000- (até o final do arquivo)
+                        try {
+                            start = Long.parseLong(startStr);
+                            end = fileLength - 1;
+                            isRange = true;
+                        } catch (Exception ignored) {}
+                    } else if (!endStr.isEmpty()) {
+                        // Ex: bytes=-1048576 (sufixo: últimos N bytes do arquivo, ex: atom moov do MP4!)
+                        try {
+                            long suffix = Long.parseLong(endStr);
+                            start = Math.max(0, fileLength - suffix);
+                            end = fileLength - 1;
+                            isRange = true;
+                        } catch (Exception ignored) {}
                     }
-                    if (!endStr.isEmpty()) {
-                        end = Long.parseLong(endStr);
-                    }
                 }
-
-                if (end >= fileLength) {
-                    end = fileLength - 1;
-                }
-                if (start < 0) {
-                    start = 0;
-                }
-                if (start > end) {
-                    start = end;
-                }
-
-                long contentLength = end - start + 1;
-                FileInputStream fis = new FileInputStream(videoFile);
-                if (start > 0) {
-                    fis.getChannel().position(start);
-                }
-
-                final InputStream boundedIs = new BoundedInputStream(fis, contentLength);
-
-                headers.put("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
-                headers.put("Content-Length", String.valueOf(contentLength));
-
-                // Para recursos binários (áudio/vídeo), encoding deve ser obrigatoriamente null
-                return new WebResourceResponse(mimeType, null, 206, "Partial Content", headers, boundedIs);
-            } else {
-                headers.put("Content-Length", String.valueOf(fileLength));
-                FileInputStream fis = new FileInputStream(videoFile);
-                return new WebResourceResponse(mimeType, null, 200, "OK", headers, fis);
             }
+
+            if (end >= fileLength) {
+                end = fileLength - 1;
+            }
+            if (start < 0) {
+                start = 0;
+            }
+            if (start > end) {
+                start = end;
+            }
+
+            long contentLength = end - start + 1;
+            int statusCode = isRange ? 206 : 200;
+            String statusMsg = isRange ? "Partial Content" : "OK";
+
+            if (isRange) {
+                headers.put("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+            }
+            headers.put("Content-Length", String.valueOf(contentLength));
+
+            // Stream inteligente com suporte nativo a seek/skip aleatório sem duplo pulo do Chromium
+            InputStream stream = new SmartVideoInputStream(videoFile, start, end);
+            return new WebResourceResponse(mimeType, null, statusCode, statusMsg, headers, stream);
         } catch (Exception e) {
             e.printStackTrace();
             return null;
         }
     }
 
-    private static class BoundedInputStream extends InputStream {
-        private final InputStream in;
-        private long remaining;
+    private static class SmartVideoInputStream extends InputStream {
+        private final RandomAccessFile raf;
+        private final long fileLength;
+        private final long intendedStart;
+        private final long intendedEnd;
+        private long position = 0;
+        private boolean initialSeekHandled = false;
 
-        BoundedInputStream(InputStream in, long limit) {
-            this.in = in;
-            this.remaining = limit;
+        SmartVideoInputStream(File file, long start, long end) throws IOException {
+            this.raf = new RandomAccessFile(file, "r");
+            this.fileLength = file.length();
+            this.intendedStart = Math.max(0, Math.min(start, fileLength - 1));
+            this.intendedEnd = Math.max(this.intendedStart, Math.min(end, fileLength - 1));
+            this.position = 0;
+            if (this.intendedStart == 0) {
+                this.initialSeekHandled = true;
+            }
+        }
+
+        private void ensurePositioned() throws IOException {
+            if (!initialSeekHandled) {
+                initialSeekHandled = true;
+                position = intendedStart;
+                raf.seek(position);
+            }
         }
 
         @Override
         public int read() throws IOException {
-            if (remaining <= 0) return -1;
-            int b = in.read();
-            if (b != -1) remaining--;
+            ensurePositioned();
+            if (position > intendedEnd) {
+                return -1;
+            }
+            int b = raf.read();
+            if (b != -1) {
+                position++;
+            }
             return b;
         }
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            if (remaining <= 0) return -1;
-            int toRead = (int) Math.min(len, remaining);
-            int bytesRead = in.read(b, off, toRead);
-            if (bytesRead != -1) remaining -= bytesRead;
+            ensurePositioned();
+            if (position > intendedEnd) {
+                return -1;
+            }
+            long maxToRead = intendedEnd - position + 1;
+            int toRead = (int) Math.min((long) len, maxToRead);
+            if (toRead <= 0) {
+                return -1;
+            }
+            int bytesRead = raf.read(b, off, toRead);
+            if (bytesRead != -1) {
+                position += bytesRead;
+            }
             return bytesRead;
         }
 
         @Override
+        public long skip(long n) throws IOException {
+            if (n <= 0) return 0;
+
+            if (!initialSeekHandled) {
+                initialSeekHandled = true;
+                // Se o Chromium está tentando pular para intendedStart (comportamento do AndroidStreamReaderURLLoader)
+                if (n == intendedStart) {
+                    position = intendedStart;
+                    raf.seek(position);
+                    return n;
+                } else {
+                    long target = Math.min(intendedStart + n, intendedEnd + 1);
+                    position = target;
+                    raf.seek(position);
+                    return n;
+                }
+            }
+
+            long target = Math.min(position + n, intendedEnd + 1);
+            long skipped = target - position;
+            position = target;
+            raf.seek(position);
+            return skipped;
+        }
+
+        @Override
         public int available() throws IOException {
-            return (int) Math.min(in.available(), remaining);
+            ensurePositioned();
+            long rem = (intendedEnd >= position) ? (intendedEnd - position + 1) : 0;
+            return rem > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rem;
         }
 
         @Override
         public void close() throws IOException {
-            in.close();
+            try {
+                raf.close();
+            } catch (Exception ignored) {}
         }
     }
 
