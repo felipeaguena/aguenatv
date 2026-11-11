@@ -187,8 +187,16 @@ function OfflineWatchContent() {
         loadDownloads();
       }
     };
+    const handleDownloadsChanged = () => {
+      loadDownloads();
+    };
+
     window.addEventListener(PROGRESS_EVENT, handleProgress);
-    return () => window.removeEventListener(PROGRESS_EVENT, handleProgress);
+    window.addEventListener('offline-downloads-changed', handleDownloadsChanged);
+    return () => {
+      window.removeEventListener(PROGRESS_EVENT, handleProgress);
+      window.removeEventListener('offline-downloads-changed', handleDownloadsChanged);
+    };
   }, [loadDownloads]);
 
   // Volta da tela de reprodução para a tela de catálogo de títulos

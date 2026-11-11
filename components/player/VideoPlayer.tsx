@@ -216,6 +216,8 @@ export default function VideoPlayer({
   const retryCountRef = useRef(0);
   const showControlsRef = useRef<() => void>(() => {});
   const resetInactivityTimerRef = useRef<(delay?: number) => void>(() => {});
+  const isSwitchingUrlRef = useRef(false);
+  const switchingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estados e controle de Pular Abertura (Intro) e Encerramento (Outro)
   const [showSkipIntro, setShowSkipIntro] = useState(false);
@@ -616,6 +618,19 @@ export default function VideoPlayer({
         currentDeviceCategory === 'mobile' ? 5000 : currentDeviceCategory === 'tablet' ? 4500 : 3500;
     } catch (e) {}
 
+    // Garante que qualquer elemento de vídeo residual anterior no container seja pausado e removido
+    if (artContainerRef.current) {
+      const leftoverVideos = artContainerRef.current.querySelectorAll('video');
+      leftoverVideos.forEach((v) => {
+        try {
+          v.pause();
+          v.removeAttribute('src');
+          v.load();
+          v.remove();
+        } catch (e) {}
+      });
+    }
+
     // Criação da instância Artplayer.js
     const art = new Artplayer({
       container: artContainerRef.current,
@@ -677,6 +692,9 @@ export default function VideoPlayer({
       subtitleOffset: true,
       miniProgressBar: true,
       playsInline: true,
+      moreVideoAttr: {
+        preload: 'auto',
+      },
       autoOrientation: false, // Desabilitado para evitar corrida de rotação com Capacitor
       hotkey: false, // Centralizado no handleKeyDown do React para evitar double-toggle e conflito no Espaço
       airplay: true,
@@ -1346,6 +1364,11 @@ export default function VideoPlayer({
     };
 
     art.on('video:loadedmetadata', () => {
+      isSwitchingUrlRef.current = false;
+      if (switchingTimeoutRef.current) {
+        clearTimeout(switchingTimeoutRef.current);
+        switchingTimeoutRef.current = null;
+      }
       restorePosition();
       const video = art.video;
       if (video && onVideoInfoRef.current) {
@@ -1507,8 +1530,33 @@ export default function VideoPlayer({
     });
 
     art.on('video:error', () => {
-      const currentUrl = art.url || streamUrl;
+      // Ignora erros transitórios se estiver em processo de troca de URL (ex: próximo episódio ou troca para offline)
+      if (isSwitchingUrlRef.current) {
+        console.info('[VideoPlayer] Ignorando video:error transitório durante transição de fluxo/switchUrl.');
+        return;
+      }
+
       const mediaErr = art.video?.error;
+
+      // Se o erro for MEDIA_ERR_ABORTED (código 1), significa que a mídia anterior foi cancelada propositalmente
+      // pela troca de stream/capítulo ou seek do navegador. NUNCA deve exibir alerta de erro para o usuário.
+      if (mediaErr && mediaErr.code === 1) {
+        console.info('[VideoPlayer] Ignorando MEDIA_ERR_ABORTED durante transição.');
+        return;
+      }
+
+      // Se o elemento de vídeo estiver em reprodução ativa (áudio ou vídeo rolando), NUNCA sobrepõe tela de erro!
+      if (art.video && !art.video.paused && art.video.currentTime > 0) {
+        console.info('[VideoPlayer] Ignorando video:error falso pois o vídeo está ativamente em reprodução.');
+        return;
+      }
+
+      if (!mediaErr && !art.video?.src) {
+        return;
+      }
+
+      const currentUrl = art.url || streamUrl;
+
       console.warn('[VideoPlayer] Erro no stream de vídeo:', {
         code: mediaErr?.code,
         message: mediaErr?.message,
@@ -1534,6 +1582,11 @@ export default function VideoPlayer({
             } catch (e) {}
           }, 800);
           return;
+        }
+        if (art.video) {
+          try {
+            art.video.pause();
+          } catch (e) {}
         }
         setError('Não foi possível reproduzir o arquivo de vídeo baixado na memória. Verifique se o download foi concluído com sucesso.');
         return;
@@ -1575,24 +1628,22 @@ export default function VideoPlayer({
         return;
       }
 
-      // Diagnóstico inteligente do erro de rede do servidor IPTV
-      fetch(currentUrl, { method: 'HEAD', signal: AbortSignal.timeout(2500) })
-        .then((res) => {
-          if (res.status >= 520 && res.status <= 526) {
-            setError(
-              `O servidor do seu provedor IPTV está temporariamente fora do ar (Erro Cloudflare ${res.status} - Servidor de origem inacessível). Aguarde a normalização pelo seu provedor.`
-            );
-          } else if (res.status === 401 || res.status === 403) {
-            setError(
-              `Conexão recusada pelo provedor IPTV (HTTP ${res.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente com o mesmo usuário (limite de 1 tela atingido).`
-            );
-          } else {
-            setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
-          }
-        })
-        .catch(() => {
-          setError('Falha na reprodução do stream de vídeo. O servidor do provedor IPTV não respondeu ao fluxo.');
-        });
+      // Pausa imediatamente para garantir que NENHUM áudio continue rolando por trás da tela de erro
+      if (art.video) {
+        try {
+          art.video.pause();
+        } catch (e) {}
+      }
+
+      if (mediaErr?.code === 2) {
+        setError('Falha de conexão com o servidor de transmissão IPTV. Verifique sua conexão com a internet ou estabilidade do provedor.');
+      } else if (mediaErr?.code === 3) {
+        setError('Erro de decodificação do vídeo. O codec desta transmissão pode não ser suportado nativamente pelo dispositivo.');
+      } else if (mediaErr?.code === 4) {
+        setError('O servidor do provedor IPTV não respondeu ao fluxo ou o canal/vídeo está temporariamente indisponível.');
+      } else {
+        setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
+      }
     });
 
     art.on('fullscreenWeb', (state) => {
@@ -1677,7 +1728,12 @@ export default function VideoPlayer({
       setPlayerMountNode(null);
       if (artInstanceRef.current) {
         try {
-          artInstanceRef.current.destroy(false);
+          if (artInstanceRef.current.video) {
+            artInstanceRef.current.video.pause();
+            artInstanceRef.current.video.removeAttribute('src');
+            artInstanceRef.current.video.load();
+          }
+          artInstanceRef.current.destroy(true);
         } catch (e) {}
         artInstanceRef.current = null;
       }
@@ -1744,9 +1800,20 @@ export default function VideoPlayer({
         art.video.pause();
       } catch (e) {}
     }
+    setError(null);
+    isSwitchingUrlRef.current = true;
+    if (switchingTimeoutRef.current) clearTimeout(switchingTimeoutRef.current);
+    switchingTimeoutRef.current = setTimeout(() => {
+      isSwitchingUrlRef.current = false;
+    }, 5000);
 
     try {
       art.switchUrl(streamUrl).then(() => {
+        isSwitchingUrlRef.current = false;
+        if (switchingTimeoutRef.current) {
+          clearTimeout(switchingTimeoutRef.current);
+          switchingTimeoutRef.current = null;
+        }
         if (wasFullscreen) {
           if (isMobileDevice()) {
             art.fullscreenWeb = true;

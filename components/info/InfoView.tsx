@@ -49,14 +49,12 @@ import { useWatched } from '@/hooks/useWatched';
 import { cleanCategoryName } from '@/lib/stream-utils';
 import {
   downloadVideoForOffline,
-  getOfflineDownloadsList,
   deleteOfflineDownload,
   buildDownloadId,
   isNativeApp,
   OfflineDownload,
-  PROGRESS_EVENT,
 } from '@/lib/download-manager';
-import { useDownloadProgress } from '@/hooks/useDownloadProgress';
+import { useOfflineDownloads } from '@/hooks/useOfflineDownloads';
 import { usePlayer } from '@/context/PlayerContext';
 import MediaCard from '@/components/media/MediaCard';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
@@ -89,11 +87,19 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { isWatched, markWatched, removeWatched, watchedList } = useWatched();
   const { play } = usePlayer();
-  const { getProgress } = useDownloadProgress();
 
-  // Estados de Configuração IPTV e Downloads Offline
+  // Estados de Configuração IPTV e Downloads Offline Unificados
+  const {
+    downloadedMap,
+    isDownloaded,
+    getDownload,
+    getProgress,
+    isDownloading,
+    deleteDownload,
+    deleteOfflineItem,
+    refreshDownloads,
+  } = useOfflineDownloads();
   const [config, setConfig] = useState<IPTVAccount | null>(null);
-  const [downloadedMap, setDownloadedMap] = useState<Record<string, OfflineDownload>>({});
   const [downloadingIds, setDownloadingIds] = useState<Record<string, boolean>>({});
   const [isOffline, setIsOffline] = useState(false);
   const [isNative, setIsNative] = useState(false);
@@ -102,37 +108,16 @@ export default function InfoView({ type, id }: InfoViewProps) {
     setIsNative(isNativeApp());
   }, []);
 
-  const refreshDownloads = async () => {
-    try {
-      const list = await getOfflineDownloadsList();
-      const map: Record<string, OfflineDownload> = {};
-      for (const d of list) {
-        map[d.id] = d;
-      }
-      setDownloadedMap(map);
-    } catch {}
-  };
-
   useEffect(() => {
-    refreshDownloads();
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
     setIsOffline(typeof navigator !== 'undefined' ? !navigator.onLine : false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    const handleProgress = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.done) {
-        refreshDownloads();
-      }
-    };
-    window.addEventListener(PROGRESS_EVENT, handleProgress);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener(PROGRESS_EVENT, handleProgress);
     };
   }, []);
 
@@ -533,10 +518,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const currentSeasonDownloadedCount = useMemo(() => {
     if (!isSeries || !item) return 0;
     return currentSeasonEpisodes.filter((ep) => {
-      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-      return !!downloadedMap[id];
+      return isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
     }).length;
-  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadedMap]);
+  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, isDownloaded, downloadedMap]);
 
   const isSeasonFullyDownloaded =
     currentSeasonEpisodes.length > 0 && currentSeasonDownloadedCount === currentSeasonEpisodes.length;
@@ -545,9 +529,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
     if (!isSeries || !item) return false;
     return currentSeasonEpisodes.some((ep) => {
       const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-      return !!downloadingIds[id] || !!getProgress(id);
+      return isDownloading(id) || !!downloadingIds[id] || !!getProgress(id);
     });
-  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, downloadingIds, getProgress]);
+  }, [isSeries, item, currentSeasonEpisodes, selectedSeason, isDownloading, downloadingIds, getProgress]);
 
   const activeSeasonProgress = useMemo(() => {
     if (!isSeries || !item) return 0;
@@ -660,16 +644,15 @@ export default function InfoView({ type, id }: InfoViewProps) {
   // HANDLERS DE DOWNLOAD OFFLINE (FILMES E SÉRIES)
   // =========================================================================
   const movieDownloadId = item ? buildDownloadId('movie', item.stream_id) : '';
-  const isMovieDownloaded = !!downloadedMap[movieDownloadId];
+  const isMovieDownloaded = item ? isDownloaded('movie', item.stream_id) : false;
   const movieProgress = getProgress(movieDownloadId);
-  const isMovieDownloading = !!downloadingIds[movieDownloadId] || !!movieProgress;
+  const isMovieDownloading = isDownloading(movieDownloadId) || !!downloadingIds[movieDownloadId] || !!movieProgress;
 
   const handleToggleMovieDownload = async () => {
     if (!item) return;
     if (isMovieDownloaded) {
       if (confirm('Deseja excluir este filme da memória do dispositivo para liberar espaço?')) {
-        await deleteOfflineDownload(movieDownloadId);
-        await refreshDownloads();
+        await deleteOfflineItem('movie', item.stream_id);
       }
       return;
     }
@@ -704,7 +687,6 @@ export default function InfoView({ type, id }: InfoViewProps) {
     }
   };
 
-
   const handleToggleSeasonDownload = async () => {
     if (!item || !config?.server_url) {
       alert('Configuração de IPTV não encontrada.');
@@ -722,17 +704,14 @@ export default function InfoView({ type, id }: InfoViewProps) {
         )
       ) {
         for (const ep of currentSeasonEpisodes) {
-          const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-          await deleteOfflineDownload(id);
+          await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
         }
-        await refreshDownloads();
       }
       return;
     }
 
     const undownloaded = currentSeasonEpisodes.filter((ep) => {
-      const id = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-      return !downloadedMap[id];
+      return !isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
     });
 
     if (
@@ -786,10 +765,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
     if (!item) return;
     const epId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
 
-    if (downloadedMap[epId]) {
+    if (isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id)) {
       if (confirm(`Deseja excluir o episódio ${ep.episode_num} da memória do dispositivo?`)) {
-        await deleteOfflineDownload(epId);
-        await refreshDownloads();
+        await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
       }
       return;
     }
@@ -1546,9 +1524,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
                       {/* Botão de Download do Episódio (Apenas no aplicativo nativo, tamanho padronizado) */}
                       {isNative && (() => {
                         const epDownloadId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-                        const isEpDownloaded = !!downloadedMap[epDownloadId];
+                        const isEpDownloaded = isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
                         const epProgress = getProgress(epDownloadId);
-                        const isEpDownloading = !!downloadingIds[epDownloadId] || !!epProgress;
+                        const isEpDownloading = isDownloading(epDownloadId) || !!downloadingIds[epDownloadId] || !!epProgress;
 
                         return (
                           <button

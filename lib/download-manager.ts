@@ -126,11 +126,31 @@ export function isNativeApp(): boolean {
 }
 
 /**
- * Recupera o cache síncrono de títulos baixados do localStorage para renderização imediata com 0ms
+ * Recupera o cache síncrono de títulos baixados do localStorage ou da bridge nativa do Android para renderização imediata com 0ms
  */
 export function getCachedManifestSync(): OfflineDownload[] {
   if (typeof window === 'undefined') return [];
   try {
+    // 1. Tenta carregar do AndroidBridge nativo síncrono no APK se disponível
+    if ((window as any).AndroidBridge?.getOfflineDownloadsJson) {
+      try {
+        const nativeJson = (window as any).AndroidBridge.getOfflineDownloadsJson();
+        if (nativeJson && nativeJson.trim().length > 2) {
+          const parsed = JSON.parse(nativeJson);
+          const list: OfflineDownload[] = Array.isArray(parsed) ? parsed : Object.values(parsed);
+          if (list && list.length > 0) {
+            try {
+              localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(list));
+            } catch {}
+            return list;
+          }
+        }
+      } catch (bridgeErr) {
+        console.warn('[DownloadManager] Erro ao ler getOfflineDownloadsJson síncrono:', bridgeErr);
+      }
+    }
+
+    // 2. Fallback para cache local no localStorage
     const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -438,6 +458,11 @@ export async function downloadVideoForOffline(
               window.dispatchEvent(
                 new CustomEvent(PROGRESS_EVENT, {
                   detail: { id: cleanId, title: item.title, done: true, success: true },
+                })
+              );
+              window.dispatchEvent(
+                new CustomEvent('offline-downloads-changed', {
+                  detail: { id: cleanId, action: 'added' },
                 })
               );
             }
@@ -868,6 +893,10 @@ export function findCachedOfflineDownload(
         (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
     );
   } else {
+    // Para séries, só busca quando o episódio ou ID do episódio for informado
+    if (episodeNum === undefined && episodeId === undefined) {
+      return undefined;
+    }
     const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
     const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
     const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
@@ -886,7 +915,7 @@ export function findCachedOfflineDownload(
       }
       if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
       if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-      return idMatches && eNum === undefined && strEpId === undefined;
+      return false;
     });
   }
 }
@@ -924,6 +953,9 @@ export async function findOfflineDownloadRecord(
         );
         if (movieRec) return movieRec;
       } else {
+        if (episodeNum === undefined && episodeId === undefined) {
+          return undefined;
+        }
         const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
         const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
         const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
@@ -942,7 +974,7 @@ export async function findOfflineDownloadRecord(
           }
           if (sNum !== undefined && i.season_num !== undefined && Number(i.season_num) !== sNum) return false;
           if (eNum !== undefined && i.episode_num !== undefined && Number(i.episode_num) === eNum) return true;
-          return idMatches && eNum === undefined && strEpId === undefined;
+          return false;
         });
         if (seriesRec) return seriesRec;
       }
@@ -963,6 +995,9 @@ export async function findOfflineDownloadRecord(
           (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
       );
     } else {
+      if (episodeNum === undefined && episodeId === undefined) {
+        return undefined;
+      }
       const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
       const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
       const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
@@ -981,7 +1016,7 @@ export async function findOfflineDownloadRecord(
         }
         if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
         if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-        return idMatches && eNum === undefined && strEpId === undefined;
+        return false;
       });
     }
   } catch {}
@@ -1094,6 +1129,13 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
     // Remove do manifesto persistente
     await removeDownloadFromManifest(id);
 
+    // Se estiver no APK nativo, remove via AndroidBridge nativo
+    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.deleteOfflineVideo) {
+      try {
+        (window as any).AndroidBridge.deleteOfflineVideo(id, filePath || null);
+      } catch (e) {}
+    }
+
     if (filePath && isNativeApp()) {
       try {
         const relativePath = filePath.includes('videos/')
@@ -1113,6 +1155,11 @@ export async function deleteOfflineDownload(id: string): Promise<void> {
       window.dispatchEvent(
         new CustomEvent(PROGRESS_EVENT, {
           detail: { id, done: true, deleted: true },
+        })
+      );
+      window.dispatchEvent(
+        new CustomEvent('offline-downloads-changed', {
+          detail: { id, action: 'deleted' },
         })
       );
     }
