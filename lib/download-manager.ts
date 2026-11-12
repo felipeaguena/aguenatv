@@ -137,13 +137,18 @@ export function getCachedManifestSync(): OfflineDownload[] {
         const nativeJson = (window as any).AndroidBridge.getOfflineDownloadsJson();
         if (nativeJson && nativeJson.trim().length > 2) {
           const parsed = JSON.parse(nativeJson);
-          const list: OfflineDownload[] = Array.isArray(parsed) ? parsed : Object.values(parsed);
-          if (list && list.length > 0) {
-            try {
-              localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(list));
-            } catch {}
-            return list;
-          }
+          const rawList: OfflineDownload[] = Array.isArray(parsed) ? parsed : Object.values(parsed);
+          const validList = (rawList || []).filter(
+            (item) => item && item.id && item.file_path && (item.file_size === undefined || item.file_size > 0)
+          );
+          try {
+            const manifestMap: Record<string, OfflineDownload> = {};
+            for (const it of validList) {
+              manifestMap[it.id] = it;
+            }
+            localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifestMap));
+          } catch {}
+          return validList;
         }
       } catch (bridgeErr) {
         console.warn('[DownloadManager] Erro ao ler getOfflineDownloadsJson síncrono:', bridgeErr);
@@ -154,10 +159,16 @@ export function getCachedManifestSync(): OfflineDownload[] {
     const raw = localStorage.getItem(MANIFEST_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-      if (typeof parsed === 'object' && parsed !== null) {
-        return Object.values(parsed);
-      }
+      const rawList: OfflineDownload[] = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === 'object' && parsed !== null
+        ? Object.values(parsed)
+        : [];
+      return rawList.filter((item) => {
+        if (!item || !item.id || !item.file_path) return false;
+        if (isNativeApp() && (!item.file_size || item.file_size <= 0)) return false;
+        return true;
+      });
     }
   } catch {}
   return [];
@@ -382,9 +393,6 @@ export async function downloadVideoForOffline(
 
   // 1. EXECUÇÃO EM APLICATIVO NATIVO (Android / iOS via Foreground Service Nativo Resiliente)
   if (isNativeApp()) {
-    // Grava preliminarmente os metadados companion JSON no disco do celular
-    await saveDownloadToManifest(initialRecord);
-
     // Pede permissão para notificações locais se necessário (Android 13+)
     try {
       const notifPerm = await LocalNotifications.checkPermissions();
@@ -775,20 +783,32 @@ export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
       const raw = (window as any).AndroidBridge.getOfflineDownloadsJson();
       if (raw && typeof raw === 'string') {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
+          const validList = parsed.filter(
+            (it: OfflineDownload) => it && it.id && it.file_path && (!isNativeApp() || (it.file_size && it.file_size > 0))
+          );
           if (localDB?.offline_downloads) {
-            for (const it of parsed) {
+            try {
+              const existingInDb = await localDB.offline_downloads.toArray();
+              const validIds = new Set(validList.map((v: OfflineDownload) => v.id));
+              for (const dbItem of existingInDb) {
+                if (!validIds.has(dbItem.id)) {
+                  await localDB.offline_downloads.delete(dbItem.id).catch(() => {});
+                }
+              }
+            } catch {}
+            for (const it of validList) {
               await localDB.offline_downloads.put(it).catch(() => {});
             }
           }
           const manifest: Record<string, OfflineDownload> = {};
-          parsed.forEach((it) => {
+          validList.forEach((it: OfflineDownload) => {
             if (it?.id) manifest[it.id] = it;
           });
           try {
             localStorage.setItem(MANIFEST_STORAGE_KEY, JSON.stringify(manifest));
           } catch {}
-          return parsed;
+          return validList;
         }
       }
     } catch (e) {
@@ -800,7 +820,10 @@ export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
     await syncOfflineDownloadsWithDisk();
     if (localDB?.offline_downloads) {
       const fromDb = await localDB.offline_downloads.toArray();
-      if (fromDb.length > 0) return fromDb;
+      const validFromDb = fromDb.filter(
+        (it) => it && it.id && it.file_path && (!isNativeApp() || (it.file_size && it.file_size > 0))
+      );
+      if (validFromDb.length > 0) return validFromDb;
     }
   } catch (err) {
     console.warn('[DownloadManager] Erro ao consultar IndexedDB:', err);
@@ -808,7 +831,9 @@ export async function getOfflineDownloadsList(): Promise<OfflineDownload[]> {
 
   // Fallback 1: Manifesto do disco ou localStorage
   try {
-    const manifestItems = Object.values(await readManifestFromDisk());
+    const manifestItems = Object.values(await readManifestFromDisk()).filter(
+      (it) => it && it.id && it.file_path && (!isNativeApp() || (it.file_size && it.file_size > 0))
+    );
     if (manifestItems.length > 0) {
       if (localDB?.offline_downloads) {
         for (const it of manifestItems) {
@@ -869,6 +894,67 @@ export function getPlayableOfflineUrlSync(download: OfflineDownload): string {
 }
 
 /**
+ * Regra estrita de verificação de correspondência entre um registro de download e um título/capítulo.
+ * Garante 0% de falsos positivos entre séries diferentes (ex: Episódio 1 de outra série).
+ */
+export function doesOfflineRecordMatch(
+  d: OfflineDownload,
+  streamType: 'movie' | 'series',
+  streamId: string | number,
+  seasonNum?: number | string,
+  episodeNum?: number | string,
+  episodeId?: string | number
+): boolean {
+  if (!d || d.stream_type !== streamType) return false;
+  if (isNativeApp() && (!d.file_size || d.file_size <= 0)) return false;
+
+  const strStreamId = String(streamId);
+
+  if (streamType === 'movie') {
+    return String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}`;
+  }
+
+  // Para séries:
+  if (episodeNum === undefined && episodeId === undefined) {
+    return false;
+  }
+
+  // 1. Obrigatório pertencer estritamente à mesma série (stream_id idêntico)
+  const matchesSeries =
+    String(d.stream_id) === strStreamId ||
+    d.id.startsWith(`series_${strStreamId}_`);
+
+  if (!matchesSeries) return false;
+
+  // 2. Comparação de ID exato de download
+  const targetCleanId = buildDownloadId('series', streamId, seasonNum, episodeNum ?? episodeId);
+  if (d.id === targetCleanId) return true;
+
+  // 3. Comparação por ID único do episódio no servidor IPTV (quando fornecido e diferente de número simples ou quando coincide com temporada)
+  const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
+  const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
+  const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
+
+  if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) {
+    return false;
+  }
+
+  if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) {
+    return true;
+  }
+
+  if (strEpId && d.episode_id !== undefined && String(d.episode_id) === strEpId) {
+    // Se episode_id no registro era apenas o número do episódio (ex: 1), exige que season_num também coincida
+    if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Busca de forma síncrona/imediata do cache local de manifesto (0ms de espera)
  */
 export function findCachedOfflineDownload(
@@ -881,43 +967,9 @@ export function findCachedOfflineDownload(
   const cached = getCachedManifestSync();
   if (!cached || cached.length === 0) return undefined;
 
-  const targetCleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNum ?? episodeId);
-  const exact = cached.find((d) => d.id === targetCleanId);
-  if (exact) return exact;
-
-  const strStreamId = String(streamId);
-  if (streamType === 'movie') {
-    return cached.find(
-      (d) =>
-        d.stream_type === 'movie' &&
-        (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
-    );
-  } else {
-    // Para séries, só busca quando o episódio ou ID do episódio for informado
-    if (episodeNum === undefined && episodeId === undefined) {
-      return undefined;
-    }
-    const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
-    const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
-    const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
-
-    return cached.find((d) => {
-      if (d.stream_type !== 'series') return false;
-      const idMatches =
-        String(d.stream_id) === strStreamId ||
-        String(d.episode_id) === strStreamId ||
-        d.id === strStreamId ||
-        d.id.includes(`_${strStreamId}_`) ||
-        d.id.endsWith(`_${strStreamId}`);
-
-      if (strEpId) {
-        if (String(d.episode_id) === strEpId || d.id === strEpId || d.id.includes(`_${strEpId}`)) return true;
-      }
-      if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
-      if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-      return false;
-    });
-  }
+  return cached.find((d) =>
+    doesOfflineRecordMatch(d, streamType, streamId, seasonNum, episodeNum, episodeId)
+  );
 }
 
 /**
@@ -934,91 +986,23 @@ export async function findOfflineDownloadRecord(
   const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNum, episodeId);
   if (cached) return cached;
 
-  const targetCleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNum ?? episodeId);
-
   // 2. Tenta IndexedDB Dexie
   if (localDB?.offline_downloads) {
     try {
-      const exact = await localDB.offline_downloads.get(targetCleanId);
-      if (exact) return exact;
-
-      const strStreamId = String(streamId);
       const allForStream = await localDB.offline_downloads.toArray();
-
-      if (streamType === 'movie') {
-        const movieRec = allForStream.find(
-          (i) =>
-            i.stream_type === 'movie' &&
-            (String(i.stream_id) === strStreamId || i.id === `movie_${strStreamId}` || i.id.includes(strStreamId))
-        );
-        if (movieRec) return movieRec;
-      } else {
-        if (episodeNum === undefined && episodeId === undefined) {
-          return undefined;
-        }
-        const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
-        const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
-        const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
-
-        const seriesRec = allForStream.find((i) => {
-          if (i.stream_type !== 'series') return false;
-          const idMatches =
-            String(i.stream_id) === strStreamId ||
-            String(i.episode_id) === strStreamId ||
-            i.id === strStreamId ||
-            i.id.includes(`_${strStreamId}_`) ||
-            i.id.endsWith(`_${strStreamId}`);
-
-          if (strEpId) {
-            if (String(i.episode_id) === strEpId || i.id === strEpId || i.id.includes(`_${strEpId}`)) return true;
-          }
-          if (sNum !== undefined && i.season_num !== undefined && Number(i.season_num) !== sNum) return false;
-          if (eNum !== undefined && i.episode_num !== undefined && Number(i.episode_num) === eNum) return true;
-          return false;
-        });
-        if (seriesRec) return seriesRec;
-      }
+      const foundInDb = allForStream.find((d) =>
+        doesOfflineRecordMatch(d, streamType, streamId, seasonNum, episodeNum, episodeId)
+      );
+      if (foundInDb) return foundInDb;
     } catch (e) {}
   }
 
   // 3. Fallback: manifesto completo do disco nativo / AndroidBridge
   try {
     const list = await getOfflineDownloadsList();
-    const exact = list.find((d) => d.id === targetCleanId);
-    if (exact) return exact;
-
-    const strStreamId = String(streamId);
-    if (streamType === 'movie') {
-      return list.find(
-        (d) =>
-          d.stream_type === 'movie' &&
-          (String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId))
-      );
-    } else {
-      if (episodeNum === undefined && episodeId === undefined) {
-        return undefined;
-      }
-      const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
-      const eNum = episodeNum !== undefined ? Number(String(episodeNum).replace(/\D/g, '')) : undefined;
-      const strEpId = episodeId !== undefined ? String(episodeId) : undefined;
-
-      return list.find((d) => {
-        if (d.stream_type !== 'series') return false;
-        const idMatches =
-          String(d.stream_id) === strStreamId ||
-          String(d.episode_id) === strStreamId ||
-          d.id === strStreamId ||
-          d.id.includes(`_${strStreamId}_`) ||
-          d.id.endsWith(`_${strStreamId}`);
-
-        if (strEpId) {
-          if (String(d.episode_id) === strEpId || d.id === strEpId || d.id.includes(`_${strEpId}`)) return true;
-        }
-        if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
-        if (eNum !== undefined && d.episode_num !== undefined && Number(d.episode_num) === eNum) return true;
-        return false;
-      });
-    }
+    return list.find((d) =>
+      doesOfflineRecordMatch(d, streamType, streamId, seasonNum, episodeNum, episodeId)
+    );
   } catch {}
 
   return undefined;

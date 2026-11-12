@@ -6,7 +6,7 @@ import { App } from '@capacitor/app';
 import { AppVersionInfo } from '@/app/api/version/route';
 import { BackgroundDownload } from '@/lib/download-manager';
 
-const FALLBACK_VERSION = '0.2.6';
+const FALLBACK_VERSION = '0.3.1';
 
 interface UpdateAlertModalProps {
   manualCheck?: boolean;

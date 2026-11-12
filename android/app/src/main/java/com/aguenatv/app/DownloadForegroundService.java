@@ -205,15 +205,7 @@ public class DownloadForegroundService extends Service {
             videosDir.mkdirs();
         }
 
-        // Salva metadados companion JSON imediatamente ao iniciar
-        if (metadata != null && !metadata.trim().isEmpty()) {
-            try {
-                File companionJson = new File(videosDir, "offline_" + id + ".json");
-                writeStringToFile(companionJson, metadata);
-            } catch (Exception e) {
-                Log.w(TAG, "Falha ao gravar metadata preliminar: " + e.getMessage());
-            }
-        }
+        // Não grava offline_{id}.json antes do término para impedir que downloads em andamento ou falhos apareçam como concluídos
 
         DownloadTask task = new DownloadTask(id, urlStr, title, fileName, metadata);
         activeTasks.put(id, task);

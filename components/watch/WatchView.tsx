@@ -720,13 +720,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
     if (targetType === 'movie') {
       return getDownload('movie', currentStreamId);
     }
-    const epNum = activeEpisode?.episode_num ?? (episodeParam ? Number(episodeParam) : undefined);
+    const epNum = activeEpisode?.episode_num;
     const epId = activeEpisode?.id ?? (episodeParam || undefined);
     if (epNum === undefined && epId === undefined) {
       return undefined;
     }
     const sNum = selectedSeason || seasonParam || '1';
-    return getDownload('series', currentStreamId, sNum, epNum ?? epId);
+    return getDownload('series', currentStreamId, sNum, epNum, epId);
   }, [type, item?.stream_type, selectedSeason, seasonParam, activeEpisode?.episode_num, activeEpisode?.id, episodeParam, currentStreamId, getDownload, downloadedMap]);
 
   const resolvedLocalPlayableUrl = useMemo(() => {
@@ -1125,9 +1125,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
     if (!currentStreamId) return;
     const epId = buildDownloadId('series', currentStreamId, selectedSeason, ep.episode_num ?? ep.id);
 
-    if (isDownloaded('series', currentStreamId, selectedSeason, ep.episode_num ?? ep.id)) {
+    if (isDownloaded('series', currentStreamId, selectedSeason, ep.episode_num, ep.id)) {
       if (confirm(`Deseja excluir o episódio ${ep.episode_num} da memória do celular?`)) {
-        await deleteOfflineItem('series', currentStreamId, selectedSeason, ep.episode_num ?? ep.id);
+        await deleteOfflineItem('series', currentStreamId, selectedSeason, ep.episode_num, ep.id);
       }
       return;
     }
@@ -1482,7 +1482,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
                             streamType === 'series' ? 'series' : 'movie',
                             seriesOrMovieId,
                             sNum,
-                            epNum ?? epId
+                            epNum,
+                            epId
                           );
                         }
                         return;
@@ -1765,7 +1766,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
                             {/* Botão de Download do Episódio (No APK / App Nativo) */}
                             {isNative && (() => {
                               const epDownloadId = buildDownloadId('series', item?.stream_id || id, selectedSeason, ep.episode_num ?? ep.id);
-                              const isEpDownloaded = isDownloaded('series', item?.stream_id || id, selectedSeason, ep.episode_num ?? ep.id);
+                              const isEpDownloaded = isDownloaded('series', item?.stream_id || id, selectedSeason, ep.episode_num, ep.id);
                               const epProgress = getProgress(epDownloadId);
                               const isEpDownloading = isDownloading(epDownloadId) || !!downloadingIds[epDownloadId] || !!epProgress;
 

@@ -1,5 +1,5 @@
 // AGUENATV Service Worker para Suporte Completo Offline e Modo Avião
-const CACHE_NAME = 'aguenatv-v2';
+const CACHE_NAME = 'aguenatv-v3';
 
 // Recursos críticos pré-cacheados para navegação sem internet
 const PRECACHE_URLS = [
@@ -41,11 +41,23 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Não intercepta chamadas de stream de vídeo de terceiros ou localhost Capacitor
+  // Não intercepta chamadas de stream de vídeo de terceiros, requisições com Range (seek de vídeo)
+  // ou vídeos locais servidos na memória do APK (_local_video_, _capacitor_file_, /videos/offline_)
   if (
     request.method !== 'GET' ||
+    request.headers.has('range') ||
+    request.headers.has('Range') ||
+    request.destination === 'video' ||
+    request.destination === 'audio' ||
     url.protocol === 'chrome-extension:' ||
+    url.pathname.includes('/_local_video_') ||
     url.pathname.includes('/_capacitor_file_') ||
+    url.pathname.includes('/videos/offline_') ||
+    url.pathname.endsWith('.mp4') ||
+    url.pathname.endsWith('.mkv') ||
+    url.pathname.endsWith('.webm') ||
+    url.pathname.endsWith('.m3u8') ||
+    url.pathname.endsWith('.ts') ||
     url.pathname.startsWith('/movie/') ||
     url.pathname.startsWith('/series/') ||
     url.pathname.startsWith('/live/')

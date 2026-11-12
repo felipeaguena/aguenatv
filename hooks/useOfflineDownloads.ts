@@ -10,6 +10,7 @@ import {
   getPlayableOfflineUrlSync,
   buildDownloadId,
   findCachedOfflineDownload,
+  doesOfflineRecordMatch,
   PROGRESS_EVENT,
   getAllActiveDownloads,
 } from '@/lib/download-manager';
@@ -141,44 +142,22 @@ export function useOfflineDownloads() {
       streamType: 'movie' | 'series',
       streamId: string | number,
       seasonNum?: number | string,
-      episodeNumOrId?: number | string
+      episodeNumOrId?: number | string,
+      episodeId?: string | number
     ): boolean => {
       if (typeof window === 'undefined') return false;
-      const strStreamId = String(streamId);
 
       // Séries sem episódio especificado: não assume episódio aleatório
-      if (streamType === 'series' && episodeNumOrId === undefined) {
+      if (streamType === 'series' && episodeNumOrId === undefined && episodeId === undefined) {
         return false;
       }
 
-      const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeNumOrId);
+      const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeId);
       if (cached) return true;
 
-      const cleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNumOrId);
-      if (globalDownloadedMap[cleanId]) return true;
-
-      const strEp = episodeNumOrId !== undefined ? String(episodeNumOrId) : undefined;
-      const numEp = episodeNumOrId !== undefined ? Number(String(episodeNumOrId).replace(/\D/g, '')) : undefined;
-      const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
-
-      return Object.values(globalDownloadedMap).some((d) => {
-        if (d.stream_type !== streamType) return false;
-        if (streamType === 'movie') {
-          return String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId);
-        }
-        const matchesStream =
-          String(d.stream_id) === strStreamId ||
-          String(d.episode_id) === strStreamId ||
-          d.id.includes(`_${strStreamId}_`) ||
-          d.id === strStreamId;
-
-        if (strEp && (String(d.episode_id) === strEp || d.id === strEp || d.id.includes(`_${strEp}`))) {
-          return true;
-        }
-        if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
-        if (numEp !== undefined && d.episode_num !== undefined && Number(d.episode_num) === numEp) return true;
-        return false;
-      });
+      return Object.values(globalDownloadedMap).some((d) =>
+        doesOfflineRecordMatch(d, streamType, streamId, seasonNum, episodeNumOrId, episodeId)
+      );
     },
     []
   );
@@ -188,44 +167,22 @@ export function useOfflineDownloads() {
       streamType: 'movie' | 'series',
       streamId: string | number,
       seasonNum?: number | string,
-      episodeNumOrId?: number | string
+      episodeNumOrId?: number | string,
+      episodeId?: string | number
     ): OfflineDownload | undefined => {
       if (typeof window === 'undefined') return undefined;
-      const strStreamId = String(streamId);
 
       // Séries sem episódio especificado: não assume episódio aleatório para reprodução
-      if (streamType === 'series' && episodeNumOrId === undefined) {
+      if (streamType === 'series' && episodeNumOrId === undefined && episodeId === undefined) {
         return undefined;
       }
 
-      const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeNumOrId);
+      const cached = findCachedOfflineDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeId);
       if (cached) return cached;
 
-      const cleanId = buildDownloadId(streamType, streamId, seasonNum, episodeNumOrId);
-      if (globalDownloadedMap[cleanId]) return globalDownloadedMap[cleanId];
-
-      const strEp = episodeNumOrId !== undefined ? String(episodeNumOrId) : undefined;
-      const numEp = episodeNumOrId !== undefined ? Number(String(episodeNumOrId).replace(/\D/g, '')) : undefined;
-      const sNum = seasonNum !== undefined ? Number(String(seasonNum).replace(/\D/g, '')) : undefined;
-
-      return Object.values(globalDownloadedMap).find((d) => {
-        if (d.stream_type !== streamType) return false;
-        if (streamType === 'movie') {
-          return String(d.stream_id) === strStreamId || d.id === `movie_${strStreamId}` || d.id.includes(strStreamId);
-        }
-        const matchesStream =
-          String(d.stream_id) === strStreamId ||
-          String(d.episode_id) === strStreamId ||
-          d.id.includes(`_${strStreamId}_`) ||
-          d.id === strStreamId;
-
-        if (strEp && (String(d.episode_id) === strEp || d.id === strEp || d.id.includes(`_${strEp}`))) {
-          return true;
-        }
-        if (sNum !== undefined && d.season_num !== undefined && Number(d.season_num) !== sNum) return false;
-        if (numEp !== undefined && d.episode_num !== undefined && Number(d.episode_num) === numEp) return true;
-        return false;
-      });
+      return Object.values(globalDownloadedMap).find((d) =>
+        doesOfflineRecordMatch(d, streamType, streamId, seasonNum, episodeNumOrId, episodeId)
+      );
     },
     []
   );
@@ -233,7 +190,9 @@ export function useOfflineDownloads() {
   const hasAnyEpisodeDownloaded = useCallback((seriesId: string | number): boolean => {
     const strId = String(seriesId);
     return Object.values(globalDownloadedMap).some(
-      (d) => d.stream_type === 'series' && (String(d.stream_id) === strId || d.id.includes(`_${strId}_`))
+      (d) =>
+        d.stream_type === 'series' &&
+        (String(d.stream_id) === strId || d.id.startsWith(`series_${strId}_`))
     );
   }, []);
 
@@ -242,9 +201,10 @@ export function useOfflineDownloads() {
       streamType: 'movie' | 'series',
       streamId: string | number,
       seasonNum?: number | string,
-      episodeNumOrId?: number | string
+      episodeNumOrId?: number | string,
+      episodeId?: string | number
     ): string | null => {
-      const rec = getDownload(streamType, streamId, seasonNum, episodeNumOrId);
+      const rec = getDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeId);
       if (!rec) return null;
       return getPlayableOfflineUrlSync(rec);
     },
@@ -285,10 +245,11 @@ export function useOfflineDownloads() {
       streamType: 'movie' | 'series',
       streamId: string | number,
       seasonNum?: number | string,
-      episodeNumOrId?: number | string
+      episodeNumOrId?: number | string,
+      episodeId?: string | number
     ): Promise<void> => {
-      const rec = getDownload(streamType, streamId, seasonNum, episodeNumOrId);
-      const cleanId = rec ? rec.id : buildDownloadId(streamType, streamId, seasonNum, episodeNumOrId);
+      const rec = getDownload(streamType, streamId, seasonNum, episodeNumOrId, episodeId);
+      const cleanId = rec ? rec.id : buildDownloadId(streamType, streamId, seasonNum, episodeNumOrId ?? episodeId);
       await deleteDownload(cleanId);
     },
     [getDownload, deleteDownload]

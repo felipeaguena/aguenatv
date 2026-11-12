@@ -930,14 +930,16 @@
         const MANIFEST_KEY = 'aguenatv_offline_downloads_manifest';
 
         // 1. Prioridade Máxima no APK: Lê diretamente do AndroidBridge nativo (acessa arquivos físicos e JSONs do celular)
+        let hasAndroidBridge = false;
         if (window.AndroidBridge && typeof window.AndroidBridge.getOfflineDownloadsJson === 'function') {
+          hasAndroidBridge = true;
           try {
             const raw = window.AndroidBridge.getOfflineDownloadsJson();
             if (raw && typeof raw === 'string') {
               const nativeItems = JSON.parse(raw);
               if (Array.isArray(nativeItems)) {
                 nativeItems.forEach((it) => {
-                  if (it && it.id) downloadsMap[it.id] = it;
+                  if (it && it.id && Number(it.file_size || 0) > 0) downloadsMap[it.id] = it;
                 });
               }
             }
@@ -946,26 +948,28 @@
           }
         }
 
-        // 2. Lê do localStorage para complementar
-        try {
-          const raw = localStorage.getItem(MANIFEST_KEY);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              parsed.forEach((it) => {
-                if (it && it.id && !downloadsMap[it.id]) downloadsMap[it.id] = it;
-              });
-            } else if (typeof parsed === 'object' && parsed !== null) {
-              Object.keys(parsed).forEach((k) => {
-                if (!downloadsMap[k]) downloadsMap[k] = parsed[k];
-              });
+        // 2. Lê do localStorage apenas quando não estamos no AndroidBridge nativo (evita ressuscitar itens excluídos/fantasmas)
+        if (!hasAndroidBridge) {
+          try {
+            const raw = localStorage.getItem(MANIFEST_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) {
+                parsed.forEach((it) => {
+                  if (it && it.id && !downloadsMap[it.id]) downloadsMap[it.id] = it;
+                });
+              } else if (typeof parsed === 'object' && parsed !== null) {
+                Object.keys(parsed).forEach((k) => {
+                  if (!downloadsMap[k]) downloadsMap[k] = parsed[k];
+                });
+              }
             }
-          }
-        } catch {}
+          } catch {}
+        }
 
-        // 2. Lê do disco nativo via Filesystem do Capacitor se disponível
+        // 2b. Lê do disco nativo via Filesystem do Capacitor se disponível e sem AndroidBridge
         const fs = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
-        if (fs) {
+        if (fs && !hasAndroidBridge) {
           try {
             const res = await fs.readFile({
               path: 'videos/downloads_manifest.json',
@@ -989,7 +993,7 @@
             const files = dirRes.files || [];
             for (const f of files) {
               const name = typeof f === 'string' ? f : (f && f.name);
-              if (!name || !name.startsWith('offline_') || name.endsWith('.tmp')) continue;
+              if (!name || !name.startsWith('offline_') || name.endsWith('.tmp') || name.endsWith('.json')) continue;
 
               const withoutPrefix = name.replace(/^offline_/, '');
               const lastDot = withoutPrefix.lastIndexOf('.');
@@ -1037,15 +1041,20 @@
           }
 
           if (db) {
-            const dbDownloads = await getStoreData(db, 'offline_downloads');
-            dbDownloads.forEach((it) => {
-              if (it && it.id) downloadsMap[it.id] = it;
-            });
+            if (!hasAndroidBridge) {
+              const dbDownloads = await getStoreData(db, 'offline_downloads');
+              dbDownloads.forEach((it) => {
+                if (it && it.id) downloadsMap[it.id] = it;
+              });
+            }
             allStreams = await getStoreData(db, 'streams');
           }
         } catch {}
 
-        allDownloads = Object.values(downloadsMap);
+        allDownloads = Object.values(downloadsMap).filter((it) => {
+          if (hasAndroidBridge) return Number(it && it.file_size || 0) > 0;
+          return Boolean(it && it.id);
+        });
         renderUI();
       }
 

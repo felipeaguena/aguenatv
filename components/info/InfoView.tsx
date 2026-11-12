@@ -518,7 +518,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
   const currentSeasonDownloadedCount = useMemo(() => {
     if (!isSeries || !item) return 0;
     return currentSeasonEpisodes.filter((ep) => {
-      return isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+      return isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num, ep.id);
     }).length;
   }, [isSeries, item, currentSeasonEpisodes, selectedSeason, isDownloaded, downloadedMap]);
 
@@ -704,14 +704,14 @@ export default function InfoView({ type, id }: InfoViewProps) {
         )
       ) {
         for (const ep of currentSeasonEpisodes) {
-          await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+          await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num, ep.id);
         }
       }
       return;
     }
 
     const undownloaded = currentSeasonEpisodes.filter((ep) => {
-      return !isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+      return !isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num, ep.id);
     });
 
     if (
@@ -765,9 +765,9 @@ export default function InfoView({ type, id }: InfoViewProps) {
     if (!item) return;
     const epId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
 
-    if (isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id)) {
+    if (isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num, ep.id)) {
       if (confirm(`Deseja excluir o episódio ${ep.episode_num} da memória do dispositivo?`)) {
-        await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+        await deleteOfflineItem('series', item.stream_id, selectedSeason, ep.episode_num, ep.id);
       }
       return;
     }
@@ -1524,7 +1524,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
                       {/* Botão de Download do Episódio (Apenas no aplicativo nativo, tamanho padronizado) */}
                       {isNative && (() => {
                         const epDownloadId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
-                        const isEpDownloaded = isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
+                        const isEpDownloaded = isDownloaded('series', item.stream_id, selectedSeason, ep.episode_num, ep.id);
                         const epProgress = getProgress(epDownloadId);
                         const isEpDownloading = isDownloading(epDownloadId) || !!downloadingIds[epDownloadId] || !!epProgress;
 

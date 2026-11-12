@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -111,26 +111,41 @@ function OfflineWatchContent() {
   const [filterTab, setFilterTab] = useState<'all' | 'movie' | 'series'>('all');
   const [isNative, setIsNative] = useState(false);
 
+  const selectedGroupRef = useRef<GroupedDownloadItem | null>(null);
+  const activeEpisodeRef = useRef<OfflineDownload | null>(null);
+
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+  }, [selectedGroup]);
+
+  useEffect(() => {
+    activeEpisodeRef.current = activeEpisode;
+  }, [activeEpisode]);
+
   // Seleciona um grupo de título para abrir a página de reprodução estilo Watch
   const handleOpenTitle = useCallback((group: GroupedDownloadItem, targetEp?: OfflineDownload) => {
     setSelectedGroup(group);
+    selectedGroupRef.current = group;
     const chosenEp = targetEp || (group.episodes && group.episodes.length > 0 ? group.episodes[0] : null);
     if (chosenEp) {
       setActiveEpisode(chosenEp);
+      activeEpisodeRef.current = chosenEp;
       const syncUrl = getPlayableOfflineUrlSync(chosenEp);
-      setPlayableUrl(syncUrl);
-      // Confirmação assíncrona
-      getPlayableOfflineUrl(chosenEp).then((u) => {
-        if (u) setPlayableUrl(u);
-      }).catch(() => {});
+      setPlayableUrl((prev) => (prev === syncUrl ? prev : syncUrl));
+      getPlayableOfflineUrl(chosenEp)
+        .then((u) => {
+          if (u) setPlayableUrl((prev) => (prev === u ? prev : u));
+        })
+        .catch(() => {});
     } else {
       setActiveEpisode(null);
+      activeEpisodeRef.current = null;
       setPlayableUrl(null);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  // Carrega lista de downloads offline salvos
+  // Carrega lista de downloads offline salvos sem criar loop de re-renderização
   const loadDownloads = useCallback(async () => {
     try {
       const allList = await getOfflineDownloadsList();
@@ -139,24 +154,32 @@ function OfflineWatchContent() {
       setAllDownloadsList(allList);
       setGroupedDownloads(grouped);
 
-      // Se houver um título selecionado anteriormente ou via query param, revalida
-      if (selectedGroup) {
+      const currentGroup = selectedGroupRef.current;
+      const currentEp = activeEpisodeRef.current;
+
+      // Se houver um título selecionado anteriormente ou via query param, revalida sem interromper o player
+      if (currentGroup) {
         const stillGroup = grouped.find(
           (g) =>
-            (String(g.stream_id) === String(selectedGroup.stream_id) && g.stream_type === selectedGroup.stream_type) ||
-            g.title.toLowerCase() === selectedGroup.title.toLowerCase()
+            (String(g.stream_id) === String(currentGroup.stream_id) && g.stream_type === currentGroup.stream_type) ||
+            g.title.toLowerCase() === currentGroup.title.toLowerCase()
         );
         if (stillGroup) {
           setSelectedGroup(stillGroup);
-          if (activeEpisode) {
-            const stillEp = stillGroup.episodes.find((e) => e.id === activeEpisode.id);
+          selectedGroupRef.current = stillGroup;
+          if (currentEp) {
+            const stillEp = stillGroup.episodes.find((e) => e.id === currentEp.id);
             if (stillEp) {
               setActiveEpisode(stillEp);
-              setPlayableUrl(getPlayableOfflineUrlSync(stillEp));
+              activeEpisodeRef.current = stillEp;
+              const nextUrl = getPlayableOfflineUrlSync(stillEp);
+              setPlayableUrl((prev) => (prev === nextUrl ? prev : nextUrl));
             } else if (stillGroup.episodes.length > 0) {
               const firstEp = stillGroup.episodes[0];
               setActiveEpisode(firstEp);
-              setPlayableUrl(getPlayableOfflineUrlSync(firstEp));
+              activeEpisodeRef.current = firstEp;
+              const nextUrl = getPlayableOfflineUrlSync(firstEp);
+              setPlayableUrl((prev) => (prev === nextUrl ? prev : nextUrl));
             }
           }
         }
@@ -175,7 +198,7 @@ function OfflineWatchContent() {
     } finally {
       setLoading(false);
     }
-  }, [selectedGroup, activeEpisode, initialTitleParam, handleOpenTitle]);
+  }, [initialTitleParam, handleOpenTitle]);
 
   useEffect(() => {
     setIsNative(isNativeApp());
@@ -202,7 +225,9 @@ function OfflineWatchContent() {
   // Volta da tela de reprodução para a tela de catálogo de títulos
   const handleBackToCatalog = () => {
     setSelectedGroup(null);
+    selectedGroupRef.current = null;
     setActiveEpisode(null);
+    activeEpisodeRef.current = null;
     setPlayableUrl(null);
     setEpisodeSearch('');
   };
@@ -210,11 +235,14 @@ function OfflineWatchContent() {
   // Alterna o capítulo selecionado na tela de reprodução de forma 100% síncrona
   const handleSelectEpisode = (ep: OfflineDownload) => {
     setActiveEpisode(ep);
+    activeEpisodeRef.current = ep;
     const syncUrl = getPlayableOfflineUrlSync(ep);
-    setPlayableUrl(syncUrl);
-    getPlayableOfflineUrl(ep).then((u) => {
-      if (u) setPlayableUrl(u);
-    }).catch(() => {});
+    setPlayableUrl((prev) => (prev === syncUrl ? prev : syncUrl));
+    getPlayableOfflineUrl(ep)
+      .then((u) => {
+        if (u) setPlayableUrl((prev) => (prev === u ? prev : u));
+      })
+      .catch(() => {});
   };
 
   // Exclui item individual da memória

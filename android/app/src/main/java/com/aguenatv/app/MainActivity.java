@@ -34,7 +34,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -42,6 +46,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -52,6 +58,200 @@ public class MainActivity extends BridgeActivity {
     private boolean isCutoutFullscreenActive = false;
 
     private static final int SYSTEM_BAR_COLOR_DARK = Color.parseColor("#0b0c10");
+
+    // Servidor HTTP local em 127.0.0.1 para streaming de vídeo local com suporte real a HTTP 206 Range / Seek
+    private ServerSocket localVideoServerSocket;
+    private int localVideoServerPort = 0;
+    private final ExecutorService videoServerExecutor = Executors.newCachedThreadPool();
+
+    private synchronized void startLocalVideoServer() {
+        if (localVideoServerSocket != null && !localVideoServerSocket.isClosed() && localVideoServerPort > 0) {
+            return;
+        }
+        try {
+            localVideoServerSocket = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+            localVideoServerPort = localVideoServerSocket.getLocalPort();
+            videoServerExecutor.execute(() -> {
+                while (localVideoServerSocket != null && !localVideoServerSocket.isClosed()) {
+                    try {
+                        Socket client = localVideoServerSocket.accept();
+                        videoServerExecutor.execute(() -> handleLocalVideoSocket(client));
+                    } catch (Exception ignored) {
+                        break;
+                    }
+                }
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void handleLocalVideoSocket(Socket socket) {
+        try (Socket client = socket) {
+            client.setSoTimeout(30000);
+            client.setTcpNoDelay(true);
+            InputStream in = client.getInputStream();
+            OutputStream out = client.getOutputStream();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            String requestLine = reader.readLine();
+            if (requestLine == null || requestLine.isEmpty()) return;
+
+            String[] reqParts = requestLine.split(" ");
+            if (reqParts.length < 2) return;
+            String method = reqParts[0].toUpperCase(Locale.ROOT);
+            String rawPath = reqParts[1];
+
+            String rangeHeader = null;
+            String line;
+            while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                int colon = line.indexOf(':');
+                if (colon != -1) {
+                    String hName = line.substring(0, colon).trim();
+                    String hVal = line.substring(colon + 1).trim();
+                    if ("Range".equalsIgnoreCase(hName)) {
+                        rangeHeader = hVal;
+                    }
+                }
+            }
+
+            if ("OPTIONS".equals(method)) {
+                String resp = "HTTP/1.1 204 No Content\r\n"
+                    + "Access-Control-Allow-Origin: *\r\n"
+                    + "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
+                    + "Access-Control-Allow-Headers: *\r\n"
+                    + "Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n"
+                    + "Accept-Ranges: bytes\r\n"
+                    + "Connection: close\r\n\r\n";
+                out.write(resp.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                return;
+            }
+
+            int qIdx = rawPath.indexOf('?');
+            String cleanPath = qIdx != -1 ? rawPath.substring(0, qIdx) : rawPath;
+            String fileName = cleanPath.substring(cleanPath.lastIndexOf('/') + 1);
+            try {
+                fileName = java.net.URLDecoder.decode(fileName, "UTF-8");
+            } catch (Exception ignored) {}
+
+            File videosDir = new File(getFilesDir(), "videos");
+            File videoFile = new File(videosDir, fileName);
+            if (!videoFile.exists()) {
+                int dot = fileName.lastIndexOf('.');
+                String base = dot != -1 ? fileName.substring(0, dot) : fileName;
+                File[] candidates = videosDir.listFiles((dir, fName) ->
+                    fName.startsWith(base) && !fName.endsWith(".tmp") && !fName.endsWith(".json")
+                );
+                if (candidates != null && candidates.length > 0) {
+                    videoFile = candidates[0];
+                }
+            }
+
+            if (!videoFile.exists() || !videoFile.isFile() || videoFile.length() <= 0) {
+                String notFound = "HTTP/1.1 404 Not Found\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n";
+                out.write(notFound.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                return;
+            }
+
+            long fileLength = videoFile.length();
+            String mimeType = "video/mp4";
+            String lowerName = videoFile.getName().toLowerCase(Locale.ROOT);
+            if (lowerName.endsWith(".webm")) {
+                mimeType = "video/webm";
+            } else if (lowerName.endsWith(".mkv")) {
+                mimeType = "video/x-matroska";
+            }
+
+            long start = 0;
+            long end = fileLength - 1;
+            boolean isRange = false;
+
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                String rangeVal = rangeHeader.substring(6).trim();
+                int comma = rangeVal.indexOf(',');
+                if (comma != -1) {
+                    rangeVal = rangeVal.substring(0, comma).trim();
+                }
+                int dash = rangeVal.indexOf('-');
+                if (dash != -1) {
+                    String startStr = rangeVal.substring(0, dash).trim();
+                    String endStr = rangeVal.substring(dash + 1).trim();
+                    try {
+                        if (!startStr.isEmpty() && !endStr.isEmpty()) {
+                            start = Long.parseLong(startStr);
+                            end = Long.parseLong(endStr);
+                            isRange = true;
+                        } else if (!startStr.isEmpty()) {
+                            start = Long.parseLong(startStr);
+                            end = fileLength - 1;
+                            isRange = true;
+                        } else if (!endStr.isEmpty()) {
+                            long suffix = Long.parseLong(endStr);
+                            start = Math.max(0, fileLength - suffix);
+                            end = fileLength - 1;
+                            isRange = true;
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            if (end >= fileLength) end = fileLength - 1;
+            if (start < 0) start = 0;
+
+            if (start > end || start >= fileLength) {
+                String invalidRange = "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                    + "Content-Range: bytes */" + fileLength + "\r\n"
+                    + "Access-Control-Allow-Origin: *\r\n"
+                    + "Connection: close\r\n\r\n";
+                out.write(invalidRange.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                return;
+            }
+
+            long contentLength = end - start + 1;
+            StringBuilder headerSb = new StringBuilder();
+            if (isRange) {
+                headerSb.append("HTTP/1.1 206 Partial Content\r\n");
+                headerSb.append("Content-Range: bytes ").append(start).append("-").append(end).append("/").append(fileLength).append("\r\n");
+            } else {
+                headerSb.append("HTTP/1.1 200 OK\r\n");
+            }
+            headerSb.append("Content-Type: ").append(mimeType).append("\r\n");
+            headerSb.append("Content-Length: ").append(contentLength).append("\r\n");
+            headerSb.append("Accept-Ranges: bytes\r\n");
+            headerSb.append("Access-Control-Allow-Origin: *\r\n");
+            headerSb.append("Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n");
+            headerSb.append("Access-Control-Allow-Headers: *\r\n");
+            headerSb.append("Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n");
+            headerSb.append("Cache-Control: no-cache\r\n");
+            headerSb.append("Connection: close\r\n\r\n");
+
+            out.write(headerSb.toString().getBytes(StandardCharsets.UTF_8));
+            out.flush();
+
+            if ("HEAD".equals(method)) {
+                return;
+            }
+
+            try (RandomAccessFile raf = new RandomAccessFile(videoFile, "r")) {
+                raf.seek(start);
+                byte[] buffer = new byte[64 * 1024];
+                long remaining = contentLength;
+                while (remaining > 0) {
+                    int toRead = (int) Math.min(buffer.length, remaining);
+                    int read = raf.read(buffer, 0, toRead);
+                    if (read == -1) break;
+                    out.write(buffer, 0, read);
+                    remaining -= read;
+                }
+                out.flush();
+            }
+        } catch (Exception ignored) {
+            // Conexão fechada pelo player durante seek rápido é comportamento normal do HTML5 video
+        }
+    }
 
     public void applyCutoutFullscreen(boolean enable) {
         runOnUiThread(() -> {
@@ -196,22 +396,28 @@ public class MainActivity extends BridgeActivity {
                     videosDir.mkdirs();
                 }
 
-                JSONObject manifestObj = new JSONObject();
+                JSONObject oldManifestObj = new JSONObject();
                 File manifestFile = new File(videosDir, "downloads_manifest.json");
                 if (manifestFile.exists()) {
                     try {
                         String manifestContent = readFileToString(manifestFile);
                         if (manifestContent != null && !manifestContent.trim().isEmpty()) {
-                            manifestObj = new JSONObject(manifestContent);
+                            oldManifestObj = new JSONObject(manifestContent);
                         }
                     } catch (Exception ignored) {}
                 }
+
+                // A fonte de verdade são APENAS os arquivos de vídeo físicos completos (> 0 bytes)
+                JSONObject validManifestObj = new JSONObject();
 
                 File[] files = videosDir.listFiles();
                 if (files != null) {
                     for (File file : files) {
                         String name = file.getName();
                         if (name.startsWith("offline_") && !name.endsWith(".tmp") && !name.endsWith(".json")) {
+                            if (file.length() <= 0) {
+                                continue;
+                            }
                             String withoutPrefix = name.substring("offline_".length());
                             int lastDot = withoutPrefix.lastIndexOf('.');
                             String cleanId = (lastDot != -1) ? withoutPrefix.substring(0, lastDot) : withoutPrefix;
@@ -230,10 +436,10 @@ public class MainActivity extends BridgeActivity {
                                 } catch (Exception ignored) {}
                             }
 
-                            // 2. Se não encontrou, busca no manifesto mestre
-                            if (item == null && manifestObj.has(cleanId)) {
+                            // 2. Se não encontrou, busca no manifesto anterior
+                            if (item == null && oldManifestObj.has(cleanId)) {
                                 try {
-                                    item = manifestObj.getJSONObject(cleanId);
+                                    item = oldManifestObj.getJSONObject(cleanId);
                                 } catch (Exception ignored) {}
                             }
 
@@ -279,7 +485,7 @@ public class MainActivity extends BridgeActivity {
                             item.put("file_size", file.length());
                             if (!item.has("id")) item.put("id", cleanId);
 
-                            manifestObj.put(cleanId, item);
+                            validManifestObj.put(cleanId, item);
 
                             if (!companionJson.exists()) {
                                 try {
@@ -291,14 +497,14 @@ public class MainActivity extends BridgeActivity {
                 }
 
                 try {
-                    writeStringToFile(manifestFile, manifestObj.toString(2));
+                    writeStringToFile(manifestFile, validManifestObj.toString(2));
                 } catch (Exception ignored) {}
 
                 JSONArray array = new JSONArray();
-                Iterator<String> keys = manifestObj.keys();
+                Iterator<String> keys = validManifestObj.keys();
                 while (keys.hasNext()) {
                     String k = keys.next();
-                    array.put(manifestObj.getJSONObject(k));
+                    array.put(validManifestObj.getJSONObject(k));
                 }
                 return array.toString();
             } catch (Exception e) {
@@ -387,7 +593,15 @@ public class MainActivity extends BridgeActivity {
             if (fileName.contains("/")) {
                 fileName = fileName.substring(fileName.lastIndexOf('/') + 1);
             }
-            return DEFAULT_SERVER_URL + "/_local_video_/" + fileName;
+            startLocalVideoServer();
+            String encodedName = fileName;
+            try {
+                encodedName = java.net.URLEncoder.encode(fileName, "UTF-8").replace("+", "%20");
+            } catch (Exception ignored) {}
+            if (localVideoServerPort > 0) {
+                return "http://127.0.0.1:" + localVideoServerPort + "/_local_video_/" + encodedName;
+            }
+            return DEFAULT_SERVER_URL + "/_local_video_/" + encodedName;
         }
     }
 
@@ -399,6 +613,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BackgroundDownloadPlugin.class);
         super.onCreate(savedInstanceState);
+        startLocalVideoServer();
 
         try {
             Window window = getWindow();
@@ -753,8 +968,8 @@ public class MainActivity extends BridgeActivity {
 
         @Override
         public int available() throws IOException {
-            ensurePositioned();
-            long rem = (intendedEnd >= position) ? (intendedEnd - position + 1) : 0;
+            long currentPos = initialSeekHandled ? position : intendedStart;
+            long rem = (intendedEnd >= currentPos) ? (intendedEnd - currentPos + 1) : 0;
             return rem > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rem;
         }
 

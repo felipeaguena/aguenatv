@@ -10,7 +10,7 @@ export interface AppVersionInfo {
 }
 
 export async function GET() {
-  let latestVersion = '0.3.0';
+  let latestVersion = '0.3.1';
   let apkDownloadUrl = 'https://github.com/felipeaguena/aguenatv/releases';
   let changelog = [
     "Transição instantânea entre capítulos e episódios sem recarregar a página (History API nativa)",
@@ -53,7 +53,7 @@ export async function GET() {
   }
 
   const versionData: AppVersionInfo = {
-    currentVersion: '0.2.0',
+    currentVersion: '0.3.1',
     latestVersion,
     releaseDate: '2026-11-04',
     apkDownloadUrl,
