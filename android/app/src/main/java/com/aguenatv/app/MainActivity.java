@@ -777,7 +777,6 @@ public class MainActivity extends BridgeActivity {
                         }
                     }
 
-                    String host = url.getHost();
                     if ("163.176.207.140".equals(host)) {
                         // Serve recursos estáticos locais (svg, png) quando sem rede
                         if (!isNetworkConnected()) {
