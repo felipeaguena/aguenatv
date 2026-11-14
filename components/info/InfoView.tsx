@@ -464,6 +464,17 @@ export default function InfoView({ type, id }: InfoViewProps) {
     const missingOfficial = Math.max(0, officialCount - availableCount);
     const missingAired = Math.max(0, releasedCount - availableCount);
 
+    // Identifica se a série já concluiu o lançamento de todos os episódios ou se ainda está em lançamento
+    const statusLower = (enrichedMetadata?.status || '').toLowerCase();
+    const isFinishedAiring =
+      releasedCount >= officialCount ||
+      /ended|finalizad|conclu|cancel/.test(statusLower);
+    const targetEpisodeCount = isFinishedAiring
+      ? officialCount
+      : releasedCount > 0
+      ? releasedCount
+      : officialCount;
+
     let statusText = '';
     let badgeLabel = '';
     let badgeClass = '';
@@ -487,6 +498,8 @@ export default function InfoView({ type, id }: InfoViewProps) {
       availableCount,
       officialCount,
       releasedCount,
+      targetEpisodeCount,
+      isFinishedAiring,
       isComplete,
       isUpToDate,
       missingOfficial,
@@ -495,7 +508,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
       badgeClass,
       statusText,
     };
-  }, [type, item?.stream_type, totalRegularEpisodes, enrichedMetadata?.totalEpisodes, seasonOfficialMeta]);
+  }, [type, item?.stream_type, totalRegularEpisodes, enrichedMetadata?.totalEpisodes, enrichedMetadata?.status, seasonOfficialMeta]);
 
   // Lista de sinônimos/aliases que não repetem os títulos principais já exibidos
   const otherAliases = useMemo(() => {
@@ -1043,64 +1056,92 @@ export default function InfoView({ type, id }: InfoViewProps) {
                 )}
               </div>
 
-              {/* Badges de Categoria, Ano, Status e API de Origem (abaixo do nome no mobile) */}
-              <div className="order-2 md:order-1 flex flex-wrap items-center justify-start gap-2">
-                <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shadow-md shadow-violet-600/30">
-                  {streamType === 'live' ? 'TV ao Vivo' : streamType === 'movie' ? 'Filme' : 'Série'}
-                </span>
-
-                {item.category_name && (
-                  <span
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 backdrop-blur-md flex items-center gap-1"
-                    title={`Categoria na lista IPTV: ${item.category_name}`}
-                  >
-                    <Layers className="w-3 h-3 text-indigo-400 shrink-0" />
-                    <span>{cleanCategoryName(item.category_name) || item.category_name}</span>
+              {/* Badges em 3 Divs Estruturadas (abaixo do nome no mobile) */}
+              <div className="order-2 md:order-1 flex flex-col gap-2">
+                {/* Div 1: Categoria + Tipo onde foi encontrado + Rating com classificação */}
+                <div className="flex flex-wrap items-center justify-start gap-2">
+                  <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shadow-md shadow-violet-600/30">
+                    {streamType === 'live' ? 'TV ao Vivo' : streamType === 'movie' ? 'Filme' : 'Série'}
                   </span>
+
+                  {item.category_name && (
+                    <span
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 backdrop-blur-md flex items-center gap-1"
+                      title={`Categoria na lista IPTV: ${item.category_name}`}
+                    >
+                      <Layers className="w-3 h-3 text-indigo-400 shrink-0" />
+                      <span>{cleanCategoryName(item.category_name) || item.category_name}</span>
+                    </span>
+                  )}
+
+                  {(displayRating || enrichedMetadata?.ageRating) && (
+                    <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
+                      {displayRating && (
+                        <span className="flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {displayRating}
+                        </span>
+                      )}
+                      {enrichedMetadata?.ageRating && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/25 text-amber-200 text-[10px] font-extrabold">
+                          {enrichedMetadata.ageRating}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </div>
+
+                {/* Div 2: Categorias de títulos (gêneros) + Fonte dos dados */}
+                {(genresList.length > 0 || (enrichedMetadata?.source && enrichedMetadata.source !== 'none')) && (
+                  <div className="flex flex-wrap items-center justify-start gap-2">
+                    {genresList.slice(0, 4).map((genre) => (
+                      <span
+                        key={`genre_${genre}`}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white/10 text-neutral-300 border border-white/10 backdrop-blur-md"
+                      >
+                        {genre}
+                      </span>
+                    ))}
+
+                    {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
+                      <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30">
+                        Dados via {enrichedMetadata.source.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
                 )}
 
-                {genresList.slice(0, 3).map((genre) => (
-                  <span
-                    key={`genre_${genre}`}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white/10 text-neutral-300 border border-white/10 backdrop-blur-md"
-                  >
-                    {genre}
-                  </span>
-                ))}
+                {/* Div 3: Data de lançamento (dia/mês/ano) + Status + Contagem de episódios (na plataforma / já lançados ou total) */}
+                {(enrichedMetadata?.releaseDate || enrichedMetadata?.year || enrichedMetadata?.status || (isSeries && seriesComparison?.hasOfficialData)) && (
+                  <div className="flex flex-wrap items-center justify-start gap-2">
+                    {(enrichedMetadata?.releaseDate || enrichedMetadata?.year) && (
+                      <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/5 text-neutral-300 border border-white/10">
+                        {(() => {
+                          const raw = enrichedMetadata?.releaseDate;
+                          if (raw && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+                            const [y, m, d] = raw.slice(0, 10).split('-');
+                            return `${d}/${m}/${y}`;
+                          }
+                          return raw || enrichedMetadata?.year;
+                        })()}
+                      </span>
+                    )}
 
-                {displayRating && (
-                  <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                    <Star className="w-3 h-3 fill-amber-400 text-amber-400" /> {displayRating}
-                  </span>
-                )}
+                    {enrichedMetadata?.status && (
+                      <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        {enrichedMetadata.status}
+                      </span>
+                    )}
 
-                {enrichedMetadata?.year && (
-                  <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white/5 text-neutral-400 border border-white/5">
-                    {enrichedMetadata.year}
-                  </span>
-                )}
-
-                {enrichedMetadata?.status && (
-                  <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                    {enrichedMetadata.status}
-                  </span>
-                )}
-
-                {enrichedMetadata?.source && enrichedMetadata.source !== 'none' && (
-                  <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-violet-950/60 text-violet-300 border border-violet-500/30">
-                    Dados via {enrichedMetadata.source.toUpperCase()}
-                  </span>
-                )}
-
-                {/* Badge de Comparação de Episódios da Série: Completa vs Em Lançamento */}
-                {isSeries && seriesComparison?.hasOfficialData && (
-                  <span
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${seriesComparison.badgeClass}`}
-                    title={seriesComparison.statusText}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                    {seriesComparison.badgeLabel} ({seriesComparison.availableCount}/{seriesComparison.officialCount} eps)
-                  </span>
+                    {isSeries && seriesComparison?.hasOfficialData && (
+                      <span
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border flex items-center gap-1.5 ${seriesComparison.badgeClass}`}
+                        title={seriesComparison.statusText}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                        {seriesComparison.badgeLabel} ({seriesComparison.availableCount}/{seriesComparison.targetEpisodeCount} eps)
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -1189,7 +1230,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
                         : 'bg-white/5 border-white/10 text-neutral-400 hover:bg-white/10 hover:text-neutral-200'
                     }`}
                   >
-                    <CheckCircle2 className={`w-3.5 h-3.5 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
+                    <CheckCircle2 className={`w-5 h-5 md:w-4 md:h-4 ${watched ? 'fill-emerald-500/20 text-emerald-400' : ''}`} />
                     <span className="hidden md:inline">{watched ? 'Concluído' : 'Marcar Concluído'}</span>
                   </button>
                 )}

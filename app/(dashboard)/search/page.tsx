@@ -12,6 +12,8 @@ import {
   Tv,
   Video,
   Layers,
+  LayoutGrid,
+  LayoutList,
   X,
   Compass,
 } from 'lucide-react';
@@ -57,30 +59,35 @@ function NetflixCategoryCarousel({
   return (
     <div className="space-y-3">
       {/* Cabeçalho da Categoria com Título e Botão de Ver Mais */}
-      <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
-        <div className="flex items-center gap-2.5">
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-violet-600/30 text-violet-300 border border-violet-500/20">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-3 border-b border-white/5 pb-2.5">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-violet-600/30 text-violet-300 border border-violet-500/20 shrink-0">
             {typeLabel}
           </span>
-          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
             {group.name}
           </h2>
+        </div>
+
+        <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
           <span className="text-xs text-neutral-400 font-medium">
             ({group.items.length} {group.items.length === 1 ? 'resultado' : 'resultados'})
           </span>
-        </div>
 
-        <button
-          onClick={() =>
-            router.push(
-              `/catalog?category=${group.id}&type=${group.type}&q=${encodeURIComponent(query)}`
-            )
-          }
-          className="text-xs font-semibold text-violet-400 hover:text-violet-300 flex items-center gap-1 transition cursor-pointer"
-        >
-          <span>Mais Resultados em {group.name}</span>
-          <ArrowRight className="w-3.5 h-3.5" />
-        </button>
+          <button
+            onClick={() =>
+              router.push(
+                `/catalog?category=${group.id}&type=${group.type}&q=${encodeURIComponent(query)}`
+              )
+            }
+            aria-label={`Mais Resultados em ${group.name}`}
+            title={`Mais Resultados em ${group.name}`}
+            className="text-xs font-semibold text-violet-400 hover:text-violet-300 flex items-center gap-1 transition cursor-pointer p-1 sm:p-0 rounded-lg bg-white/5 sm:bg-transparent border border-white/10 sm:border-0"
+          >
+            <span className="hidden sm:inline">Mais Resultados em {group.name}</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Carrossel Horizontal Estilo Netflix */}
@@ -152,6 +159,7 @@ function SearchContent() {
   const [searchInput, setSearchInput] = useState(qParam);
   const [results, setResults] = useState<BaseStreamItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'category' | 'title'>('category');
 
   // Sincroniza estado local com URL
   useEffect(() => {
@@ -286,13 +294,42 @@ function SearchContent() {
             </p>
           </div>
 
-          <Link
-            href={`/catalog?q=${encodeURIComponent(qParam)}`}
-            className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white text-xs font-bold transition flex items-center gap-2 self-start sm:self-auto cursor-pointer"
-          >
-            <Layers className="w-3.5 h-3.5 text-violet-400" />
-            <span>Ver no Catálogo Completo</span>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <div className="flex items-center p-1 rounded-xl bg-white/5 border border-white/10">
+              <button
+                type="button"
+                onClick={() => setViewMode('category')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'category'
+                    ? 'bg-violet-600 text-white shadow-md shadow-violet-600/30'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                <LayoutList className="w-3.5 h-3.5" />
+                <span>Por Categoria</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('title')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'title'
+                    ? 'bg-violet-600 text-white shadow-md shadow-violet-600/30'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Por Título</span>
+              </button>
+            </div>
+
+            <Link
+              href={`/catalog?q=${encodeURIComponent(qParam)}`}
+              className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-neutral-300 hover:text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5 text-violet-400" />
+              <span>Ver no Catálogo Completo</span>
+            </Link>
+          </div>
         </div>
       )}
 
@@ -332,8 +369,15 @@ function SearchContent() {
             </Link>
           </div>
         </div>
+      ) : viewMode === 'title' ? (
+        /* 4a. Visualização Agrupada por Título (todos os títulos juntos em sequência) */
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {results.map((item) => (
+            <MediaCard key={`title_${item.stream_type}_${item.id}`} item={item} />
+          ))}
+        </div>
       ) : (
-        /* 4. Carrosséis Horizontais Agrupados por Categoria estilo Netflix */
+        /* 4b. Carrosséis Horizontais Agrupados por Categoria estilo Netflix */
         <div className="space-y-10">
           {groupedCategories.map((group) => (
             <NetflixCategoryCarousel
