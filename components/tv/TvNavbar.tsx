@@ -38,19 +38,16 @@ export default function TvNavbar({ activeTab, onSelectTab }: TvNavbarProps) {
 
   return (
     <header className="sticky top-0 z-[9999] w-full bg-[#08090d]/95 backdrop-blur-xl border-b border-white/10 px-6 py-3.5 flex items-center justify-between">
-      {/* Lado Esquerdo: Logo AGUENATV com Badge TV */}
+      {/* Lado Esquerdo: Logo Studio Aguena com Badge TV */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-600/40">
-          <Tv className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <span className="font-black text-xl tracking-tight text-white">
-            AGUENA<span className="text-violet-500">TV</span>
-          </span>
-          <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-widest bg-violet-600/30 text-violet-300 border border-violet-500/40">
-            TV & TABLET
-          </span>
-        </div>
+        <img
+          src="/studio-aguena-white.png"
+          alt="Studio Aguena"
+          className="h-8 w-auto object-contain"
+        />
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-widest bg-violet-600/30 text-violet-300 border border-violet-500/40">
+          TV & TABLET
+        </span>
       </div>
 
       {/* Centro: Abas de Navegação 10-Foot Widescreen */}

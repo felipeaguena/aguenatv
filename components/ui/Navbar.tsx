@@ -265,13 +265,12 @@ export default function Navbar() {
             <Menu className="w-5 h-5" />
           </button>
 
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-600/30 group-hover:scale-105 transition-transform">
-              <Tv className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-neutral-200 to-violet-400 bg-clip-text text-transparent">
-              AGUENA<span className="text-violet-500">TV</span>
-            </span>
+          <Link href="/" className="flex items-center group">
+            <img
+              src="/studio-aguena-white.png"
+              alt="Studio Aguena"
+              className="h-7 sm:h-8 w-auto object-contain group-hover:opacity-90 transition-opacity"
+            />
           </Link>
         </div>
 
@@ -320,7 +319,7 @@ export default function Navbar() {
                   handleSearchAll();
                 }
               }}
-              className="w-full bg-[#13141b]/90 border border-white/10 hover:border-violet-500/40 focus:border-violet-500 text-xs text-white rounded-xl pl-9 pr-14 py-2 focus:outline-none transition-all placeholder:text-neutral-500"
+              className="w-full bg-[#13141b]/90 border border-white/10 hover:border-violet-500/40 focus:border-violet-500 text-xs text-white rounded-xl pl-9 pr-2 sm:pr-14 py-2 focus:outline-none transition-all placeholder:text-neutral-500"
             />
             <kbd className="hidden sm:inline-flex items-center gap-0.5 absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono text-neutral-400 bg-white/5 rounded border border-white/10">
               Ctrl K
@@ -405,8 +404,8 @@ export default function Navbar() {
           )}
         </div>
 
-        {/* Lado Direito: Dropdown do Usuário no Desktop e Botão de Logout no Mobile */}
-        <div className="flex items-center gap-2">
+        {/* Lado Direito: Dropdown do Usuário no Desktop */}
+        <div className="hidden md:flex items-center gap-2">
           {/* Dropdown Desktop (Favoritos, Configurações, Usuários, Sair) */}
           <div ref={profileDropdownRef} className="relative hidden md:block">
             <button
@@ -567,15 +566,6 @@ export default function Navbar() {
               </div>
             )}
           </div>
-
-          {/* Botão de Logout Rápido no Mobile */}
-          <button
-            onClick={handleLogout}
-            className="md:hidden p-2 rounded-xl text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition border border-transparent hover:border-rose-500/20"
-            title="Sair da conta"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </div>
 

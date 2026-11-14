@@ -79,12 +79,13 @@ export default function LoginPage() {
         {/* Card de Login Glassmorphism */}
         <div className="glass-panel rounded-3xl p-8 shadow-2xl relative overflow-hidden">
           <div className="text-center mb-8">
-            <div className="inline-flex w-12 h-12 rounded-2xl bg-gradient-to-tr from-violet-600 to-indigo-500 items-center justify-center shadow-lg shadow-violet-600/40 mb-3">
-              <Tv className="w-6 h-6 text-white" />
+            <div className="flex items-center justify-center mb-3">
+              <img
+                src="/studio-aguena-white.png"
+                alt="Studio Aguena"
+                className="h-11 w-auto object-contain"
+              />
             </div>
-            <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center justify-center gap-1">
-              AGUENA<span className="text-violet-500">TV</span>
-            </h1>
             <p className="text-xs text-neutral-400 mt-1">
               Portal privado de entretenimento e transmissões
             </p>
