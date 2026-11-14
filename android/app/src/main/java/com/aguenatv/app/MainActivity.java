@@ -56,6 +56,7 @@ public class MainActivity extends BridgeActivity {
     private SwipeRefreshLayout swipeRefreshLayout;
 
     private boolean isCutoutFullscreenActive = false;
+    private volatile boolean pullToRefreshBlockedByJs = false;
 
     private static final int SYSTEM_BAR_COLOR_DARK = Color.parseColor("#0b0c10");
 
@@ -269,6 +270,10 @@ public class MainActivity extends BridgeActivity {
                 }
 
                 if (enable) {
+                    if (swipeRefreshLayout != null) {
+                        swipeRefreshLayout.setRefreshing(false);
+                        swipeRefreshLayout.setEnabled(false);
+                    }
                     // 1. Edge-to-Edge: desenhar sob 100% da barra de navegação e status (o vídeo cobre tudo)
                     WindowCompat.setDecorFitsSystemWindows(window, false);
 
@@ -353,6 +358,13 @@ public class MainActivity extends BridgeActivity {
                     }
 
                     decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                    if (swipeRefreshLayout != null && !isTvApp() && !pullToRefreshBlockedByJs) {
+                        try {
+                            WebView wv = getBridge().getWebView();
+                            String url = wv != null ? wv.getUrl() : null;
+                            swipeRefreshLayout.setEnabled(url == null || !url.contains("/watch"));
+                        } catch (Exception ignored) {}
+                    }
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -373,6 +385,21 @@ public class MainActivity extends BridgeActivity {
         public void setCutoutFullscreen(boolean enable) {
             isCutoutFullscreenActive = enable;
             applyCutoutFullscreen(enable);
+        }
+
+        @JavascriptInterface
+        public void setPullToRefreshEnabled(boolean enabled) {
+            pullToRefreshBlockedByJs = !enabled;
+            runOnUiThread(() -> {
+                if (swipeRefreshLayout != null) {
+                    if (!enabled || isCutoutFullscreenActive || isTvApp()) {
+                        swipeRefreshLayout.setRefreshing(false);
+                        swipeRefreshLayout.setEnabled(false);
+                    } else {
+                        swipeRefreshLayout.setEnabled(true);
+                    }
+                }
+            });
         }
 
         @JavascriptInterface
@@ -1026,6 +1053,10 @@ public class MainActivity extends BridgeActivity {
                 swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#181924"));
 
                 swipeRefreshLayout.setOnRefreshListener(() -> {
+                    if (isCutoutFullscreenActive || pullToRefreshBlockedByJs) {
+                        swipeRefreshLayout.setRefreshing(false);
+                        return;
+                    }
                     if (isNetworkConnected()) {
                         String currentUrl = webView.getUrl();
                         if (currentUrl == null || currentUrl.contains("data:text/html") || currentUrl.contains("localhost")) {
@@ -1039,8 +1070,15 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                // Dispara o refresh somente quando estiver exatamente no topo da página
+                // Dispara o refresh somente quando estiver exatamente no topo da página e fora de fullscreen/watch
                 swipeRefreshLayout.setOnChildScrollUpCallback((parentLayout, child) -> {
+                    if (isCutoutFullscreenActive || pullToRefreshBlockedByJs) {
+                        return true;
+                    }
+                    String url = webView.getUrl();
+                    if (url != null && url.contains("/watch")) {
+                        return true;
+                    }
                     return webView.getScrollY() > 0;
                 });
             }
@@ -1111,6 +1149,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onResume() {
         super.onResume();
+        startLocalVideoServer();
         if (isCutoutFullscreenActive) {
             applyCutoutFullscreen(true);
         } else {

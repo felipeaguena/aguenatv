@@ -192,6 +192,8 @@ export default function VideoPlayer({
   const deviceCategoryRef = useRef<DeviceCategory>('desktop');
   const [isControlsVisible, setIsControlsVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isControlsVisibleRef = useRef(true);
   const isPlayingRef = useRef(true);
   const lastTouchTimestampRef = useRef(0);
@@ -441,25 +443,199 @@ export default function VideoPlayer({
     }
   }, []);
 
-  // Suporte ao botão voltar nativo do Android no APK: sair do fullscreen antes de fechar a página
+  // Suporte ao botão/gesto voltar nativo do Android no APK: sair do fullscreen antes de navegar para trás
   useEffect(() => {
-    let removeListener: (() => void) | null = null;
-    if (Capacitor.isNativePlatform()) {
-      import('@capacitor/app').then(({ App }) => {
-        App.addListener('backButton', () => {
-          if (isFullscreenRef.current && artInstanceRef.current) {
-            toggleFullscreen(artInstanceRef.current);
+    const handleAndroidBack = (e: Event) => {
+      if (isFullscreenRef.current && artInstanceRef.current) {
+        e.preventDefault();
+        toggleFullscreen(artInstanceRef.current);
+      }
+    };
+
+    window.addEventListener('aguenatv:android-back', handleAndroidBack);
+    return () => {
+      window.removeEventListener('aguenatv:android-back', handleAndroidBack);
+    };
+  }, [toggleFullscreen]);
+
+  // Recuperação automática de reprodução offline/local ao retornar de outro app no Android
+  useEffect(() => {
+    let removeAppStateListener: (() => void) | null = null;
+    let isDisposed = false;
+    let wasPlayingBeforeBg = false;
+    let savedBgTime = 0;
+    let wentBgAt = 0;
+    let returnedFromBg = false;
+    let watchdogTimer: NodeJS.Timeout | null = null;
+
+    const isLocalSource = (url: string) =>
+      url.includes('_local_video_') ||
+      url.includes('127.0.0.1') ||
+      url.includes('/videos/offline_') ||
+      url.includes('_capacitor_file_') ||
+      url.startsWith('file://');
+
+    const resolveFreshLocalUrl = (currentUrl: string): string => {
+      try {
+        const bridge = (window as any).AndroidBridge;
+        if (bridge?.getOfflineVideoUrl && currentUrl.includes('/_local_video_/')) {
+          const rawName = decodeURIComponent(currentUrl.split('/_local_video_/').pop()?.split('?')[0] || '');
+          if (rawName) {
+            const fresh = bridge.getOfflineVideoUrl(rawName);
+            if (fresh && typeof fresh === 'string') return fresh;
           }
-        }).then((handler) => {
-          removeListener = () => handler.remove();
-        }).catch(() => {});
-      }).catch(() => {});
+        }
+      } catch {}
+      return currentUrl;
+    };
+
+    const reloadAndResumeAt = (video: HTMLVideoElement, targetUrl: string, resumeTime: number, shouldPlay: boolean) => {
+      try {
+        video.pause();
+        const onCanResume = () => {
+          video.removeEventListener('loadedmetadata', onCanResume);
+          video.removeEventListener('canplay', onCanResume);
+          if (resumeTime > 0 && isFinite(resumeTime)) {
+            try {
+              video.currentTime = resumeTime;
+            } catch {}
+          }
+          if (shouldPlay) {
+            video.play().catch(() => {});
+          }
+        };
+        video.addEventListener('loadedmetadata', onCanResume);
+        video.addEventListener('canplay', onCanResume);
+        if (video.src !== targetUrl) {
+          video.src = targetUrl;
+        }
+        video.load();
+      } catch {}
+    };
+
+    const handleGoBackground = () => {
+      const art = artInstanceRef.current;
+      const video = art?.video;
+      if (!art || art.isDestroy || !video) return;
+      savedBgTime = video.currentTime || lastReportedTimeRef.current || 0;
+      wasPlayingBeforeBg = !video.paused && !video.ended;
+      wentBgAt = Date.now();
+      returnedFromBg = false;
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+      if (wasPlayingBeforeBg) {
+        try {
+          video.pause();
+        } catch {}
+      }
+    };
+
+    const handleReturnForeground = () => {
+      const art = artInstanceRef.current;
+      const video = art?.video;
+      if (!art || art.isDestroy || !video || !wentBgAt) return;
+
+      const currentUrl = video.currentSrc || video.src || art.url || '';
+      if (!isLocalSource(currentUrl)) return;
+
+      returnedFromBg = true;
+      const freshUrl = resolveFreshLocalUrl(currentUrl);
+      const portChanged = freshUrl !== currentUrl;
+      const resumeTime = savedBgTime > 0 ? savedBgTime : video.currentTime || 0;
+
+      if (portChanged || video.error || video.readyState < 2) {
+        reloadAndResumeAt(video, freshUrl, resumeTime, wasPlayingBeforeBg);
+        return;
+      }
+
+      if (wasPlayingBeforeBg) {
+        const baselineTime = video.currentTime;
+        video.play().catch(() => {});
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => {
+          if (isDisposed || !artInstanceRef.current || artInstanceRef.current.isDestroy) return;
+          const v = artInstanceRef.current.video;
+          if (!v) return;
+          if (v.paused || Math.abs(v.currentTime - baselineTime) < 0.05) {
+            reloadAndResumeAt(v, freshUrl, resumeTime || baselineTime, true);
+          }
+        }, 550);
+      }
+    };
+
+    // Se o usuário tentar dar play ou mover a barra de progresso após voltar de outro app e o decoder estiver travado
+    const handleManualActionWatchdog = () => {
+      if (!returnedFromBg) return;
+      const art = artInstanceRef.current;
+      const video = art?.video;
+      if (!art || art.isDestroy || !video) return;
+      const currentUrl = video.currentSrc || video.src || art.url || '';
+      if (!isLocalSource(currentUrl)) return;
+
+      const baselineTime = video.currentTime;
+      const freshUrl = resolveFreshLocalUrl(currentUrl);
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      watchdogTimer = setTimeout(() => {
+        if (isDisposed || !artInstanceRef.current || artInstanceRef.current.isDestroy) return;
+        const v = artInstanceRef.current.video;
+        if (!v || v.paused) return;
+        if (Math.abs(v.currentTime - baselineTime) < 0.05) {
+          returnedFromBg = false;
+          reloadAndResumeAt(v, freshUrl, baselineTime, true);
+        } else {
+          returnedFromBg = false;
+        }
+      }, 650);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        handleGoBackground();
+      } else {
+        handleReturnForeground();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    const videoEl = artInstanceRef.current?.video;
+    if (videoEl) {
+      videoEl.addEventListener('seeked', handleManualActionWatchdog);
+      videoEl.addEventListener('play', handleManualActionWatchdog);
+    }
+
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/app')
+        .then(({ App }) => {
+          if (isDisposed) return;
+          App.addListener('appStateChange', ({ isActive }) => {
+            if (isActive) {
+              handleReturnForeground();
+            } else {
+              handleGoBackground();
+            }
+          })
+            .then((handler) => {
+              if (isDisposed) handler.remove();
+              else removeAppStateListener = () => handler.remove();
+            })
+            .catch(() => {});
+        })
+        .catch(() => {});
     }
 
     return () => {
-      if (removeListener) removeListener();
+      isDisposed = true;
+      if (watchdogTimer) clearTimeout(watchdogTimer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (videoEl) {
+        videoEl.removeEventListener('seeked', handleManualActionWatchdog);
+        videoEl.removeEventListener('play', handleManualActionWatchdog);
+      }
+      if (removeAppStateListener) removeAppStateListener();
     };
-  }, [toggleFullscreen]);
+  }, [streamUrl]);
 
   // Monitora alterações de tela cheia para manter estado sempre sincronizado
   useEffect(() => {
@@ -1303,6 +1479,22 @@ export default function VideoPlayer({
       resetInactivityTimer();
     });
 
+    art.on('video:playing', () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
+      setIsTransitioning(false);
+    });
+
+    art.on('video:canplay', () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
+      setIsTransitioning(false);
+    });
+
     art.on('video:pause', () => {
       setIsPlaying(false);
       isPlayingRef.current = false;
@@ -1530,6 +1722,11 @@ export default function VideoPlayer({
     });
 
     art.on('video:error', () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
+      setIsTransitioning(false);
       // Ignora erros transitórios se estiver em processo de troca de URL (ex: próximo episódio ou troca para offline)
       if (isSwitchingUrlRef.current) {
         console.info('[VideoPlayer] Ignorando video:error transitório durante transição de fluxo/switchUrl.');
@@ -1786,6 +1983,12 @@ export default function VideoPlayer({
       } catch (e) {}
     }
 
+    setIsTransitioning(true);
+    if (transitionTimeoutRef.current) clearTimeout(transitionTimeoutRef.current);
+    transitionTimeoutRef.current = setTimeout(() => {
+      setIsTransitioning(false);
+    }, 12000);
+
     // Se o stream anterior era HLS e o novo não é, limpa a instância anterior do Hls.js
     const isNewHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
     if (!isNewHls && (art as any).hls) {
@@ -1884,6 +2087,29 @@ export default function VideoPlayer({
       {/* Controles e botões dinâmicos renderizados diretamente dentro de $player via Portal */}
       {playerMountNode && createPortal(
         <>
+          {/* Overlay de Transição entre Capítulos com Banner/Thumb pré-carregado */}
+          {isTransitioning && (
+            <div className="absolute inset-0 z-40 bg-black flex flex-col items-center justify-center overflow-hidden pointer-events-none">
+              {posterUrl && (
+                <img
+                  src={posterUrl}
+                  alt={title}
+                  className="absolute inset-0 w-full h-full object-cover opacity-55 scale-105"
+                />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/70" />
+              <div className="relative z-10 flex flex-col items-center gap-3 px-6 text-center max-w-lg">
+                <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin shadow-lg" />
+                <span className="text-[11px] font-bold uppercase tracking-widest text-violet-300">
+                  Carregando capítulo
+                </span>
+                <p className="text-sm sm:text-base font-bold text-white line-clamp-2 drop-shadow-md">
+                  {title}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Overlay Central de Ação (Distinção por categoria: Mobile, Tablet, Desktop) */}
           <div
             className={`absolute inset-0 z-50 flex items-center justify-center transition-all duration-300 ${

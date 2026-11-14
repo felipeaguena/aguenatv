@@ -176,13 +176,25 @@ export default function InfoView({ type, id }: InfoViewProps) {
         if (savedCfg) setConfig(savedCfg);
 
         if (found) {
+          const currentFound = found;
+          if (!currentFound.category_name && currentFound.category_id && localDB.categories) {
+            try {
+              const cat = await localDB.categories
+                .where('category_id')
+                .equals(String(currentFound.category_id))
+                .first();
+              if (cat?.category_name) {
+                found = { ...currentFound, category_name: cat.category_name };
+              }
+            } catch {}
+          }
           setItem(found as unknown as BaseStreamItem);
 
           if (found.category_id) {
             let sameCategory = await localDB.streams
               .where('category_id')
               .equals(found.category_id)
-              .filter((s) => s.stream_id !== id && s.stream_type === found.stream_type)
+              .filter((s) => s.stream_id !== id && s.stream_type === currentFound.stream_type)
               .limit(12)
               .toArray();
 
@@ -1037,6 +1049,16 @@ export default function InfoView({ type, id }: InfoViewProps) {
                   {streamType === 'live' ? 'TV ao Vivo' : streamType === 'movie' ? 'Filme' : 'Série'}
                 </span>
 
+                {item.category_name && (
+                  <span
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 backdrop-blur-md flex items-center gap-1"
+                    title={`Categoria na lista IPTV: ${item.category_name}`}
+                  >
+                    <Layers className="w-3 h-3 text-indigo-400 shrink-0" />
+                    <span>{cleanCategoryName(item.category_name) || item.category_name}</span>
+                  </span>
+                )}
+
                 {genresList.slice(0, 3).map((genre) => (
                   <span
                     key={`genre_${genre}`}
@@ -1670,8 +1692,10 @@ export default function InfoView({ type, id }: InfoViewProps) {
             </div>
 
             <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5">
-              <span className="text-neutral-500 block text-[11px] mb-0.5">Categoria Principal</span>
-              <span className="font-bold text-neutral-200 truncate block">{item.category_name || 'Geral'}</span>
+              <span className="text-neutral-500 block text-[11px] mb-0.5">Categoria na Lista IPTV</span>
+              <span className="font-bold text-neutral-200 truncate block">
+                {cleanCategoryName(item.category_name) || item.category_name || 'Geral'}
+              </span>
             </div>
 
             <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5">

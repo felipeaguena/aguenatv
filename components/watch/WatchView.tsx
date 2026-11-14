@@ -1029,6 +1029,29 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return allCurrentSeasonEpisodes.findIndex((ep) => String(ep.id) === String(activeEpisode.id));
   }, [activeEpisode, allCurrentSeasonEpisodes]);
 
+  // Pré-carrega os banners/thumbs dos capítulos adjacentes (próximo e anterior) para transição instantânea
+  useEffect(() => {
+    if (!isSeries || activeEpisodeIndex < 0 || typeof window === 'undefined') return;
+    const candidates = [
+      allCurrentSeasonEpisodes[activeEpisodeIndex + 1],
+      allCurrentSeasonEpisodes[activeEpisodeIndex - 1],
+    ].filter(Boolean);
+
+    for (const ep of candidates) {
+      const epMeta = seasonEpisodesMeta[Number(ep.episode_num)];
+      const thumb =
+        epMeta?.thumbnailUrl ||
+        ep.info?.movie_image ||
+        ep.info?.cover_big ||
+        enrichedMetadata?.backdropUrl ||
+        item?.stream_icon;
+      if (thumb) {
+        const img = new window.Image();
+        img.src = thumb;
+      }
+    }
+  }, [isSeries, activeEpisodeIndex, allCurrentSeasonEpisodes, seasonEpisodesMeta, enrichedMetadata?.backdropUrl, item?.stream_icon]);
+
   const currentSeasonIndex = useMemo(() => {
     return seasonList.findIndex((s) => String(s.season_number) === String(selectedSeason));
   }, [seasonList, selectedSeason]);

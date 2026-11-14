@@ -17,8 +17,6 @@ import {
   Sparkles,
   ArrowLeft,
   Volume2,
-  ChevronLeft,
-  ChevronRight,
   Layers,
   Star,
   Calendar,
@@ -223,14 +221,26 @@ function OfflineWatchContent() {
   }, [loadDownloads]);
 
   // Volta da tela de reprodução para a tela de catálogo de títulos
-  const handleBackToCatalog = () => {
+  const handleBackToCatalog = useCallback(() => {
     setSelectedGroup(null);
     selectedGroupRef.current = null;
     setActiveEpisode(null);
     activeEpisodeRef.current = null;
     setPlayableUrl(null);
     setEpisodeSearch('');
-  };
+  }, []);
+
+  // Intercepta o comando Voltar do Android quando um título offline está aberto
+  useEffect(() => {
+    const handleAndroidBack = (e: Event) => {
+      if (selectedGroupRef.current) {
+        e.preventDefault();
+        handleBackToCatalog();
+      }
+    };
+    window.addEventListener('aguenatv:android-back', handleAndroidBack);
+    return () => window.removeEventListener('aguenatv:android-back', handleAndroidBack);
+  }, [handleBackToCatalog]);
 
   // Alterna o capítulo selecionado na tela de reprodução de forma 100% síncrona
   const handleSelectEpisode = (ep: OfflineDownload) => {
@@ -343,6 +353,22 @@ function OfflineWatchContent() {
     }
   };
 
+  // Pré-carrega os banners/thumbs dos capítulos adjacentes offline
+  useEffect(() => {
+    if (!selectedGroup || currentEpisodeIndex < 0 || typeof window === 'undefined') return;
+    const candidates = [
+      currentEpisodesList[currentEpisodeIndex + 1],
+      currentEpisodesList[currentEpisodeIndex - 1],
+    ].filter(Boolean);
+    for (const ep of candidates) {
+      const thumb = ep.poster_url || selectedGroup.poster_url;
+      if (thumb) {
+        const img = new window.Image();
+        img.src = thumb;
+      }
+    }
+  }, [selectedGroup, currentEpisodeIndex, currentEpisodesList]);
+
   // Título legível do episódio ou filme para o player
   const playerDisplayTitle = useMemo(() => {
     if (!activeEpisode) return selectedGroup?.title || 'Vídeo Offline';
@@ -411,9 +437,9 @@ function OfflineWatchContent() {
 
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 sm:pb-12 space-y-6 pt-[calc(1.5rem+env(safe-area-inset-top,0px))]">
-        {/* Barra Superior de Navegação idêntica à WatchView */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-          <div className="flex items-center gap-3 min-w-0">
+        {/* Cabeçalho de Navegação: botão Voltar em uma div e metadados do título em uma div abaixo */}
+        <div className="flex flex-col gap-3 border-b border-white/5 pb-4">
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={handleBackToCatalog}
@@ -424,26 +450,6 @@ function OfflineWatchContent() {
               <span>Voltar aos Títulos</span>
             </button>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
-                  {isSeries ? 'Série Offline' : 'Filme Offline'}
-                </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  <span>Local</span>
-                </span>
-                <span className="text-xs text-neutral-400 font-medium truncate">
-                  {selectedGroup.title}
-                </span>
-              </div>
-              <h1 className="text-base sm:text-xl font-bold text-white truncate">
-                {playerDisplayTitle}
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
             <button
               type="button"
               onClick={(e) =>
@@ -455,12 +461,30 @@ function OfflineWatchContent() {
                   e
                 )
               }
-              className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
               title="Excluir este título da memória"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>{isSeries ? 'Excluir Todos os Episódios' : 'Excluir Filme'}</span>
             </button>
+          </div>
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-600/30 text-violet-300 border border-violet-500/30 shrink-0">
+                {isSeries ? 'Série Offline' : 'Filme Offline'}
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                <span>Local</span>
+              </span>
+              <span className="text-xs text-neutral-400 font-medium truncate">
+                {selectedGroup.title}
+              </span>
+            </div>
+            <h1 className="text-base sm:text-xl font-bold text-white truncate">
+              {playerDisplayTitle}
+            </h1>
           </div>
         </div>
 
@@ -540,52 +564,6 @@ function OfflineWatchContent() {
                 </div>
               </div>
             </div>
-
-            {/* Barra de Navegação entre Capítulos logo após o player */}
-            {isSeries && (
-              <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 rounded-2xl bg-[#13141b] border border-white/10 shadow-lg">
-                <button
-                  type="button"
-                  onClick={handlePrevChapter}
-                  disabled={!canGoPrev}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                    canGoPrev
-                      ? 'bg-white/5 hover:bg-white/10 text-white border border-white/10 active:scale-98 shadow-sm'
-                      : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-                  }`}
-                  title={canGoPrev ? 'Voltar para o capítulo anterior' : 'Não há capítulo anterior'}
-                >
-                  <ChevronLeft className="w-4 h-4 text-violet-400 shrink-0" />
-                  <span className="truncate">Capítulo Anterior</span>
-                </button>
-
-                <div className="flex flex-col items-center justify-center px-2 text-center min-w-0 max-w-[220px]">
-                  <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
-                    Capítulo Atual
-                  </span>
-                  <span className="text-xs font-bold text-violet-300 truncate w-full">
-                    {activeEpisode.season_num && activeEpisode.episode_num
-                      ? `T${activeEpisode.season_num} • EP ${activeEpisode.episode_num}`
-                      : activeEpisode.title}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleNextChapter}
-                  disabled={!canGoNext}
-                  className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer select-none ${
-                    canGoNext
-                      ? 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/30 active:scale-98'
-                      : 'bg-white/5 text-neutral-600 border border-white/5 cursor-not-allowed opacity-40'
-                  }`}
-                  title={canGoNext ? 'Ir para o próximo capítulo' : 'Não há próximo capítulo'}
-                >
-                  <span className="truncate">Próximo Capítulo</span>
-                  <ChevronRight className="w-4 h-4 text-white shrink-0" />
-                </button>
-              </div>
-            )}
 
             {/* Card Completo de Informações do Título, Sinopse e Metadados EXIF */}
             <div className="p-5 sm:p-6 rounded-3xl bg-[#13141b] border border-white/10 shadow-xl space-y-4">
@@ -941,8 +919,8 @@ function OfflineWatchContent() {
                 onClick={() => handleOpenTitle(group)}
                 className="group flex flex-col rounded-2xl bg-[#13141b] border border-white/10 overflow-hidden hover:border-violet-500/50 hover:shadow-xl hover:shadow-violet-600/15 transition-all duration-300 cursor-pointer"
               >
-                {/* Poster com Badges */}
-                <div className="aspect-[2/3] w-full bg-black/60 relative overflow-hidden">
+                {/* Poster compacto com Badges */}
+                <div className="h-36 sm:h-40 w-full bg-black/60 relative overflow-hidden">
                   {group.poster_url ? (
                     <ImageWithFallback
                       src={group.poster_url}
