@@ -3,6 +3,7 @@ const path = require('path');
 const sharp = require('sharp');
 
 const resDir = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'res');
+const logoBase64 = fs.readFileSync(path.join(__dirname, '..', 'public', 'studio-aguena-white.png')).toString('base64');
 
 // 1. SVG para ic_launcher (quadrado com cantos arredondados)
 const squareIconSvg = `
@@ -12,23 +13,10 @@ const squareIconSvg = `
       <stop offset="0%" stop-color="#7c3aed" />
       <stop offset="100%" stop-color="#4f46e5" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.35" />
-    </filter>
   </defs>
-  <!-- Fundo gradiente com cantos arredondados -->
   <rect width="512" height="512" rx="115" fill="url(#grad)" />
-  
-  <!-- Ícone TV com sombra suave -->
-  <g filter="url(#shadow)">
-    <!-- Moldura da TV -->
-    <rect x="90" y="115" width="332" height="215" rx="30" fill="none" stroke="#ffffff" stroke-width="26" />
-    <!-- Botão Play -->
-    <polygon points="225,178 225,268 305,223" fill="#ffffff" />
-    <!-- Pedestal da TV -->
-    <line x1="256" y1="330" x2="256" y2="385" stroke="#ffffff" stroke-width="26" stroke-linecap="round" />
-    <line x1="180" y1="385" x2="332" y2="385" stroke="#ffffff" stroke-width="26" stroke-linecap="round" />
-  </g>
+  <image href="data:image/png;base64,${logoBase64}" x="56" y="112" width="400" height="168" preserveAspectRatio="xMidYMid meet" />
+  <text x="256" y="400" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="112" letter-spacing="12">TV</text>
 </svg>
 `;
 
@@ -40,20 +28,10 @@ const roundIconSvg = `
       <stop offset="0%" stop-color="#7c3aed" />
       <stop offset="100%" stop-color="#4f46e5" />
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.35" />
-    </filter>
   </defs>
-  <!-- Fundo circular gradiente -->
   <circle cx="256" cy="256" r="256" fill="url(#grad)" />
-  
-  <!-- Ícone TV centralizado -->
-  <g filter="url(#shadow)" transform="translate(16, 8) scale(0.94)">
-    <rect x="90" y="115" width="332" height="215" rx="30" fill="none" stroke="#ffffff" stroke-width="26" />
-    <polygon points="225,178 225,268 305,223" fill="#ffffff" />
-    <line x1="256" y1="330" x2="256" y2="385" stroke="#ffffff" stroke-width="26" stroke-linecap="round" />
-    <line x1="180" y1="385" x2="332" y2="385" stroke="#ffffff" stroke-width="26" stroke-linecap="round" />
-  </g>
+  <image href="data:image/png;base64,${logoBase64}" x="66" y="118" width="380" height="160" preserveAspectRatio="xMidYMid meet" />
+  <text x="256" y="396" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="108" letter-spacing="12">TV</text>
 </svg>
 `;
 
