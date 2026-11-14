@@ -1,6 +1,28 @@
 import { IPTVAccount } from './types';
 
 /**
+ * Normaliza a URL base de um servidor IPTV/Xtream, removendo sufixos comuns
+ * caso o usuário tenha colado o link completo (ex: /player_api.php, /get.php?...).
+ */
+export function normalizeIPTVServerBase(serverUrl: string): string {
+  const trimmed = serverUrl.trim();
+  if (!trimmed) return '';
+
+  try {
+    const parsed = new URL(trimmed);
+    const cleanPath = parsed.pathname
+      .replace(/\/(player_api|get|xmltv)\.php.*$/i, '')
+      .replace(/\/+$/, '');
+    return `${parsed.protocol}//${parsed.host}${cleanPath}`;
+  } catch {
+    return trimmed
+      .replace(/\/(player_api|get|xmltv)\.php.*$/i, '')
+      .split('?')[0]
+      .replace(/\/+$/, '');
+  }
+}
+
+/**
  * Resolve o host seguro para comunicação direta do navegador.
  * Quando a aplicação está rodando em HTTPS (ex: https://aguenatv.vercel.app):
  * - Servidores conhecidos como rootdns.cc, dfpump.top e zonaverde.sbs possuem suporte nativo
@@ -9,7 +31,8 @@ import { IPTVAccount } from './types';
  *   o bloqueio de WAF da Cloudflare (HTTP 403 Forbidden) em IPs de datacenter (Vercel/AWS).
  */
 export function getSafeDirectHost(serverUrl: string): string {
-  const clean = serverUrl.trim().replace(/\/+$/, '');
+  const clean = normalizeIPTVServerBase(serverUrl);
+  if (!clean) return '';
 
   if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
     if (

@@ -1,5 +1,22 @@
 import { SeriesInfoResponse, SeriesSeason, SeriesEpisode, WatchedItem } from './types';
 
+/**
+ * Converte coleções de episódios retornadas pela API IPTV (array ou mapa objeto)
+ * em um array padronizado de `SeriesEpisode`.
+ */
+export function normalizeEpisodeList(raw: unknown): SeriesEpisode[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter((ep): ep is SeriesEpisode => Boolean(ep && typeof ep === 'object' && 'id' in ep));
+  }
+  if (typeof raw === 'object') {
+    return Object.values(raw as Record<string, unknown>).filter(
+      (ep): ep is SeriesEpisode => Boolean(ep && typeof ep === 'object' && 'id' in ep)
+    );
+  }
+  return [];
+}
+
 export function isSpecialSeason(
   s: SeriesSeason | { season_number?: number | string; name?: string }
 ): boolean {
@@ -17,32 +34,30 @@ export function buildSortedSeasonList(seriesInfo: SeriesInfoResponse | null): Se
   if (Array.isArray(seriesInfo.seasons)) {
     seriesInfo.seasons.forEach((s) => {
       const sNum = Number(s.season_number);
-      const realCount =
-        seriesInfo.episodes?.[String(sNum)]?.length ||
-        seriesInfo.episodes?.[sNum]?.length ||
-        0;
+      const epsForSeason = getEpisodesForSeason(seriesInfo, sNum);
 
       seasonMap.set(sNum, {
         ...s,
         season_number: sNum,
         name: s.name || (sNum === 0 ? 'Especiais' : `Temporada ${sNum}`),
-        episode_count: realCount,
+        episode_count: epsForSeason.length,
       });
     });
   }
 
   // 2. Mapeia chaves de episódios (garante que temporadas existentes no servidor apareçam, ex: Temporada 2)
-  if (seriesInfo.episodes) {
+  if (seriesInfo.episodes && typeof seriesInfo.episodes === 'object') {
     Object.keys(seriesInfo.episodes).forEach((sKey) => {
       const sNum = Number(sKey);
-      const eps = seriesInfo.episodes![sKey] || [];
-      const existing = seasonMap.get(sNum);
+      const safeNum = Number.isFinite(sNum) ? sNum : 0;
+      const eps = normalizeEpisodeList((seriesInfo.episodes as Record<string, unknown>)[sKey]);
+      const existing = seasonMap.get(safeNum);
       if (existing) {
         existing.episode_count = eps.length;
       } else {
-        seasonMap.set(sNum, {
-          season_number: sNum,
-          name: sNum === 0 ? 'Especiais' : `Temporada ${sNum}`,
+        seasonMap.set(safeNum, {
+          season_number: safeNum,
+          name: safeNum === 0 ? 'Especiais' : `Temporada ${safeNum}`,
           episode_count: eps.length,
         });
       }
@@ -65,37 +80,77 @@ export function buildSortedSeasonList(seriesInfo: SeriesInfoResponse | null): Se
 
 export function getDefaultSeason(sortedSeasons: SeriesSeason[]): string {
   if (!sortedSeasons || sortedSeasons.length === 0) return '1';
-  // Prioriza Temporada 1 se existir
-  const s1 = sortedSeasons.find((s) => s.season_number === 1);
+  const nonEmpty = sortedSeasons.filter((s) => (s.episode_count ?? 0) > 0);
+  const pool = nonEmpty.length > 0 ? nonEmpty : sortedSeasons;
+
+  // Prioriza Temporada 1 se existir com episódios
+  const s1 = pool.find((s) => s.season_number === 1);
   if (s1) return '1';
   // Se não existir temporada 1, pega a primeira temporada regular (não especial)
-  const firstRegular = sortedSeasons.find((s) => !isSpecialSeason(s));
+  const firstRegular = pool.find((s) => !isSpecialSeason(s));
   if (firstRegular) return String(firstRegular.season_number);
   // Fallback para a primeira temporada disponível
-  return String(sortedSeasons[0].season_number);
+  return String(pool[0].season_number);
 }
 
 export function getEpisodesForSeason(
   seriesInfo: SeriesInfoResponse | null,
   seasonKey: string | number
 ): SeriesEpisode[] {
-  if (!seriesInfo?.episodes) return [];
+  if (!seriesInfo?.episodes || typeof seriesInfo.episodes !== 'object') return [];
+  const episodesMap = seriesInfo.episodes as Record<string, unknown>;
   const sStr = String(seasonKey);
   const sNum = Number(seasonKey);
 
-  let eps = seriesInfo.episodes[sStr] || seriesInfo.episodes[sNum];
+  let eps = normalizeEpisodeList(
+    episodesMap[sStr] !== undefined
+      ? episodesMap[sStr]
+      : Number.isFinite(sNum)
+      ? episodesMap[String(sNum)]
+      : undefined
+  );
 
   // Se for temporada especial e não encontrou com a chave numérica, busca por 'specials' ou 'especiais'
-  if ((!eps || eps.length === 0) && (sStr === '0' || sStr.toLowerCase().includes('especia'))) {
-    const specialKey = Object.keys(seriesInfo.episodes).find(
+  if (eps.length === 0 && (sStr === '0' || sStr.toLowerCase().includes('especia'))) {
+    const specialKey = Object.keys(episodesMap).find(
       (k) => k.toLowerCase().includes('especia') || k.toLowerCase().includes('special') || k === '0'
     );
     if (specialKey) {
-      eps = seriesInfo.episodes[specialKey];
+      eps = normalizeEpisodeList(episodesMap[specialKey]);
     }
   }
 
-  return eps || [];
+  return eps;
+}
+
+/**
+ * Localiza um episódio por ID em `seriesInfo.episodes` (normalizando arrays e mapas objeto).
+ */
+export function findEpisodeInSeriesInfo(
+  seriesInfo: SeriesInfoResponse | null,
+  episodeId: string | number,
+  preferredSeason?: string | number
+): { episode: SeriesEpisode; season: string } | null {
+  if (!seriesInfo?.episodes || typeof seriesInfo.episodes !== 'object') return null;
+
+  const targetId = String(episodeId);
+  if (preferredSeason !== undefined && preferredSeason !== '') {
+    const preferredEps = getEpisodesForSeason(seriesInfo, preferredSeason);
+    const match = preferredEps.find((e) => String(e.id) === targetId);
+    if (match) {
+      return { episode: match, season: String(preferredSeason) };
+    }
+  }
+
+  for (const sKey of Object.keys(seriesInfo.episodes)) {
+    const list = normalizeEpisodeList((seriesInfo.episodes as Record<string, unknown>)[sKey]);
+    const match = list.find((e) => String(e.id) === targetId);
+    if (match) {
+      return { episode: match, season: sKey };
+    }
+  }
+
+  return null;
 }
 
 /**

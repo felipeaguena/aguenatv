@@ -263,6 +263,9 @@ export default function VideoPlayer({
   const prevEpisodeLabelRef = useRef(prevEpisodeLabel);
   const nextEpisodeLabelRef = useRef(nextEpisodeLabel);
   const prevStreamUrlRef = useRef(streamUrl);
+  const originalStreamUrlRef = useRef(streamUrl);
+  const targetStreamUrlRef = useRef(streamUrl);
+  const initialTimeRef = useRef(initialTime);
   const prevStreamTypeRef = useRef(streamType);
   const lastReportedTimeRef = useRef(0);
   const lastDurationRef = useRef(0);
@@ -289,6 +292,7 @@ export default function VideoPlayer({
     posterUrlRef.current = posterUrl;
     prevEpisodeLabelRef.current = prevEpisodeLabel;
     nextEpisodeLabelRef.current = nextEpisodeLabel;
+    initialTimeRef.current = initialTime;
 
     // Atualiza dinamicamente os controles na barra do player se a instância já estiver ativa
     const art = artInstanceRef.current;
@@ -763,12 +767,17 @@ export default function VideoPlayer({
     }
   }, []);
 
-  // 1. Efeito de Ciclo de Vida do Player: Monta a instância do Artplayer (somente quando streamType ou retryKey mudam)
+  const hasStreamUrl = Boolean(streamUrl);
+
+  // 1. Efeito de Ciclo de Vida do Player: Monta a instância do Artplayer (quando hasStreamUrl, streamType ou retryKey mudam)
   useEffect(() => {
     if (!artContainerRef.current || !streamUrl) return;
 
     prevStreamUrlRef.current = streamUrl;
+    originalStreamUrlRef.current = streamUrl;
+    targetStreamUrlRef.current = streamUrl;
     prevStreamTypeRef.current = streamType;
+    isSwitchingUrlRef.current = false;
     triedExtensionsRef.current.clear();
     retryCountRef.current = 0;
     hasRestoredRef.current = false;
@@ -870,6 +879,7 @@ export default function VideoPlayer({
       playsInline: true,
       moreVideoAttr: {
         preload: 'auto',
+        ...({ referrerPolicy: 'no-referrer' } as Partial<HTMLVideoElement>),
       },
       autoOrientation: false, // Desabilitado para evitar corrida de rotação com Capacitor
       hotkey: false, // Centralizado no handleKeyDown do React para evitar double-toggle e conflito no Espaço
@@ -981,9 +991,12 @@ export default function VideoPlayer({
 
             const hls = new Hls({
               enableWorker: true,
-              lowLatencyMode: true,
+              lowLatencyMode: streamTypeRef.current === 'live',
               backBufferLength: 90,
             });
+
+            let hlsNetworkRetries = 0;
+            let hlsMediaRetries = 0;
 
             hls.loadSource(url);
             hls.attachMedia(video);
@@ -1125,27 +1138,52 @@ export default function VideoPlayer({
             hls.on(Hls.Events.ERROR, (_, errData) => {
               if (errData.fatal) {
                 switch (errData.type) {
-                  case Hls.ErrorTypes.NETWORK_ERROR:
-                    console.warn('[HLS] Tentando recuperar erro de rede...', errData);
+                  case Hls.ErrorTypes.NETWORK_ERROR: {
                     const httpCode = (errData.response as any)?.code || (errData.response as any)?.status;
                     if (httpCode >= 520 && httpCode <= 526) {
+                      setIsTransitioning(false);
                       setError(`O servidor do provedor IPTV está temporariamente fora do ar (Erro Cloudflare ${httpCode} - Servidor de origem inacessível). Aguarde a recuperação pelo provedor.`);
                       hls.destroy();
                       break;
                     }
                     if (httpCode === 401 || httpCode === 403) {
+                      setIsTransitioning(false);
                       setError(`Conexão recusada pelo provedor IPTV (HTTP ${httpCode}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`);
                       hls.destroy();
                       break;
                     }
-                    hls.startLoad();
+                    if (hlsNetworkRetries < 2) {
+                      hlsNetworkRetries += 1;
+                      console.warn(`[HLS] Tentando recuperar erro de rede (${hlsNetworkRetries}/2)...`, errData);
+                      hls.startLoad();
+                    } else {
+                      console.error('[HLS] Falha persistente de rede:', errData);
+                      setIsTransitioning(false);
+                      setIsPlaying(false);
+                      isPlayingRef.current = false;
+                      setError('Falha de conexão com o servidor IPTV ao carregar o stream HLS (.m3u8).');
+                      hls.destroy();
+                    }
                     break;
+                  }
                   case Hls.ErrorTypes.MEDIA_ERROR:
-                    console.warn('[HLS] Tentando recuperar erro de mídia...');
-                    hls.recoverMediaError();
+                    if (hlsMediaRetries < 2) {
+                      hlsMediaRetries += 1;
+                      console.warn(`[HLS] Tentando recuperar erro de mídia (${hlsMediaRetries}/2)...`);
+                      hls.recoverMediaError();
+                    } else {
+                      setIsTransitioning(false);
+                      setIsPlaying(false);
+                      isPlayingRef.current = false;
+                      setError('Erro de decodificação de mídia no stream HLS.');
+                      hls.destroy();
+                    }
                     break;
                   default:
                     console.error('[HLS] Erro fatal irrecuperável:', errData);
+                    setIsTransitioning(false);
+                    setIsPlaying(false);
+                    isPlayingRef.current = false;
                     setError('Não foi possível carregar a transmissão. O servidor de origem pode estar temporariamente offline.');
                     hls.destroy();
                     break;
@@ -1173,6 +1211,9 @@ export default function VideoPlayer({
     // Elementos do DOM do Artplayer
     const playerEl = art.template?.$player;
     const videoEl = art.template?.$video;
+    if (videoEl) {
+      videoEl.setAttribute('referrerpolicy', 'no-referrer');
+    }
 
     if (playerEl) {
       setPlayerMountNode(playerEl as HTMLDivElement);
@@ -1493,6 +1534,13 @@ export default function VideoPlayer({
         transitionTimeoutRef.current = null;
       }
       setIsTransitioning(false);
+      if (autoPlay && art.video?.paused) {
+        art.play().catch(() => {
+          setIsPlaying(false);
+          isPlayingRef.current = false;
+          showControls();
+        });
+      }
     });
 
     art.on('video:pause', () => {
@@ -1535,10 +1583,11 @@ export default function VideoPlayer({
     const restorePosition = () => {
       if (hasRestoredRef.current || streamType === 'live') return;
       try {
-        if (initialTime !== undefined && initialTime > 5) {
+        const requestedTime = initialTimeRef.current;
+        if (requestedTime !== undefined && requestedTime > 5) {
           hasRestoredRef.current = true;
-          art.currentTime = initialTime;
-          art.notice.show = `Continuando de onde parou (${formatSeconds(initialTime)})`;
+          art.currentTime = requestedTime;
+          art.notice.show = `Continuando de onde parou (${formatSeconds(requestedTime)})`;
           return;
         }
         const raw = localStorage.getItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`);
@@ -1721,15 +1770,74 @@ export default function VideoPlayer({
       }
     });
 
+    const reloadOrSwitchUrl = (nextUrl: string, forceSameUrlReload = false) => {
+      if (art.isDestroy) return;
+      const isNextHls = nextUrl.toLowerCase().includes('.m3u8') || streamTypeRef.current === 'live';
+
+      if ((art as any).hls) {
+        try {
+          (art as any).hls.destroy();
+        } catch {}
+        (art as any).hls = null;
+      }
+
+      targetStreamUrlRef.current = nextUrl;
+      (art.option as any).type = isNextHls ? 'm3u8' : '';
+
+      if (!forceSameUrlReload && nextUrl !== art.url) {
+        art.switchUrl(nextUrl)
+          .then(() => {
+            if (autoPlay && art.video?.paused) {
+              art.play().catch(() => {
+                setIsPlaying(false);
+                isPlayingRef.current = false;
+              });
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+
+      if (isNextHls && (art.option as any).customType?.m3u8 && art.video) {
+        (art.option as any).customType.m3u8(art.video, nextUrl, art);
+        if (autoPlay) {
+          art.play().catch(() => {
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+          });
+        }
+        return;
+      }
+
+      if (art.video) {
+        // Silencia evento transitório ao limpar src antes de reatribuir o mesmo URL
+        isSwitchingUrlRef.current = true;
+        art.video.pause();
+        art.video.removeAttribute('src');
+        art.video.load();
+        isSwitchingUrlRef.current = false;
+        art.video.src = nextUrl;
+        art.option.url = nextUrl;
+        art.video.load();
+        if (autoPlay) {
+          art.video.play().catch(() => {
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+          });
+        }
+      }
+    };
+
     art.on('video:error', () => {
       if (transitionTimeoutRef.current) {
         clearTimeout(transitionTimeoutRef.current);
         transitionTimeoutRef.current = null;
       }
       setIsTransitioning(false);
-      // Ignora erros transitórios se estiver em processo de troca de URL (ex: próximo episódio ou troca para offline)
+
+      // Ignora apenas erros emitidos enquanto limpamos explicitamente o src anterior antes da troca
       if (isSwitchingUrlRef.current) {
-        console.info('[VideoPlayer] Ignorando video:error transitório durante transição de fluxo/switchUrl.');
+        console.info('[VideoPlayer] Ignorando video:error transitório de limpeza do fluxo anterior.');
         return;
       }
 
@@ -1752,7 +1860,8 @@ export default function VideoPlayer({
         return;
       }
 
-      const currentUrl = art.url || streamUrl;
+      const currentUrl = art.url || targetStreamUrlRef.current || originalStreamUrlRef.current || streamUrl;
+      const baseUrl = originalStreamUrlRef.current || currentUrl;
 
       console.warn('[VideoPlayer] Erro no stream de vídeo:', {
         code: mediaErr?.code,
@@ -1798,25 +1907,28 @@ export default function VideoPlayer({
             art.video.pause();
           } catch (e) {}
         }
+        setIsPlaying(false);
+        isPlayingRef.current = false;
         setError('Não foi possível reproduzir o arquivo de vídeo baixado na memória. Verifique se o download foi concluído com sucesso.');
         return;
       }
 
-      // Se não for transmissão ao vivo e for arquivo de mídia remoto, tenta alternar extensões candidatas (.mp4, .mkv, .ts)
-      if (streamTypeRef.current !== 'live' && !currentUrl.includes('.m3u8')) {
-        const extMatch = currentUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
-        const currentExt = extMatch ? extMatch[1].toLowerCase() : 'mp4';
-        triedExtensionsRef.current.add(currentExt);
+      // Se não for transmissão ao vivo e houver extensão na URL base, testa alternativas reproduzíveis no navegador (.mp4, .mkv, .m3u8)
+      if (streamTypeRef.current !== 'live' && !baseUrl.toLowerCase().includes('.m3u8')) {
+        const extMatch = baseUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+        const currentExtMatch = currentUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+        if (extMatch) triedExtensionsRef.current.add(extMatch[1].toLowerCase());
+        if (currentExtMatch) triedExtensionsRef.current.add(currentExtMatch[1].toLowerCase());
 
-        const candidates = ['mp4', 'mkv', 'ts', 'avi'];
+        const candidates = ['mp4', 'mkv', 'm3u8'];
         const nextExt = candidates.find((ext) => !triedExtensionsRef.current.has(ext));
 
         if (nextExt) {
           triedExtensionsRef.current.add(nextExt);
-          const nextUrl = currentUrl.replace(/\.[a-zA-Z0-9]+(?:\?.*)?$/, `.${nextExt}`);
+          const nextUrl = baseUrl.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, `.${nextExt}$1`);
           console.info(`[VideoPlayer] Tentando extensão alternativa de fallback: .${nextExt}`);
           try {
-            art.switchUrl(nextUrl).catch(() => {});
+            reloadOrSwitchUrl(nextUrl);
             return;
           } catch (e) {
             console.warn('[VideoPlayer] Falha ao alternar URL de fallback:', e);
@@ -1824,17 +1936,15 @@ export default function VideoPlayer({
         }
       }
 
-      // Se falhar e ainda não tiver tentado 1 reconexão rápida
+      // Reconexão real da URL original (evita art.switchUrl(mesmaUrl), que é no-op no Artplayer)
       if (retryCountRef.current < 1) {
         retryCountRef.current += 1;
-        console.info('[VideoPlayer] Tentando reconexão rápida do stream...');
+        console.info('[VideoPlayer] Tentando reconexão rápida do stream original...');
         setTimeout(() => {
           try {
-            if (!art.isDestroy) {
-              art.switchUrl(currentUrl).catch(() => {});
-            }
+            reloadOrSwitchUrl(baseUrl, true);
           } catch (e) {}
-        }, 1200);
+        }, 1000);
         return;
       }
 
@@ -1844,13 +1954,18 @@ export default function VideoPlayer({
           art.video.pause();
         } catch (e) {}
       }
+      try {
+        art.loading.show = false;
+      } catch (e) {}
+      setIsPlaying(false);
+      isPlayingRef.current = false;
 
       if (mediaErr?.code === 2) {
         setError('Falha de conexão com o servidor de transmissão IPTV. Verifique sua conexão com a internet ou estabilidade do provedor.');
       } else if (mediaErr?.code === 3) {
         setError('Erro de decodificação do vídeo. O codec desta transmissão pode não ser suportado nativamente pelo dispositivo.');
       } else if (mediaErr?.code === 4) {
-        setError('O servidor do provedor IPTV não respondeu ao fluxo ou o canal/vídeo está temporariamente indisponível.');
+        setError('Não foi possível abrir o stream neste provedor IPTV (formato não suportado pelo navegador ou servidor indisponível).');
       } else {
         setError('Falha na reprodução do stream de vídeo. O conteúdo pode estar indisponível no servidor IPTV.');
       }
@@ -1948,7 +2063,7 @@ export default function VideoPlayer({
         artInstanceRef.current = null;
       }
     };
-  }, [streamType, retryKey, toggleFullscreen]);
+  }, [streamType, retryKey, hasStreamUrl, toggleFullscreen]);
 
   // 2. Efeito de Atualização da URL: quando o capítulo muda (autoplay/manual) ou URL local é resolvida,
   // atualiza o Artplayer suavemente SEM destruir a instância, mantendo 100% o fullscreen e a orientação.
@@ -1958,6 +2073,8 @@ export default function VideoPlayer({
     if (!streamUrl || prevStreamUrlRef.current === streamUrl) return;
 
     prevStreamUrlRef.current = streamUrl;
+    originalStreamUrlRef.current = streamUrl;
+    targetStreamUrlRef.current = streamUrl;
     triedExtensionsRef.current.clear();
     retryCountRef.current = 0;
     hasRestoredRef.current = false;
@@ -2002,93 +2119,58 @@ export default function VideoPlayer({
       setIsTransitioning(false);
     }, 12000);
 
-    // Se o stream anterior era HLS e o novo não é, limpa a instância anterior do Hls.js
+    // Limpa instância HLS anterior e atualiza o tipo do Artplayer conforme o novo fluxo
     const isNewHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
-    if (!isNewHls && (art as any).hls) {
+    if ((art as any).hls) {
       try {
         (art as any).hls.destroy();
-        (art as any).hls = null;
       } catch (e) {}
+      (art as any).hls = null;
     }
+    (art.option as any).type = isNewHls ? 'm3u8' : '';
 
+    // Limpa src anterior antes do novo fluxo sem disparar video:error transitório
     if (art.video) {
       try {
+        isSwitchingUrlRef.current = true;
         art.video.pause();
+        art.video.removeAttribute('src');
+        art.video.load();
       } catch (e) {}
+      isSwitchingUrlRef.current = false;
     }
     setError(null);
-    isSwitchingUrlRef.current = true;
     if (switchingTimeoutRef.current) clearTimeout(switchingTimeoutRef.current);
-    switchingTimeoutRef.current = setTimeout(() => {
-      isSwitchingUrlRef.current = false;
-    }, 5000);
+
+    const restoreFullscreenAfterSwitch = () => {
+      if (!wasFullscreen) return;
+      if (isMobileDevice()) {
+        art.fullscreenWeb = true;
+      } else {
+        try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
+      }
+      isFullscreenRef.current = true;
+      setFullscreenCutoutMode(true);
+    };
 
     try {
       art.switchUrl(streamUrl).then(() => {
-        isSwitchingUrlRef.current = false;
-        if (switchingTimeoutRef.current) {
-          clearTimeout(switchingTimeoutRef.current);
-          switchingTimeoutRef.current = null;
-        }
-        if (wasFullscreen) {
-          if (isMobileDevice()) {
-            art.fullscreenWeb = true;
-          } else {
-            try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
-          }
-          isFullscreenRef.current = true;
-          setFullscreenCutoutMode(true);
-        }
+        restoreFullscreenAfterSwitch();
         if (autoPlay) {
-          art.play().catch(() => {});
+          art.play().catch(() => {
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+          });
         }
       }).catch((err) => {
-        console.warn('[VideoPlayer] Falha no switchUrl do Artplayer, aplicando fallback suave:', err);
-        try {
-          if (art.video) {
-            art.video.src = streamUrl;
-            if (wasFullscreen) {
-              if (isMobileDevice()) {
-                art.fullscreenWeb = true;
-              } else {
-                try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
-              }
-              isFullscreenRef.current = true;
-              setFullscreenCutoutMode(true);
-            }
-            if (autoPlay) {
-              art.video.play().catch(() => {});
-            }
-          } else {
-            setRetryKey((k) => k + 1);
-          }
-        } catch {
-          setRetryKey((k) => k + 1);
-        }
+        console.warn('[VideoPlayer] Falha no switchUrl do Artplayer:', err);
+        setIsTransitioning(false);
+        restoreFullscreenAfterSwitch();
       });
     } catch (err) {
-      console.warn('[VideoPlayer] Erro síncrono no switchUrl, aplicando fallback suave:', err);
-      try {
-        if (art.video) {
-          art.video.src = streamUrl;
-          if (wasFullscreen) {
-            if (isMobileDevice()) {
-              art.fullscreenWeb = true;
-            } else {
-              try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
-            }
-            isFullscreenRef.current = true;
-            setFullscreenCutoutMode(true);
-          }
-          if (autoPlay) {
-            art.video.play().catch(() => {});
-          }
-        } else {
-          setRetryKey((k) => k + 1);
-        }
-      } catch {
-        setRetryKey((k) => k + 1);
-      }
+      console.warn('[VideoPlayer] Erro síncrono no switchUrl, recarregando instância:', err);
+      setIsTransitioning(false);
+      setRetryKey((k) => k + 1);
     }
   }, [streamUrl, posterUrl, autoPlay, streamType]);
 

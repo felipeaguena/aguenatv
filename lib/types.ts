@@ -142,6 +142,7 @@ export interface SeriesEpisode {
   title: string;
   container_extension?: string;
   season: number | string;
+  direct_source?: string;
   info?: SeriesEpisodeInfo;
   subtitles?: string[];
   added?: string;

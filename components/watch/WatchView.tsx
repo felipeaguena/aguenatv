@@ -27,6 +27,8 @@ import {
   Download,
   Check,
   Trash2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   downloadVideoForOffline,
@@ -38,7 +40,7 @@ import {
 } from '@/lib/download-manager';
 import { useOfflineDownloads } from '@/hooks/useOfflineDownloads';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
-import { fetchIPTVApi } from '@/lib/iptv-client';
+import { fetchIPTVApi, getSafeDirectHost } from '@/lib/iptv-client';
 import {
   BaseStreamItem,
   IPTVAccount,
@@ -51,7 +53,13 @@ import {
   SkipTimesData,
 } from '@/lib/types';
 import { getWatchUrl, getInfoUrl, getRouteType } from '@/lib/routes';
-import { buildSortedSeasonList, getDefaultSeason, getEpisodesForSeason, formatEpisodeTitle } from '@/lib/series';
+import {
+  buildSortedSeasonList,
+  getDefaultSeason,
+  getEpisodesForSeason,
+  findEpisodeInSeriesInfo,
+  formatEpisodeTitle,
+} from '@/lib/series';
 import VideoPlayer, { PlayerVideoInfo } from '@/components/player/VideoPlayer';
 import MediaCard from '@/components/media/MediaCard';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
@@ -77,6 +85,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   const [item, setItem] = useState<BaseStreamItem | null>(null);
   const [config, setConfig] = useState<IPTVAccount | null>(null);
+  const [configLoaded, setConfigLoaded] = useState(false);
   const [relatedItems, setRelatedItems] = useState<BaseStreamItem[]>([]);
   const [currentStreamId, setCurrentStreamId] = useState(id);
   const [loading, setLoading] = useState(true);
@@ -84,6 +93,8 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // Estados específicos para Séries
   const [seriesInfo, setSeriesInfo] = useState<SeriesInfoResponse | null>(null);
   const [loadingSeries, setLoadingSeries] = useState(false);
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+  const [seriesRetryNonce, setSeriesRetryNonce] = useState(0);
   const [selectedSeason, setSelectedSeason] = useState<string>(seasonParam || '1');
   const [activeEpisode, setActiveEpisode] = useState<SeriesEpisode | null>(null);
   const [isSeasonDropdownOpen, setIsSeasonDropdownOpen] = useState(false);
@@ -92,6 +103,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [seasonEpisodesMeta, setSeasonEpisodesMeta] = useState<Record<string | number, EnrichedEpisodeMetadata>>({});
   const [skipTimes, setSkipTimes] = useState<SkipTimesData | null>(null);
   const [techVideoStats, setTechVideoStats] = useState<{
+    url?: string;
     duration?: string;
     size?: string;
     dimensions?: string;
@@ -126,6 +138,15 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [playerHeight, setPlayerHeight] = useState<number | null>(null);
   const [isDesktop, setIsDesktop] = useState(false);
   const autoMarkedEpisodesRef = useRef<Set<string>>(new Set());
+  const initializedSeriesIdRef = useRef<string | null>(null);
+  const [prevRouteId, setPrevRouteId] = useState(id);
+  if (prevRouteId !== id) {
+    setPrevRouteId(id);
+    setCurrentStreamId(id);
+    setActiveEpisode(null);
+    setSeriesInfo(null);
+    setSeriesError(null);
+  }
 
   useEffect(() => {
     setIsNative(isNativeApp());
@@ -166,6 +187,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // 1. Efeito: Carrega Configuração do IPTV e Item do banco local Dexie
   useEffect(() => {
     let isMounted = true;
+    let hasConfig = false;
     async function loadData() {
       try {
         const targetType: StreamType =
@@ -196,9 +218,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
         }
 
         const savedCfg = await getSavedIPTVConfig();
+        hasConfig = Boolean(savedCfg);
 
         if (!isMounted) return;
         setConfig(savedCfg);
+        setConfigLoaded(true);
 
         // Se o item não foi encontrado no Dexie local, busca metadados sob demanda na API do IPTV
         if (!foundItem && savedCfg) {
@@ -254,8 +278,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
         }
       } catch (e) {
         console.error('Erro ao carregar dados do stream:', e);
+        if (isMounted) setConfigLoaded(true);
       } finally {
-        if (isMounted && type !== 'series') {
+        if (isMounted && (type !== 'series' || !hasConfig)) {
           setLoading(false);
         }
       }
@@ -269,23 +294,33 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // 2. Efeito: Se for série, busca os detalhes completos, temporadas e episódios via API do IPTV
   useEffect(() => {
     if (type !== 'series' && item?.stream_type !== 'series') return;
-    if (!config) return;
+    if (!configLoaded) return;
 
     let isMounted = true;
     async function fetchSeriesDetails() {
       setLoadingSeries(true);
+      setSeriesError(null);
       try {
-        const data: SeriesInfoResponse = await fetchIPTVApi(config!, {
+        if (!config) {
+          throw new Error('Nenhuma lista IPTV ativa configurada. Verifique suas Configurações.');
+        }
+
+        const data: SeriesInfoResponse = await fetchIPTVApi(config, {
           action: 'get_series_info',
           params: { series_id: id },
         });
 
         if (!data) throw new Error('Falha ao obter episódios da série');
 
+        const sorted = buildSortedSeasonList(data);
+        const hasAnyEpisodes = sorted.some((s) => (s.episode_count ?? 0) > 0);
+        if (!hasAnyEpisodes) {
+          throw new Error('O servidor IPTV não retornou capítulos disponíveis para esta série.');
+        }
+
         if (!isMounted) return;
         setSeriesInfo(data);
         if (!episodeParam) {
-          const sorted = buildSortedSeasonList(data);
           setSelectedSeason(getDefaultSeason(sorted));
         }
 
@@ -301,8 +336,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
             category_name: data.info?.genre || 'Séries',
           };
         });
-      } catch (err) {
+      } catch (err: unknown) {
         console.warn('Erro ao buscar capítulos da série online (tentando offline):', err);
+        let recoveredOffline = false;
         if (localDB?.offline_downloads) {
           try {
             const offlineItems = await localDB.offline_downloads
@@ -351,8 +387,16 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 const sorted = buildSortedSeasonList(fallbackSeriesInfo);
                 setSelectedSeason(getDefaultSeason(sorted));
               }
+              recoveredOffline = true;
             }
           } catch {}
+        }
+
+        if (!recoveredOffline && isMounted) {
+          const message = err instanceof Error ? err.message : null;
+          setSeriesError(
+            message || 'Não foi possível carregar os capítulos desta série a partir do servidor IPTV.'
+          );
         }
       } finally {
         if (isMounted) {
@@ -366,53 +410,47 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return () => {
       isMounted = false;
     };
-  }, [id, type, config, item?.stream_type]);
+  }, [id, type, config, configLoaded, item?.stream_type, seriesRetryNonce]);
 
   // 3. Efeito: Sincroniza o episódio ativo inicial com base no parâmetro `?ep=...` ou padrão (Episódio 1)
-  const hasInitializedEpisodeRef = useRef(false);
   useEffect(() => {
     if (!seriesInfo?.episodes) return;
-    if (hasInitializedEpisodeRef.current) return;
+    if (initializedSeriesIdRef.current === String(id)) return;
 
     let targetEp: SeriesEpisode | null = null;
     let targetSeason = seasonParam || selectedSeason;
 
     // Se temos um ep no query param, procura na temporada selecionada primeiro, depois em todas
     if (episodeParam) {
-      if (seriesInfo.episodes[targetSeason]) {
-        const found = seriesInfo.episodes[targetSeason].find((e) => String(e.id) === String(episodeParam));
-        if (found) {
-          targetEp = found;
-        }
-      }
-      if (!targetEp) {
-        for (const sKey of Object.keys(seriesInfo.episodes)) {
-          const found = seriesInfo.episodes[sKey].find((e) => String(e.id) === String(episodeParam));
-          if (found) {
-            targetEp = found;
-            targetSeason = sKey;
-            break;
-          }
-        }
+      const matched = findEpisodeInSeriesInfo(seriesInfo, episodeParam, targetSeason);
+      if (matched) {
+        targetEp = matched.episode;
+        targetSeason = matched.season;
       }
     }
 
-    // Se não encontrou pelo epParam ou não foi passado, pega o primeiro episódio da temporada alvo
+    // Se não encontrou pelo epParam ou não foi passado, pega o primeiro episódio de uma temporada com capítulos
     if (!targetEp) {
-      const sKeys = Object.keys(seriesInfo.episodes);
-      const chosenSeason = seriesInfo.episodes[targetSeason] ? targetSeason : sKeys[0];
-      if (chosenSeason && seriesInfo.episodes[chosenSeason]?.length > 0) {
-        targetEp = seriesInfo.episodes[chosenSeason][0];
-        targetSeason = chosenSeason;
+      const preferredEps = getEpisodesForSeason(seriesInfo, targetSeason);
+      if (preferredEps.length > 0) {
+        targetEp = preferredEps[0];
+      } else {
+        const sorted = buildSortedSeasonList(seriesInfo);
+        const fallbackSeason = getDefaultSeason(sorted);
+        const fallbackEps = getEpisodesForSeason(seriesInfo, fallbackSeason);
+        if (fallbackEps.length > 0) {
+          targetEp = fallbackEps[0];
+          targetSeason = fallbackSeason;
+        }
       }
     }
 
     if (targetEp) {
-      hasInitializedEpisodeRef.current = true;
+      initializedSeriesIdRef.current = String(id);
       setActiveEpisode(targetEp);
       setSelectedSeason(targetSeason);
     }
-  }, [seriesInfo, episodeParam, seasonParam, selectedSeason]);
+  }, [id, seriesInfo, episodeParam, seasonParam, selectedSeason]);
 
   // 3b. Efeito: Sincroniza com botões nativos Voltar/Avançar do navegador (History API)
   useEffect(() => {
@@ -424,25 +462,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
       const sQuery = sp.get('season');
 
       if (epQuery) {
-        let targetEp: SeriesEpisode | null = null;
-        let targetSeason = sQuery || selectedSeason;
-
-        if (seriesInfo.episodes[targetSeason]) {
-          targetEp = seriesInfo.episodes[targetSeason].find((e) => String(e.id) === String(epQuery)) || null;
-        }
-        if (!targetEp) {
-          for (const sKey of Object.keys(seriesInfo.episodes)) {
-            const match = seriesInfo.episodes[sKey].find((e) => String(e.id) === String(epQuery));
-            if (match) {
-              targetEp = match;
-              targetSeason = sKey;
-              break;
-            }
-          }
-        }
-        if (targetEp) {
-          setActiveEpisode(targetEp);
-          setSelectedSeason(targetSeason);
+        const matched = findEpisodeInSeriesInfo(seriesInfo, epQuery, sQuery || selectedSeason);
+        if (matched) {
+          setActiveEpisode(matched.episode);
+          setSelectedSeason(matched.season);
         }
       }
     };
@@ -638,10 +661,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const isLive = streamType === 'live';
   const isMovie = streamType === 'movie';
 
-  // Preserva estritamente o servidor, protocolo e porta originais da lista IPTV para os fluxos de vídeo
+  // Normaliza o servidor IPTV preservando HTTPS/espelhos seguros na Web e removendo caminhos de API colados por engano
   const cleanHost = useMemo(() => {
     if (!config?.server_url) return '';
-    return config.server_url.trim().replace(/\/+$/, '');
+    return getSafeDirectHost(config.server_url);
   }, [config?.server_url]);
 
   // Lista de temporadas formatadas
@@ -687,11 +710,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
     if (isLive) {
       url = `${cleanHost}/live/${config.username}/${config.password}/${activeId}.m3u8`;
     } else if (isMovie) {
-      url = `${cleanHost}/movie/${config.username}/${config.password}/${activeId}.${item?.container_extension || 'mp4'}`;
+      const ext = (item?.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
+      url = `${cleanHost}/movie/${config.username}/${config.password}/${activeId}.${ext}`;
     } else if (isSeries) {
       if (activeEpisode) {
         activeId = String(activeEpisode.id);
-        url = `${cleanHost}/series/${config.username}/${config.password}/${activeEpisode.id}.${activeEpisode.container_extension || 'mp4'}`;
+        const ext = (activeEpisode.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
+        url = `${cleanHost}/series/${config.username}/${config.password}/${activeEpisode.id}.${ext}`;
         const epMeta = seasonEpisodesMeta[Number(activeEpisode.episode_num)];
         const formattedEpName = formatEpisodeTitle(
           activeEpisode.episode_num,
@@ -793,45 +818,28 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return false;
   }, [isSeries, activeEpisode, item?.stream_id, id, isWatched, streamType]);
 
-  // 6. Efeito: Busca Dados Técnicos do Vídeo (Tamanho em MB, Codec, Dimensões e Duração da CDN)
-  useEffect(() => {
-    if (!streamUrl || isCurrentDownloaded || activeOfflineDownload) return;
+  // NOTA CRITICA: Não consultamos /api/iptv/video-info no servidor simultaneamente com o player,
+  // pois uma 2ª conexão a partir do IP da VM aciona o limite de 1 tela do provedor IPTV e derruba o capítulo.
+  // Duração, dimensões e codec reais são coletados localmente via <video> / hls.js em handlePlayerVideoInfo.
+  const activeTechStats = useMemo(() => {
+    return techVideoStats.url === finalPlayUrl ? techVideoStats : {};
+  }, [techVideoStats, finalPlayUrl]);
 
-    let isMounted = true;
-    async function fetchStreamTechStats() {
-      try {
-        const res = await fetch(`/api/iptv/video-info?url=${encodeURIComponent(streamUrl)}`);
-        if (res.ok && isMounted) {
-          const data = await res.json();
-          setTechVideoStats((prev) => ({
-            ...prev,
-            size: data.sizeFormatted || prev.size,
-            dimensions: data.dimensions || prev.dimensions,
-            codec: data.codec || prev.codec,
-            duration: data.durationFormatted || prev.duration,
-          }));
-        }
-      } catch (err) {
-        console.warn('Erro ao buscar estatísticas do stream:', err);
-      }
-    }
-
-    setTechVideoStats({});
-    fetchStreamTechStats();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [streamUrl, isCurrentDownloaded, activeOfflineDownload]);
-
-  const handlePlayerVideoInfo = useCallback((info: PlayerVideoInfo) => {
-    setTechVideoStats((prev) => ({
-      ...prev,
-      duration: info.formattedDuration || prev.duration,
-      dimensions: info.dimensions || prev.dimensions,
-      codec: info.codec || prev.codec,
-    }));
-  }, []);
+  const handlePlayerVideoInfo = useCallback(
+    (info: PlayerVideoInfo) => {
+      setTechVideoStats((prev) => {
+        const base = prev.url === finalPlayUrl ? prev : { url: finalPlayUrl };
+        return {
+          ...base,
+          url: finalPlayUrl,
+          duration: info.formattedDuration || base.duration,
+          dimensions: info.dimensions || base.dimensions,
+          codec: info.codec || base.codec,
+        };
+      });
+    },
+    [finalPlayUrl]
+  );
 
   const handlePlayerProgress = useCallback(
     ({ currentTime, duration, immediate }: { currentTime: number; duration: number; immediate?: boolean }) => {
@@ -926,40 +934,44 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
   // Metadados técnicos calculados para o painel de status
   const displayDuration = useMemo(() => {
-    if (techVideoStats.duration) return techVideoStats.duration;
+    if (activeTechStats.duration) return activeTechStats.duration;
     if (isSeries && activeEpisode?.info?.duration) {
       const d = activeEpisode.info.duration;
       return d.includes(':') ? d : `${d} min`;
     }
     if (isLive) return 'Ao Vivo';
     return 'Carregando...';
-  }, [techVideoStats.duration, isSeries, activeEpisode?.info?.duration, isLive]);
+  }, [activeTechStats.duration, isSeries, activeEpisode?.info?.duration, isLive]);
 
   const displaySize = useMemo(() => {
-    if (techVideoStats.size) return techVideoStats.size;
+    if (activeTechStats.size) return activeTechStats.size;
     if (isLive) return 'Fluxo Contínuo';
-    return 'Calculando...';
-  }, [techVideoStats.size, isLive]);
+    if (activeOfflineDownload?.file_size) {
+      const mb = activeOfflineDownload.file_size / (1024 * 1024);
+      return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+    }
+    return 'Sob demanda';
+  }, [activeTechStats.size, isLive, activeOfflineDownload?.file_size]);
 
   const displayDimensions = useMemo(() => {
-    if (techVideoStats.dimensions) return techVideoStats.dimensions;
+    if (activeTechStats.dimensions) return activeTechStats.dimensions;
     const titleLower = (item?.title || item?.name || '').toLowerCase();
     if (titleLower.includes('4k') || titleLower.includes('uhd')) return '3840x2160 (4K)';
     if (titleLower.includes('fhd') || titleLower.includes('1080')) return '1920x1080 (1080p)';
     if (titleLower.includes('hd') || titleLower.includes('720')) return '1280x720 (720p)';
     if (titleLower.includes('sd')) return '720x480 (SD)';
     return '1920x1080 (FHD)';
-  }, [techVideoStats.dimensions, item?.title, item?.name]);
+  }, [activeTechStats.dimensions, item?.title, item?.name]);
 
   const displayCodec = useMemo(() => {
-    if (techVideoStats.codec) return techVideoStats.codec;
+    if (activeTechStats.codec) return activeTechStats.codec;
     const titleLower = (item?.title || item?.name || '').toLowerCase();
     if (titleLower.includes('hevc') || titleLower.includes('h265') || titleLower.includes('h.265')) {
       return 'H.265 (HEVC)';
     }
     if (titleLower.includes('av1')) return 'AV1';
     return 'H.264 (AVC) / AAC';
-  }, [techVideoStats.codec, item?.title, item?.name]);
+  }, [activeTechStats.codec, item?.title, item?.name]);
 
   // Helper de rolagem suave para manter o player sempre visível ao trocar de episódio
   const scrollToPlayer = useCallback(() => {
@@ -1162,8 +1174,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
     setDownloadingIds((prev) => ({ ...prev, [epId]: true }));
     try {
-      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
-      const streamUrl = `${cleanHost}/series/${config.username}/${config.password}/${ep.id}.${ep.container_extension || 'mp4'}`;
+      const resolvedHost = getSafeDirectHost(config.server_url);
+      const ext = (ep.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
+      const streamUrl = `${resolvedHost}/series/${config.username}/${config.password}/${ep.id}.${ext}`;
       const epMeta = seasonEpisodesMeta[Number(ep.episode_num)];
       const formattedEpName = formatEpisodeTitle(ep.episode_num, selectedSeason, epMeta?.name || ep.title);
       await downloadVideoForOffline(
@@ -1216,8 +1229,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
     }
     setDownloadingIds((prev) => ({ ...prev, [downId]: true }));
     try {
-      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
-      const streamUrl = `${cleanHost}/movie/${config.username}/${config.password}/${channel.stream_id}.${channel.container_extension || 'mp4'}`;
+      const resolvedHost = getSafeDirectHost(config.server_url);
+      const ext = (channel.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
+      const streamUrl = `${resolvedHost}/movie/${config.username}/${config.password}/${channel.stream_id}.${ext}`;
       await downloadVideoForOffline(
         {
           stream_id: channel.stream_id,
@@ -1410,6 +1424,18 @@ export default function WatchView({ type, id }: WatchViewProps) {
               <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
                 <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
                 <p className="text-xs text-neutral-400 font-medium">Carregando episódios da série...</p>
+              </div>
+            ) : isSeries && seriesError && !activeEpisode ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 p-6 text-center bg-neutral-950">
+                <AlertCircle className="w-10 h-10 text-rose-400" />
+                <p className="text-xs sm:text-sm text-neutral-200 max-w-md font-medium">{seriesError}</p>
+                <button
+                  onClick={() => setSeriesRetryNonce((n) => n + 1)}
+                  className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Tentar Novamente
+                </button>
               </div>
             ) : finalPlayUrl ? (
               <VideoPlayer
@@ -1668,8 +1694,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
                               const newSeason = String(season.season_number);
                               setSelectedSeason(newSeason);
                               setIsSeasonDropdownOpen(false);
-                              if (seriesInfo?.episodes && seriesInfo.episodes[newSeason]?.length > 0) {
-                                const firstEp = seriesInfo.episodes[newSeason][0];
+                              const seasonEps = getEpisodesForSeason(seriesInfo, newSeason);
+                              if (seasonEps.length > 0) {
+                                const firstEp = seasonEps[0];
                                 setActiveEpisode(firstEp);
                                 updateWatchUrl(firstEp.id, newSeason);
                                 scrollToPlayer();
@@ -1718,6 +1745,18 @@ export default function WatchView({ type, id }: WatchViewProps) {
                     <div className="py-12 flex flex-col items-center justify-center gap-2">
                       <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
                       <span className="text-[11px] text-neutral-400">Carregando episódios...</span>
+                    </div>
+                  ) : seriesError && !activeEpisode ? (
+                    <div className="py-8 px-3 flex flex-col items-center justify-center gap-2.5 text-center">
+                      <AlertCircle className="w-6 h-6 text-rose-400" />
+                      <span className="text-xs text-neutral-300 leading-relaxed">{seriesError}</span>
+                      <button
+                        onClick={() => setSeriesRetryNonce((n) => n + 1)}
+                        className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        Recarregar Capítulos
+                      </button>
                     </div>
                   ) : currentSeasonEpisodes.length === 0 ? (
                     <div className="py-10 text-center text-xs text-neutral-500">
