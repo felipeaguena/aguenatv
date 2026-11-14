@@ -895,7 +895,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
               className={`hidden md:block ${
                 streamType === 'live'
                   ? 'w-64 sm:w-72 aspect-video'
-                  : 'w-48 sm:w-56 aspect-[3/4]'
+                  : 'w-48 sm:w-75 aspect-[3/4]'
               } rounded-3xl overflow-hidden bg-black border-2 border-white/10 shadow-2xl shrink-0 relative group`}
             >
               {streamType === 'live' ? (
