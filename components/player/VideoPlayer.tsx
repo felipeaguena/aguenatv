@@ -1770,11 +1770,24 @@ export default function VideoPlayer({
       if (isLocalUrl) {
         if (retryCountRef.current < 2) {
           retryCountRef.current += 1;
+          const savedPos = art.video?.currentTime || lastReportedTimeRef.current || 0;
           setTimeout(() => {
             try {
               if (!art.isDestroy && art.video) {
-                art.video.load();
-                art.video.play().catch(() => {});
+                const v = art.video;
+                const onCanRestore = () => {
+                  v.removeEventListener('loadedmetadata', onCanRestore);
+                  v.removeEventListener('canplay', onCanRestore);
+                  if (savedPos > 0 && isFinite(savedPos)) {
+                    try {
+                      v.currentTime = savedPos;
+                    } catch {}
+                  }
+                  v.play().catch(() => {});
+                };
+                v.addEventListener('loadedmetadata', onCanRestore);
+                v.addEventListener('canplay', onCanRestore);
+                v.load();
               }
             } catch (e) {}
           }, 800);

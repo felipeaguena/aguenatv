@@ -747,6 +747,12 @@ public class MainActivity extends BridgeActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
                 if (url != null) {
+                    String host = url.getHost();
+                    // Permite que requisições ao servidor de vídeo local (127.0.0.1) sigam diretamente via TCP socket com suporte nativo a HTTP 206 Range
+                    if ("127.0.0.1".equals(host) || "localhost".equals(host)) {
+                        return null;
+                    }
+
                     String path = url.getPath();
 
                     // Intercepta arquivos de vídeo offline (local) para reprodução offline instantânea com busca/range
