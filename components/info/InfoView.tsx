@@ -29,7 +29,7 @@ import {
   WifiOff,
 } from 'lucide-react';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
-import { fetchIPTVApi } from '@/lib/iptv-client';
+import { fetchIPTVApi, getEffectiveStreamHost } from '@/lib/iptv-client';
 import {
   BaseStreamItem,
   StreamType,
@@ -674,7 +674,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
     }
     setDownloadingIds((prev) => ({ ...prev, [movieDownloadId]: true }));
     try {
-      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
+      const cleanHost = getEffectiveStreamHost(config.server_url);
       const streamUrl = `${cleanHost}/movie/${config.username}/${config.password}/${item.stream_id}.${item.container_extension || 'mp4'}`;
       await downloadVideoForOffline(
         {
@@ -734,7 +734,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
       return;
     }
 
-    const cleanHost = config.server_url.trim().replace(/\/+$/, '');
+    const cleanHost = getEffectiveStreamHost(config.server_url);
     for (const ep of undownloaded) {
       const epId = buildDownloadId('series', item.stream_id, selectedSeason, ep.episode_num ?? ep.id);
       setDownloadingIds((prev) => ({ ...prev, [epId]: true }));
@@ -791,7 +791,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
 
     setDownloadingIds((prev) => ({ ...prev, [epId]: true }));
     try {
-      const cleanHost = config.server_url.trim().replace(/\/+$/, '');
+      const cleanHost = getEffectiveStreamHost(config.server_url);
       const streamUrl = `${cleanHost}/series/${config.username}/${config.password}/${ep.id}.${ep.container_extension || 'mp4'}`;
       const epMeta = seasonEpisodesMeta[Number(ep.episode_num)];
       const formattedEpName = formatEpisodeTitle(ep.episode_num, selectedSeason, epMeta?.name || ep.title);

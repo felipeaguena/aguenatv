@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { isSafePublicUrl } from '@/lib/security';
+import { getIPTVMirrorHosts } from '@/lib/iptv-mirrors';
 import zlib from 'zlib';
 
 // Permite execução estendida na Vercel (até 60s) para sincronização de grandes listas IPTV
@@ -64,30 +65,7 @@ export async function GET(req: NextRequest) {
   };
 
   // Monta lista de hosts candidatos para tentar de forma resiliente, SEMPRE priorizando a porta informada pelo usuário
-  const candidateHosts: string[] = [cleanHost];
-
-  // Auto-espelho inteligente entre rootdns.cc e dfpump.top, incluindo HTTPS seguro
-  if (cleanHost.includes('rootdns.cc')) {
-    if (!cleanHost.startsWith('https://')) {
-      candidateHosts.push('https://rootdns.cc');
-    }
-    const dfpumpMirror = cleanHost.replace('rootdns.cc', 'dfpump.top');
-    if (!candidateHosts.includes(dfpumpMirror)) candidateHosts.push(dfpumpMirror);
-  } else if (cleanHost.includes('dfpump.top')) {
-    // Se digitou dfpump.top:80, tenta também sem porta explícita (e vice-versa)
-    if (cleanHost.includes(':80')) {
-      const without80 = cleanHost.replace(':80', '');
-      if (!candidateHosts.includes(without80)) candidateHosts.push(without80);
-    } else {
-      const with80 = cleanHost.replace('dfpump.top', 'dfpump.top:80');
-      if (!candidateHosts.includes(with80)) candidateHosts.push(with80);
-    }
-    const rootdnsMirror = cleanHost.replace('dfpump.top', 'rootdns.cc');
-    if (!candidateHosts.includes(rootdnsMirror)) candidateHosts.push(rootdnsMirror);
-    if (!candidateHosts.includes('https://rootdns.cc')) candidateHosts.push('https://rootdns.cc');
-  } else if (cleanHost.includes('zonaverde.sbs')) {
-    if (!candidateHosts.includes('https://rootdns.cc')) candidateHosts.push('https://rootdns.cc');
-  }
+  const candidateHosts = getIPTVMirrorHosts(cleanHost, { includeHttpsFallback: true });
 
   const userAgents = [
     'IPTVSmarters/1.0',
@@ -95,11 +73,15 @@ export async function GET(req: NextRequest) {
     'VLC/3.0.18 LibVLC/3.0.18',
   ];
 
-  let finalResponse: Response | null = null;
-  let lastError: any = null;
+  let finalBody: string | null = null;
+  let resolvedCandidate: string | null = null;
+  let lastError: Error | null = null;
+  let lastStatus: number | null = null;
+  let sawCloudflareOriginError: number | null = null;
+  let sawAuthError: number | null = null;
 
   for (const candidate of candidateHosts) {
-    if (finalResponse) break;
+    if (finalBody !== null) break;
 
     for (const ua of userAgents) {
       try {
@@ -115,68 +97,79 @@ export async function GET(req: NextRequest) {
         });
 
         if (upstreamRes.ok) {
-          finalResponse = upstreamRes;
-          break;
+          const text = await upstreamRes.text();
+          if (text && !text.trim().startsWith('<')) {
+            finalBody = text;
+            resolvedCandidate = candidate;
+            break;
+          }
+          lastError = new Error(`Resposta HTML inesperada em ${candidate}`);
+          lastStatus = 502;
+          break; // HTML em 200 OK -> tenta próximo host espelho
         } else {
+          lastStatus = upstreamRes.status;
           lastError = new Error(`HTTP ${upstreamRes.status} em ${candidate} (${upstreamRes.statusText})`);
 
-          // Se a Cloudflare retornar erro de servidor de origem indisponível (520..526)
           if (upstreamRes.status >= 520 && upstreamRes.status <= 526) {
-            return NextResponse.json(
-              {
-                error: `O servidor do seu provedor IPTV está temporariamente inacessível (Erro Cloudflare ${upstreamRes.status} - Servidor de origem desligado ou em manutenção). Aguarde o restabelecimento pelo provedor.`,
-                status: upstreamRes.status,
-              },
-              { status: 502 }
-            );
+            sawCloudflareOriginError = upstreamRes.status;
+            break; // Tenta próximo espelho antes de abortar
           }
 
-          // Se for erro de conexão recusada / limite de conexões simultâneas
-          if (upstreamRes.status === 401 || (upstreamRes.status === 403 && !upstreamRes.headers.get('cf-ray'))) {
-            return NextResponse.json(
-              {
-                error: `Conexão recusada pelo provedor IPTV (HTTP ${upstreamRes.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`,
-                status: upstreamRes.status,
-              },
-              { status: 403 }
-            );
+          if (upstreamRes.status === 401) {
+            sawAuthError = 401;
+            break; // Tenta próximo espelho antes de concluir que a conta foi recusada
           }
 
-          if (upstreamRes.status !== 403) {
-            break; // Pula para o próximo host candidato
+          if (upstreamRes.status === 403) {
+            sawAuthError = 403;
+            // Se não for bloqueio Cloudflare, outros UAs raramente resolvem neste host; testa próximo UA apenas se cf-ray presente
+            if (!upstreamRes.headers.get('cf-ray')) {
+              break;
+            }
+            continue;
           }
+
+          break; // Outro status de erro -> pula para o próximo host candidato
         }
-      } catch (err: any) {
-        lastError = err;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
         break; // Erro de rede ou timeout, tenta próximo host
       }
     }
   }
 
-  if (!finalResponse) {
+  if (finalBody === null) {
     console.error('[Proxy IPTV] Todos os candidatos falharam:', candidateHosts, lastError);
+    if (sawCloudflareOriginError) {
+      return NextResponse.json(
+        {
+          error: `O servidor do seu provedor IPTV está temporariamente inacessível (Erro Cloudflare ${sawCloudflareOriginError} - Servidor de origem desligado ou em manutenção). Aguarde o restabelecimento pelo provedor.`,
+          status: sawCloudflareOriginError,
+        },
+        { status: 502 }
+      );
+    }
+    if (sawAuthError === 401 || sawAuthError === 403) {
+      return NextResponse.json(
+        {
+          error: `Conexão recusada pelo provedor IPTV (HTTP ${sawAuthError}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`,
+          status: sawAuthError,
+        },
+        { status: 403 }
+      );
+    }
     return NextResponse.json(
       {
-        error: `Falha na comunicação com o servidor IPTV (${lastError?.message || 'conexão recusada/timeout'}). Verifique o endereço e conexão.`,
+        error: `Falha na comunicação com o servidor IPTV (${lastError?.message || `status ${lastStatus || 'desconhecido'}`}). Verifique o endereço e conexão.`,
       },
       { status: 502 }
     );
   }
 
   try {
-    const rawText = await finalResponse.text();
-
-    // Se o servidor upstream retornou HTML (ex: página de erro do Nginx ou desafio Cloudflare)
-    if (rawText.trim().startsWith('<')) {
-      return NextResponse.json(
-        { error: 'O servidor IPTV retornou uma resposta em HTML em vez de dados JSON. O servidor pode estar temporariamente indisponível.' },
-        { status: 502 }
-      );
-    }
-
     // Comprime com Gzip para contornar o limite rígido de payload de 4.5MB da Vercel
     // Listas de 15MB de filmes caem para apenas ~1.1MB comprimidas e o navegador descompacta automaticamente
-    const gzippedBuffer = zlib.gzipSync(Buffer.from(rawText, 'utf-8'));
+    const gzippedBuffer = zlib.gzipSync(Buffer.from(finalBody, 'utf-8'));
 
     return new NextResponse(gzippedBuffer, {
       status: 200,
@@ -184,11 +177,18 @@ export async function GET(req: NextRequest) {
         'Content-Type': 'application/json',
         'Content-Encoding': 'gzip',
         'Cache-Control': 'no-store, no-cache, must-revalidate',
+        ...(resolvedCandidate
+          ? {
+              'X-IPTV-Resolved-Host': resolvedCandidate,
+              'Access-Control-Expose-Headers': 'X-IPTV-Resolved-Host',
+            }
+          : {}),
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `Erro ao transferir dados do IPTV: ${err?.message}` },
+      { error: `Erro ao transferir dados do IPTV: ${msg}` },
       { status: 502 }
     );
   }

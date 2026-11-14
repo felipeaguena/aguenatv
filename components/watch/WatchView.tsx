@@ -40,7 +40,13 @@ import {
 } from '@/lib/download-manager';
 import { useOfflineDownloads } from '@/hooks/useOfflineDownloads';
 import { localDB, getSavedIPTVConfig } from '@/lib/db-local';
-import { fetchIPTVApi, getSafeDirectHost } from '@/lib/iptv-client';
+import {
+  fetchIPTVApi,
+  getCachedWorkingHost,
+  getEffectiveStreamHost,
+  getStreamHostCandidates,
+  resolveWorkingStreamHost,
+} from '@/lib/iptv-client';
 import {
   BaseStreamItem,
   IPTVAccount,
@@ -86,6 +92,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [item, setItem] = useState<BaseStreamItem | null>(null);
   const [config, setConfig] = useState<IPTVAccount | null>(null);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [resolvedStreamHost, setResolvedStreamHost] = useState<string | null>(null);
   const [relatedItems, setRelatedItems] = useState<BaseStreamItem[]>([]);
   const [currentStreamId, setCurrentStreamId] = useState(id);
   const [loading, setLoading] = useState(true);
@@ -224,6 +231,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
         setConfig(savedCfg);
         setConfigLoaded(true);
 
+        if (savedCfg?.server_url) {
+          const cachedHost = getCachedWorkingHost(savedCfg.server_url);
+          if (cachedHost) {
+            setResolvedStreamHost(cachedHost);
+          }
+        }
+
         // Se o item não foi encontrado no Dexie local, busca metadados sob demanda na API do IPTV
         if (!foundItem && savedCfg) {
           if (targetType === 'movie') {
@@ -259,6 +273,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
               stream_type: targetType,
               container_extension: 'mp4',
             };
+          }
+        }
+
+        // Para filmes e canais ao vivo, descobre o espelho ativo antes de abrir o stream (sem abrir conexão de vídeo)
+        if (savedCfg?.server_url && targetType !== 'series') {
+          const activeHost = getCachedWorkingHost(savedCfg.server_url) || (await resolveWorkingStreamHost(savedCfg));
+          if (isMounted && activeHost) {
+            setResolvedStreamHost(activeHost);
           }
         }
 
@@ -319,6 +341,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
         }
 
         if (!isMounted) return;
+        const cachedSeriesHost = getCachedWorkingHost(config.server_url);
+        if (cachedSeriesHost) {
+          setResolvedStreamHost(cachedSeriesHost);
+        }
         setSeriesInfo(data);
         if (!episodeParam) {
           setSelectedSeason(getDefaultSeason(sorted));
@@ -661,11 +687,13 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const isLive = streamType === 'live';
   const isMovie = streamType === 'movie';
 
-  // Normaliza o servidor IPTV preservando HTTPS/espelhos seguros na Web e removendo caminhos de API colados por engano
-  const cleanHost = useMemo(() => {
-    if (!config?.server_url) return '';
-    return getSafeDirectHost(config.server_url);
-  }, [config?.server_url]);
+  // Normaliza o servidor IPTV priorizando o espelho ativo descoberto pela API e listando espelhos de fallback
+  const streamHostCandidates = useMemo(() => {
+    if (!config?.server_url) return [];
+    return getStreamHostCandidates(config.server_url, resolvedStreamHost);
+  }, [config?.server_url, resolvedStreamHost]);
+
+  const cleanHost = streamHostCandidates[0] || '';
 
   // Lista de temporadas formatadas
   const seasonList: SeriesSeason[] = useMemo(() => {
@@ -696,27 +724,37 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return relatedItems.filter((i) => (i.title || i.name).toLowerCase().includes(q));
   }, [relatedItems, channelSearch]);
 
-  // URL e Metadados do Player
-  const { streamUrl, playerTitle, playerPoster, currentActiveId } = useMemo(() => {
+  // URL, espelhos de fallback e Metadados do Player
+  const { streamUrl, fallbackStreamUrls, playerTitle, playerPoster, currentActiveId } = useMemo(() => {
     let url = '';
+    let relativePath = '';
     let title = item?.title || item?.name || 'Transmissão';
     let poster = enrichedMetadata?.posterUrl || item?.stream_icon;
     let activeId = item?.stream_id || id;
 
     if (!config || !cleanHost) {
-      return { streamUrl: '', playerTitle: title, playerPoster: poster, currentActiveId: activeId };
+      return {
+        streamUrl: '',
+        fallbackStreamUrls: [] as string[],
+        playerTitle: title,
+        playerPoster: poster,
+        currentActiveId: activeId,
+      };
     }
 
     if (isLive) {
-      url = `${cleanHost}/live/${config.username}/${config.password}/${activeId}.m3u8`;
+      relativePath = `/live/${config.username}/${config.password}/${activeId}.m3u8`;
+      url = `${cleanHost}${relativePath}`;
     } else if (isMovie) {
       const ext = (item?.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
-      url = `${cleanHost}/movie/${config.username}/${config.password}/${activeId}.${ext}`;
+      relativePath = `/movie/${config.username}/${config.password}/${activeId}.${ext}`;
+      url = `${cleanHost}${relativePath}`;
     } else if (isSeries) {
       if (activeEpisode) {
         activeId = String(activeEpisode.id);
         const ext = (activeEpisode.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
-        url = `${cleanHost}/series/${config.username}/${config.password}/${activeEpisode.id}.${ext}`;
+        relativePath = `/series/${config.username}/${config.password}/${activeEpisode.id}.${ext}`;
+        url = `${cleanHost}${relativePath}`;
         const epMeta = seasonEpisodesMeta[Number(activeEpisode.episode_num)];
         const formattedEpName = formatEpisodeTitle(
           activeEpisode.episode_num,
@@ -733,8 +771,18 @@ export default function WatchView({ type, id }: WatchViewProps) {
       }
     }
 
-    return { streamUrl: url, playerTitle: title, playerPoster: poster, currentActiveId: activeId };
-  }, [config, cleanHost, item, isLive, isMovie, isSeries, activeEpisode, id, enrichedMetadata, seasonEpisodesMeta, selectedSeason]);
+    const fallbacks = relativePath
+      ? streamHostCandidates.slice(1).map((host) => `${host}${relativePath}`)
+      : [];
+
+    return {
+      streamUrl: url,
+      fallbackStreamUrls: fallbacks,
+      playerTitle: title,
+      playerPoster: poster,
+      currentActiveId: activeId,
+    };
+  }, [config, cleanHost, streamHostCandidates, item, isLive, isMovie, isSeries, activeEpisode, id, enrichedMetadata, seasonEpisodesMeta, selectedSeason]);
 
   // Regra Estrita de Priorização: Se o item/capítulo possui download concluído,
   // reproduz EXCLUSIVAMENTE pelo arquivo baixado local, sem requisitar internet.
@@ -1174,7 +1222,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
 
     setDownloadingIds((prev) => ({ ...prev, [epId]: true }));
     try {
-      const resolvedHost = getSafeDirectHost(config.server_url);
+      const resolvedHost = getEffectiveStreamHost(config.server_url, resolvedStreamHost);
       const ext = (ep.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
       const streamUrl = `${resolvedHost}/series/${config.username}/${config.password}/${ep.id}.${ext}`;
       const epMeta = seasonEpisodesMeta[Number(ep.episode_num)];
@@ -1229,7 +1277,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
     }
     setDownloadingIds((prev) => ({ ...prev, [downId]: true }));
     try {
-      const resolvedHost = getSafeDirectHost(config.server_url);
+      const resolvedHost = getEffectiveStreamHost(config.server_url, resolvedStreamHost);
       const ext = (channel.container_extension || 'mp4').replace(/^\./, '').trim() || 'mp4';
       const streamUrl = `${resolvedHost}/movie/${config.username}/${config.password}/${channel.stream_id}.${ext}`;
       await downloadVideoForOffline(
@@ -1440,6 +1488,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
             ) : finalPlayUrl ? (
               <VideoPlayer
                 streamUrl={finalPlayUrl}
+                fallbackStreamUrls={isCurrentDownloaded ? undefined : fallbackStreamUrls}
                 title={playerTitle}
                 streamId={currentActiveId}
                 streamType={streamType}

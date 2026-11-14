@@ -22,6 +22,7 @@ export interface PlayerVideoInfo {
 
 interface VideoPlayerProps {
   streamUrl: string;
+  fallbackStreamUrls?: string[];
   title: string;
   streamId: string;
   streamType: StreamType;
@@ -156,8 +157,11 @@ async function setFullscreenCutoutMode(enable: boolean) {
   }
 }
 
+const EMPTY_FALLBACK_URLS: string[] = [];
+
 export default function VideoPlayer({
   streamUrl,
+  fallbackStreamUrls = EMPTY_FALLBACK_URLS,
   title,
   streamId,
   streamType,
@@ -215,7 +219,9 @@ export default function VideoPlayer({
   }, []);
 
   const triedExtensionsRef = useRef<Set<string>>(new Set());
+  const triedUrlsRef = useRef<Set<string>>(new Set());
   const retryCountRef = useRef(0);
+  const tryFallbackStreamRef = useRef<((failedUrl: string) => boolean) | null>(null);
   const showControlsRef = useRef<() => void>(() => {});
   const resetInactivityTimerRef = useRef<(delay?: number) => void>(() => {});
   const isSwitchingUrlRef = useRef(false);
@@ -263,6 +269,7 @@ export default function VideoPlayer({
   const prevEpisodeLabelRef = useRef(prevEpisodeLabel);
   const nextEpisodeLabelRef = useRef(nextEpisodeLabel);
   const prevStreamUrlRef = useRef(streamUrl);
+  const fallbackStreamUrlsRef = useRef<string[]>(fallbackStreamUrls);
   const originalStreamUrlRef = useRef(streamUrl);
   const targetStreamUrlRef = useRef(streamUrl);
   const initialTimeRef = useRef(initialTime);
@@ -271,6 +278,7 @@ export default function VideoPlayer({
   const lastDurationRef = useRef(0);
 
   useEffect(() => {
+    fallbackStreamUrlsRef.current = fallbackStreamUrls;
     isControlsVisibleRef.current = isControlsVisible;
     isPlayingRef.current = isPlaying;
     skipTimesRef.current = skipTimes;
@@ -779,6 +787,8 @@ export default function VideoPlayer({
     prevStreamTypeRef.current = streamType;
     isSwitchingUrlRef.current = false;
     triedExtensionsRef.current.clear();
+    triedUrlsRef.current.clear();
+    triedUrlsRef.current.add(streamUrl);
     retryCountRef.current = 0;
     hasRestoredRef.current = false;
     hasMarkedRef.current = false;
@@ -1141,15 +1151,17 @@ export default function VideoPlayer({
                   case Hls.ErrorTypes.NETWORK_ERROR: {
                     const httpCode = (errData.response as any)?.code || (errData.response as any)?.status;
                     if (httpCode >= 520 && httpCode <= 526) {
+                      hls.destroy();
+                      if (tryFallbackStreamRef.current?.(url)) break;
                       setIsTransitioning(false);
                       setError(`O servidor do provedor IPTV está temporariamente fora do ar (Erro Cloudflare ${httpCode} - Servidor de origem inacessível). Aguarde a recuperação pelo provedor.`);
-                      hls.destroy();
                       break;
                     }
                     if (httpCode === 401 || httpCode === 403) {
+                      hls.destroy();
+                      if (tryFallbackStreamRef.current?.(url)) break;
                       setIsTransitioning(false);
                       setError(`Conexão recusada pelo provedor IPTV (HTTP ${httpCode}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`);
-                      hls.destroy();
                       break;
                     }
                     if (hlsNetworkRetries < 2) {
@@ -1158,11 +1170,12 @@ export default function VideoPlayer({
                       hls.startLoad();
                     } else {
                       console.error('[HLS] Falha persistente de rede:', errData);
+                      hls.destroy();
+                      if (tryFallbackStreamRef.current?.(url)) break;
                       setIsTransitioning(false);
                       setIsPlaying(false);
                       isPlayingRef.current = false;
                       setError('Falha de conexão com o servidor IPTV ao carregar o stream HLS (.m3u8).');
-                      hls.destroy();
                     }
                     break;
                   }
@@ -1172,20 +1185,22 @@ export default function VideoPlayer({
                       console.warn(`[HLS] Tentando recuperar erro de mídia (${hlsMediaRetries}/2)...`);
                       hls.recoverMediaError();
                     } else {
+                      hls.destroy();
+                      if (tryFallbackStreamRef.current?.(url)) break;
                       setIsTransitioning(false);
                       setIsPlaying(false);
                       isPlayingRef.current = false;
                       setError('Erro de decodificação de mídia no stream HLS.');
-                      hls.destroy();
                     }
                     break;
                   default:
                     console.error('[HLS] Erro fatal irrecuperável:', errData);
+                    hls.destroy();
+                    if (tryFallbackStreamRef.current?.(url)) break;
                     setIsTransitioning(false);
                     setIsPlaying(false);
                     isPlayingRef.current = false;
                     setError('Não foi possível carregar a transmissão. O servidor de origem pode estar temporariamente offline.');
-                    hls.destroy();
                     break;
                 }
               }
@@ -1828,6 +1843,61 @@ export default function VideoPlayer({
       }
     };
 
+    const tryFallbackStream = (failedUrl: string): boolean => {
+      if (art.isDestroy) return false;
+      if (failedUrl) triedUrlsRef.current.add(failedUrl);
+
+      // 1. Tenta outros espelhos do servidor IPTV sem alterar a extensão primeiro
+      const mirrorUrl = fallbackStreamUrlsRef.current.find(
+        (candidate) => candidate && !triedUrlsRef.current.has(candidate)
+      );
+      if (mirrorUrl) {
+        triedUrlsRef.current.add(mirrorUrl);
+        try {
+          const origin = new URL(mirrorUrl).origin;
+          console.info(`[VideoPlayer] Alternando para espelho de fallback: ${origin}`);
+        } catch {}
+        try {
+          reloadOrSwitchUrl(mirrorUrl);
+          return true;
+        } catch (e) {
+          console.warn('[VideoPlayer] Falha ao alternar para espelho de fallback:', e);
+        }
+      }
+
+      // 2. Se VOD não-live falhar nos espelhos, testa extensões reproduzíveis (.mp4, .mkv, .m3u8)
+      const baseUrl = originalStreamUrlRef.current || failedUrl;
+      if (streamTypeRef.current !== 'live' && baseUrl && !baseUrl.toLowerCase().includes('.m3u8')) {
+        const extMatch = baseUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+        const currentExtMatch = failedUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+        if (extMatch) triedExtensionsRef.current.add(extMatch[1].toLowerCase());
+        if (currentExtMatch) triedExtensionsRef.current.add(currentExtMatch[1].toLowerCase());
+
+        const candidates = ['mp4', 'mkv', 'm3u8'];
+        const nextExt = candidates.find((ext) => !triedExtensionsRef.current.has(ext));
+        if (nextExt) {
+          triedExtensionsRef.current.add(nextExt);
+          const candidateBases = [baseUrl, ...fallbackStreamUrlsRef.current];
+          const nextUrl = candidateBases
+            .map((b) => b.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, `.${nextExt}$1`))
+            .find((u) => !triedUrlsRef.current.has(u));
+          if (nextUrl) {
+            triedUrlsRef.current.add(nextUrl);
+            console.info(`[VideoPlayer] Tentando extensão alternativa de fallback: .${nextExt}`);
+            try {
+              reloadOrSwitchUrl(nextUrl);
+              return true;
+            } catch (e) {
+              console.warn('[VideoPlayer] Falha ao alternar URL de fallback:', e);
+            }
+          }
+        }
+      }
+
+      return false;
+    };
+    tryFallbackStreamRef.current = tryFallbackStream;
+
     art.on('video:error', () => {
       if (transitionTimeoutRef.current) {
         clearTimeout(transitionTimeoutRef.current);
@@ -1913,27 +1983,9 @@ export default function VideoPlayer({
         return;
       }
 
-      // Se não for transmissão ao vivo e houver extensão na URL base, testa alternativas reproduzíveis no navegador (.mp4, .mkv, .m3u8)
-      if (streamTypeRef.current !== 'live' && !baseUrl.toLowerCase().includes('.m3u8')) {
-        const extMatch = baseUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
-        const currentExtMatch = currentUrl.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
-        if (extMatch) triedExtensionsRef.current.add(extMatch[1].toLowerCase());
-        if (currentExtMatch) triedExtensionsRef.current.add(currentExtMatch[1].toLowerCase());
-
-        const candidates = ['mp4', 'mkv', 'm3u8'];
-        const nextExt = candidates.find((ext) => !triedExtensionsRef.current.has(ext));
-
-        if (nextExt) {
-          triedExtensionsRef.current.add(nextExt);
-          const nextUrl = baseUrl.replace(/\.[a-zA-Z0-9]+(\?.*)?$/, `.${nextExt}$1`);
-          console.info(`[VideoPlayer] Tentando extensão alternativa de fallback: .${nextExt}`);
-          try {
-            reloadOrSwitchUrl(nextUrl);
-            return;
-          } catch (e) {
-            console.warn('[VideoPlayer] Falha ao alternar URL de fallback:', e);
-          }
-        }
+      // Tenta espelhos do servidor IPTV e extensões reproduzíveis antes de exibir erro
+      if (tryFallbackStream(currentUrl)) {
+        return;
       }
 
       // Reconexão real da URL original (evita art.switchUrl(mesmaUrl), que é no-op no Artplayer)
@@ -2076,6 +2128,8 @@ export default function VideoPlayer({
     originalStreamUrlRef.current = streamUrl;
     targetStreamUrlRef.current = streamUrl;
     triedExtensionsRef.current.clear();
+    triedUrlsRef.current.clear();
+    triedUrlsRef.current.add(streamUrl);
     retryCountRef.current = 0;
     hasRestoredRef.current = false;
     hasMarkedRef.current = false;

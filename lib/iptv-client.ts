@@ -1,24 +1,63 @@
-import { IPTVAccount } from './types';
+import {
+  normalizeIPTVServerBase,
+  extractStreamHostFromServerInfo,
+  getIPTVMirrorHosts,
+  getOrderedStreamHosts,
+  isClusterMirrorHost,
+} from './iptv-mirrors';
 
-/**
- * Normaliza a URL base de um servidor IPTV/Xtream, removendo sufixos comuns
- * caso o usuário tenha colado o link completo (ex: /player_api.php, /get.php?...).
- */
-export function normalizeIPTVServerBase(serverUrl: string): string {
-  const trimmed = serverUrl.trim();
-  if (!trimmed) return '';
+export {
+  normalizeIPTVServerBase,
+  getIPTVMirrorHosts,
+  getOrderedStreamHosts,
+  isClusterMirrorHost,
+};
 
-  try {
-    const parsed = new URL(trimmed);
-    const cleanPath = parsed.pathname
-      .replace(/\/(player_api|get|xmltv)\.php.*$/i, '')
-      .replace(/\/+$/, '');
-    return `${parsed.protocol}//${parsed.host}${cleanPath}`;
-  } catch {
-    return trimmed
-      .replace(/\/(player_api|get|xmltv)\.php.*$/i, '')
-      .split('?')[0]
-      .replace(/\/+$/, '');
+const WORKING_HOST_TTL_MS = 30 * 60 * 1000;
+const workingHostMemoryCache = new Map<string, { host: string; ts: number }>();
+const inFlightHostResolution = new Map<string, Promise<string | null>>();
+
+function getHostCacheKey(serverUrl: string): string {
+  return normalizeIPTVServerBase(serverUrl).toLowerCase();
+}
+
+export function getCachedWorkingHost(serverUrl: string): string | null {
+  const key = getHostCacheKey(serverUrl);
+  if (!key) return null;
+
+  const mem = workingHostMemoryCache.get(key);
+  if (mem && Date.now() - mem.ts < WORKING_HOST_TTL_MS) {
+    return mem.host;
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = sessionStorage.getItem(`iptv_active_host_${key}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { host?: string; ts?: number };
+        if (parsed.host && parsed.ts && Date.now() - parsed.ts < WORKING_HOST_TTL_MS) {
+          workingHostMemoryCache.set(key, { host: parsed.host, ts: parsed.ts });
+          return parsed.host;
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+export function setCachedWorkingHost(serverUrl: string, workingHost: string): void {
+  const key = getHostCacheKey(serverUrl);
+  const cleanWorking = normalizeIPTVServerBase(workingHost);
+  if (!key || !cleanWorking) return;
+
+  const entry = { host: cleanWorking, ts: Date.now() };
+  workingHostMemoryCache.set(key, entry);
+
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(`iptv_active_host_${key}`, JSON.stringify(entry));
+    } catch {}
   }
 }
 
@@ -34,21 +73,29 @@ export function getSafeDirectHost(serverUrl: string): string {
   const clean = normalizeIPTVServerBase(serverUrl);
   if (!clean) return '';
 
-  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-    if (
-      clean.includes('rootdns.cc') ||
-      clean.includes('dfpump.top') ||
-      clean.includes('zonaverde.sbs')
-    ) {
-      return 'https://rootdns.cc';
-    }
-    // Se for outro servidor com http://, tenta https se a página estiver em https
-    if (clean.startsWith('http://')) {
-      return clean.replace('http://', 'https://');
-    }
-  }
+  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const candidates = getIPTVMirrorHosts(clean, { isHttpsPage });
+  return candidates[0] || clean;
+}
 
-  return clean;
+/**
+ * Retorna o host principal mais confiável para construir URLs de reprodução e download,
+ * priorizando o host ativo descoberto dinamicamente via API/espelho.
+ */
+export function getEffectiveStreamHost(serverUrl: string, overrideWorkingHost?: string | null): string {
+  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const cached = overrideWorkingHost || getCachedWorkingHost(serverUrl);
+  const candidates = getOrderedStreamHosts(serverUrl, cached, { isHttpsPage });
+  return candidates[0] || getSafeDirectHost(serverUrl);
+}
+
+/**
+ * Retorna toda a fila ordenada de hosts candidatos para failover automático no player.
+ */
+export function getStreamHostCandidates(serverUrl: string, overrideWorkingHost?: string | null): string[] {
+  const isHttpsPage = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const cached = overrideWorkingHost || getCachedWorkingHost(serverUrl);
+  return getOrderedStreamHosts(serverUrl, cached, { isHttpsPage });
 }
 
 export interface FetchIPTVOptions {
@@ -59,18 +106,15 @@ export interface FetchIPTVOptions {
 
 /**
  * Busca dados da API Xtream/IPTV com arquitetura resiliente:
- * 1. Tenta PRIMEIRO conexão direta do navegador (Client-Side Fetch):
- *    - Roda a partir do IP residencial/móvel do usuário (Cloudflare libera 100%, sem 403).
- *    - Utiliza CORS nativo e SSL válido da Cloudflare (https://rootdns.cc).
- *    - Bypassa o limite de 4.5MB da Vercel (listas de 15MB de filmes baixam em 1s direto no IndexedDB).
- *    - Sem risco de timeout das serverless functions da Vercel.
- * 2. Em caso de falha na conexão direta (ex: bloqueio de rede local ou servidor privado),
- *    faz fallback transparente para o proxy serverless (/api/iptv).
+ * 1. Tenta PRIMEIRO conexão direta do navegador (Client-Side Fetch), priorizando espelho já validado.
+ * 2. Em caso de falha na conexão direta (ex: bloqueio de rede local, CORS ou servidor espelho offline),
+ *    faz fallback transparente para o proxy (/api/iptv), que retorna em X-IPTV-Resolved-Host o host vencedor.
  */
-export async function fetchIPTVApi(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function fetchIPTVApi<T = any>(
   account: { server_url: string; username: string; password: string },
   options: FetchIPTVOptions = {}
-): Promise<any> {
+): Promise<T> {
   const { action, params = {}, timeoutMs = 12000 } = options;
 
   const buildQuery = (baseParams: Record<string, string>) => {
@@ -86,55 +130,50 @@ export async function fetchIPTVApi(
 
   // 1. TENTATIVA DIRETA NO CLIENTE (Navegador)
   if (typeof window !== 'undefined') {
-    const directHost = getSafeDirectHost(account.server_url);
-    const directQuery = buildQuery({
-      username: account.username,
-      password: account.password,
-    });
-    const directUrl = `${directHost}/player_api.php?${directQuery}`;
+    const isHttpsPage = window.location.protocol === 'https:';
+    const cachedHost = getCachedWorkingHost(account.server_url);
+    const directCandidates = getOrderedStreamHosts(account.server_url, cachedHost, { isHttpsPage });
+    const directHost = directCandidates[0] || getSafeDirectHost(account.server_url);
 
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch(directUrl, {
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json, text/plain, */*',
-        },
+    if (directHost) {
+      const directQuery = buildQuery({
+        username: account.username,
+        password: account.password,
       });
-      clearTimeout(timer);
+      const directUrl = `${directHost}/player_api.php?${directQuery}`;
 
-      // Detecção rápida de servidor de origem IPTV fora do ar (Cloudflare 520..526)
-      if (res.status >= 520 && res.status <= 526) {
-        throw new Error(
-          `O servidor do provedor IPTV está temporariamente inacessível (Erro Cloudflare ${res.status} - Servidor de origem fora do ar). Aguarde o provedor restabelecer o serviço.`
-        );
-      }
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      // Detecção de limite de conexões simultâneas ou credencial
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(
-          `Conexão recusada pelo provedor IPTV (HTTP ${res.status}). Verifique se sua lista está ativa ou se outro aparelho já está conectado simultaneamente (limite de 1 tela atingido).`
-        );
-      }
+        const res = await fetch(directUrl, {
+          signal: controller.signal,
+          headers: {
+            Accept: 'application/json, text/plain, */*',
+          },
+        });
+        clearTimeout(timer);
 
-      if (res.ok) {
-        const text = await res.text();
-        if (text && !text.trim().startsWith('<')) {
-          try {
-            return JSON.parse(text);
-          } catch {
-            // Continua para o proxy se não for JSON válido
+        if (res.ok) {
+          const text = await res.text();
+          if (text && !text.trim().startsWith('<')) {
+            try {
+              const parsed = JSON.parse(text);
+              const advertisedHost = extractStreamHostFromServerInfo(parsed?.server_info);
+              setCachedWorkingHost(account.server_url, advertisedHost || directHost);
+              return parsed as T;
+            } catch {
+              // Continua para o proxy se não for JSON válido
+            }
           }
         }
+      } catch (directErr) {
+        console.warn(`[IPTV Client] Busca direta em ${directHost} (${action || 'info'}) falhou. Tentando proxy:`, directErr);
       }
-    } catch (directErr) {
-      console.warn(`[IPTV Client] Busca direta em ${directHost} (${action || 'info'}) falhou. Tentando proxy:`, directErr);
     }
   }
 
-  // 2. FALLBACK VIA PROXY SERVERLESS (/api/iptv)
+  // 2. FALLBACK VIA PROXY (/api/iptv)
   const proxyQuery = buildQuery({
     host: account.server_url,
     username: account.username,
@@ -147,5 +186,48 @@ export async function fetchIPTVApi(
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.error || `Falha na comunicação com o servidor IPTV (Status HTTP ${res.status}). Verifique o endereço e conexão.`);
   }
-  return res.json();
+
+  const resolvedHeader = res.headers.get('X-IPTV-Resolved-Host');
+  const data = await res.json();
+
+  const advertisedHost = extractStreamHostFromServerInfo(data?.server_info);
+  const winningHost = resolvedHeader || advertisedHost;
+  if (winningHost) {
+    setCachedWorkingHost(account.server_url, winningHost);
+  }
+
+  return data as T;
+}
+
+/**
+ * Descobre e memoriza o host de streaming ativo para a conta IPTV (sem consumir conexão de mídia),
+ * permitindo que Filmes e TV Ao Vivo também evitem domínios espelho fora do ar já na primeira tentativa.
+ */
+export async function resolveWorkingStreamHost(account: {
+  server_url: string;
+  username: string;
+  password: string;
+}): Promise<string | null> {
+  if (!account?.server_url || !account?.username || !account?.password) return null;
+
+  const existing = getCachedWorkingHost(account.server_url);
+  if (existing) return existing;
+
+  const key = getHostCacheKey(account.server_url);
+  const activePromise = inFlightHostResolution.get(key);
+  if (activePromise) return activePromise;
+
+  const task = (async () => {
+    try {
+      await fetchIPTVApi(account, { timeoutMs: 6000 });
+      return getCachedWorkingHost(account.server_url);
+    } catch {
+      return null;
+    } finally {
+      inFlightHostResolution.delete(key);
+    }
+  })();
+
+  inFlightHostResolution.set(key, task);
+  return task;
 }
