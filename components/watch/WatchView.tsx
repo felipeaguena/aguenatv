@@ -72,6 +72,13 @@ import ImageWithFallback from '@/components/ui/ImageWithFallback';
 import { useFavorites } from '@/hooks/useFavorites';
 import { useWatched } from '@/hooks/useWatched';
 import { useContinueWatching } from '@/hooks/useContinueWatching';
+import {
+  extractSizeFromXtreamPayload,
+  formatVodSize,
+  getCachedVodSizeEntry,
+  probeVodSizeViaCapacitorHead,
+  setCachedVodSizeEntry,
+} from '@/lib/vod-size';
 
 interface WatchViewProps {
   type: string;
@@ -112,10 +119,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
   const [techVideoStats, setTechVideoStats] = useState<{
     url?: string;
     duration?: string;
+    durationSeconds?: number;
     size?: string;
     dimensions?: string;
     codec?: string;
   }>({});
+  const [vodMetadataPayload, setVodMetadataPayload] = useState<{ streamId: string; payload: unknown } | null>(null);
+  const [vodHeadSize, setVodHeadSize] = useState<{ cacheKey: string; bytes: number; approximate: boolean } | null>(null);
+  const [vodProbeReadyUrl, setVodProbeReadyUrl] = useState<string | null>(null);
 
   // Metadados enriquecidos da API (TMDb / Kitsu / TVMaze) e Sugestões Inteligentes
   const [enrichedMetadata, setEnrichedMetadata] = useState<EnrichedMetadata | null>(null);
@@ -250,6 +261,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
                 action: 'get_vod_info',
                 params: { vod_id: currentStreamId },
               });
+              if (vodData && isMounted) {
+                setVodMetadataPayload({ streamId: String(currentStreamId), payload: vodData });
+              }
               if (vodData?.movie_data && isMounted) {
                 foundItem = {
                   id: `movie_${currentStreamId}`,
@@ -885,6 +899,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
           ...base,
           url: finalPlayUrl,
           duration: info.formattedDuration || base.duration,
+          durationSeconds: info.duration && info.duration > 0 ? info.duration : base.durationSeconds,
           dimensions: info.dimensions || base.dimensions,
           codec: info.codec || base.codec,
         };
@@ -892,6 +907,122 @@ export default function WatchView({ type, id }: WatchViewProps) {
     },
     [finalPlayUrl]
   );
+
+  const vodCacheKey = `${streamType}_${currentActiveId}`;
+  const needsApkVodProbe = Boolean(
+    streamUrl &&
+      !isLive &&
+      !isCurrentDownloaded &&
+      isNative &&
+      !streamUrl.toLowerCase().includes('.m3u8')
+  );
+  const isProbingVodSize = needsApkVodProbe && vodProbeReadyUrl !== streamUrl;
+  const effectivePlayUrl = isProbingVodSize ? '' : finalPlayUrl;
+
+  // Coleta tamanho via metadados JSON Xtream (Web e APK, zero conexões extras de stream) e cache local
+  useEffect(() => {
+    if (isLive || isCurrentDownloaded || !currentActiveId) return;
+    let cancelled = false;
+
+    const cached = getCachedVodSizeEntry(vodCacheKey);
+    if (cached && cached.bytes > 0) {
+      Promise.resolve().then(() => {
+        if (!cancelled) {
+          setVodHeadSize({ cacheKey: vodCacheKey, bytes: cached.bytes, approximate: cached.approximate });
+        }
+      });
+      if (!cached.approximate) {
+        return () => {
+          cancelled = true;
+        };
+      }
+    }
+
+    if (isMovie && config && (!vodMetadataPayload || vodMetadataPayload.streamId !== String(currentStreamId))) {
+      fetchIPTVApi(config, {
+        action: 'get_vod_info',
+        params: { vod_id: currentStreamId },
+      })
+        .then((data) => {
+          if (!cancelled && data) {
+            setVodMetadataPayload({ streamId: String(currentStreamId), payload: data });
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLive, isCurrentDownloaded, currentActiveId, vodCacheKey, isMovie, config, vodMetadataPayload, currentStreamId]);
+
+  // No APK Android, realiza 1 HEAD rápido pelo mesmo IP do aparelho ANTES de montar o player (nunca em paralelo)
+  useEffect(() => {
+    if (!needsApkVodProbe || !streamUrl) return;
+    let cancelled = false;
+
+    (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+
+      const cached = getCachedVodSizeEntry(vodCacheKey);
+      if (cached) {
+        if (cached.bytes > 0) {
+          setVodHeadSize({ cacheKey: vodCacheKey, bytes: cached.bytes, approximate: cached.approximate });
+        }
+        setVodProbeReadyUrl(streamUrl);
+        return;
+      }
+
+      try {
+        const bytes = await probeVodSizeViaCapacitorHead(streamUrl, 1000);
+        if (!cancelled) {
+          if (bytes && bytes > 0) {
+            setCachedVodSizeEntry(vodCacheKey, { bytes, approximate: false });
+            setVodHeadSize({ cacheKey: vodCacheKey, bytes, approximate: false });
+          } else {
+            setCachedVodSizeEntry(vodCacheKey, { bytes: 0, approximate: false });
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setVodProbeReadyUrl(streamUrl);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [needsApkVodProbe, streamUrl, vodCacheKey]);
+
+  const resolvedVodSize = useMemo(() => {
+    if (vodHeadSize && vodHeadSize.cacheKey === vodCacheKey && vodHeadSize.bytes > 0 && !vodHeadSize.approximate) {
+      return vodHeadSize;
+    }
+    const durationSecs = activeTechStats.durationSeconds || 0;
+    if (isSeries && activeEpisode) {
+      const fromEp = extractSizeFromXtreamPayload(activeEpisode, durationSecs);
+      if (fromEp) return fromEp;
+    }
+    if (isMovie && vodMetadataPayload && vodMetadataPayload.streamId === String(currentStreamId)) {
+      const fromVod = extractSizeFromXtreamPayload(vodMetadataPayload.payload, durationSecs);
+      if (fromVod) return fromVod;
+    }
+    if (vodHeadSize && vodHeadSize.cacheKey === vodCacheKey && vodHeadSize.bytes > 0) {
+      return vodHeadSize;
+    }
+    return null;
+  }, [
+    vodHeadSize,
+    vodCacheKey,
+    activeTechStats.durationSeconds,
+    isSeries,
+    activeEpisode,
+    isMovie,
+    vodMetadataPayload,
+    currentStreamId,
+  ]);
 
   const handlePlayerProgress = useCallback(
     ({ currentTime, duration, immediate }: { currentTime: number; duration: number; immediate?: boolean }) => {
@@ -995,15 +1126,18 @@ export default function WatchView({ type, id }: WatchViewProps) {
     return 'Carregando...';
   }, [activeTechStats.duration, isSeries, activeEpisode?.info?.duration, isLive]);
 
+  const offlineFileSize = activeOfflineDownload?.file_size;
   const displaySize = useMemo(() => {
     if (activeTechStats.size) return activeTechStats.size;
     if (isLive) return 'Fluxo Contínuo';
-    if (activeOfflineDownload?.file_size) {
-      const mb = activeOfflineDownload.file_size / (1024 * 1024);
-      return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`;
+    if (offlineFileSize) {
+      return formatVodSize(offlineFileSize, false);
+    }
+    if (resolvedVodSize && resolvedVodSize.bytes > 0) {
+      return formatVodSize(resolvedVodSize.bytes, resolvedVodSize.approximate);
     }
     return 'Sob demanda';
-  }, [activeTechStats.size, isLive, activeOfflineDownload?.file_size]);
+  }, [activeTechStats.size, isLive, offlineFileSize, resolvedVodSize]);
 
   const displayDimensions = useMemo(() => {
     if (activeTechStats.dimensions) return activeTechStats.dimensions;
@@ -1489,9 +1623,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
                   Tentar Novamente
                 </button>
               </div>
-            ) : finalPlayUrl ? (
+            ) : isProbingVodSize ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
+                <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-neutral-400 font-medium">Preparando reprodução...</p>
+              </div>
+            ) : effectivePlayUrl ? (
               <VideoPlayer
-                streamUrl={finalPlayUrl}
+                streamUrl={effectivePlayUrl}
                 fallbackStreamUrls={isCurrentDownloaded ? undefined : fallbackStreamUrls}
                 title={playerTitle}
                 streamId={currentActiveId}
