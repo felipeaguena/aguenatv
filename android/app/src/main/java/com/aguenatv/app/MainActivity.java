@@ -9,6 +9,7 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.view.View;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -699,12 +700,46 @@ public class MainActivity extends BridgeActivity {
                             v.setPadding(0, 0, 0, 0);
                             return insets;
                         }
-                        Insets bars = insets.getInsets(
+                        Insets sysBars = insets.getInsets(
                             WindowInsetsCompat.Type.systemBars()
                             | WindowInsetsCompat.Type.displayCutout()
-                            | WindowInsetsCompat.Type.ime()
                         );
-                        v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                        Insets imeInsets = insets.getInsets(WindowInsetsCompat.Type.ime());
+
+                        // Desconta qualquer padding já aplicado em ancestrais (ex: plugins/OEM/adjustResize)
+                        // para impedir encolhimento duplicado da WebView ao abrir o teclado
+                        int ancestorLeft = 0;
+                        int ancestorTop = 0;
+                        int ancestorRight = 0;
+                        int ancestorBottom = 0;
+                        for (ViewParent parent = v.getParent(); parent instanceof View; parent = parent.getParent()) {
+                            View p = (View) parent;
+                            ancestorLeft += Math.max(0, p.getPaddingLeft());
+                            ancestorTop += Math.max(0, p.getPaddingTop());
+                            ancestorRight += Math.max(0, p.getPaddingRight());
+                            ancestorBottom += Math.max(0, p.getPaddingBottom());
+                        }
+
+                        int desiredBottom = Math.max(sysBars.bottom, imeInsets.bottom);
+                        int padLeft = Math.max(0, sysBars.left - ancestorLeft);
+                        int padTop = Math.max(0, sysBars.top - ancestorTop);
+                        int padRight = Math.max(0, sysBars.right - ancestorRight);
+                        int padBottom = Math.max(0, desiredBottom - ancestorBottom);
+
+                        // Trava de segurança: em retrato com teclado aberto, impede que inset anômalo esmague a WebView
+                        View root = v.getRootView();
+                        int rootHeight = root != null ? root.getHeight() : 0;
+                        int rootWidth = root != null ? root.getWidth() : 0;
+                        if (rootHeight > rootWidth && rootHeight > 0 && imeInsets.bottom > 0) {
+                            float density = v.getResources().getDisplayMetrics().density;
+                            int minUsefulHeightPx = Math.max((int) (260 * density), (int) (rootHeight * 0.35f));
+                            int maxAllowedBottom = Math.max(0, rootHeight - ancestorTop - padTop - ancestorBottom - minUsefulHeightPx);
+                            if (padBottom > maxAllowedBottom) {
+                                padBottom = maxAllowedBottom;
+                            }
+                        }
+
+                        v.setPadding(padLeft, padTop, padRight, padBottom);
                         return WindowInsetsCompat.CONSUMED;
                     });
                     ViewCompat.requestApplyInsets(contentView);
