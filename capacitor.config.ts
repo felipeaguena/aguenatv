@@ -29,6 +29,11 @@ const config: CapacitorConfig = {
       // Habilita requisições HTTP nativas do Android, contornando 100% dos bloqueios de CORS do navegador
       enabled: true,
     },
+    SystemBars: {
+      // MainActivity.java já gerencia edge-to-edge, fullscreen YouTube-style e teclado (IME); desativa insetsHandling para evitar padding duplo do teclado
+      insetsHandling: 'disable',
+      style: 'DARK',
+    },
   },
 };
 
