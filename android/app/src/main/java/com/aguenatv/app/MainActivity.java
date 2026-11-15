@@ -12,6 +12,8 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -56,6 +58,7 @@ public class MainActivity extends BridgeActivity {
     private SwipeRefreshLayout swipeRefreshLayout;
 
     private boolean isCutoutFullscreenActive = false;
+    private boolean lastAppliedFullscreen = false;
     private volatile boolean pullToRefreshBlockedByJs = false;
 
     private static final int SYSTEM_BAR_COLOR_DARK = Color.parseColor("#0b0c10");
@@ -254,87 +257,98 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void reapplyFullscreenBarsOnly() {
+        try {
+            Window window = getWindow();
+            if (window == null) return;
+            View decorView = window.getDecorView();
+            WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
+            if (controller != null) {
+                controller.hide(WindowInsetsCompat.Type.systemBars());
+                controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                decorView.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                );
+            }
+        } catch (Exception ignored) {}
+    }
+
     public void applyCutoutFullscreen(boolean enable) {
         runOnUiThread(() -> {
             try {
                 Window window = getWindow();
                 if (window == null) return;
                 View decorView = window.getDecorView();
-
-                window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS | WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    window.setNavigationBarContrastEnforced(false);
-                    window.setStatusBarContrastEnforced(false);
-                }
+                View contentView = findViewById(android.R.id.content);
 
                 if (enable) {
                     if (swipeRefreshLayout != null) {
                         swipeRefreshLayout.setRefreshing(false);
                         swipeRefreshLayout.setEnabled(false);
                     }
-                    // 1. Edge-to-Edge: desenhar sob 100% da barra de navegação e status (o vídeo cobre tudo)
-                    WindowCompat.setDecorFitsSystemWindows(window, false);
 
-                    // 2. Sobrepor o notch / entalhe da câmera em qualquer orientação (API 30+ usa ALWAYS, API 28-29 usa SHORT_EDGES)
+                    // 1. Sobrepor o notch / entalhe da câmera em qualquer orientação (API 30+ ALWAYS, API 28-29 SHORT_EDGES)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         WindowManager.LayoutParams params = window.getAttributes();
-                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-                        window.setAttributes(params);
+                        if (params.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS) {
+                            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+                            window.setAttributes(params);
+                        }
                     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         WindowManager.LayoutParams params = window.getAttributes();
-                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-                        window.setAttributes(params);
-                    }
-
-                    // 3. Fundo 100% preto absoluto na janela e views para eliminar qualquer barra cinza residual do notch
-                    window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
-                    decorView.setBackgroundColor(Color.BLACK);
-                    try {
-                        WebView wv = getBridge().getWebView();
-                        if (wv != null) {
-                            wv.setBackgroundColor(Color.BLACK);
-                            wv.setPadding(0, 0, 0, 0);
+                        if (params.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES) {
+                            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                            window.setAttributes(params);
                         }
-                        if (swipeRefreshLayout != null) {
-                            swipeRefreshLayout.setBackgroundColor(Color.BLACK);
-                            swipeRefreshLayout.setPadding(0, 0, 0, 0);
+                    }
+
+                    // 2. Zera o padding do container raiz para que a WebView cubra 100% inclusive o notch (780x360 no S23)
+                    if (contentView != null) {
+                        contentView.setBackgroundColor(Color.BLACK);
+                        contentView.setPadding(0, 0, 0, 0);
+                    }
+
+                    if (!lastAppliedFullscreen) {
+                        window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+                        decorView.setBackgroundColor(Color.BLACK);
+                        try {
+                            WebView wv = getBridge().getWebView();
+                            if (wv != null) {
+                                wv.setBackgroundColor(Color.BLACK);
+                                wv.setPadding(0, 0, 0, 0);
+                            }
+                            if (swipeRefreshLayout != null) {
+                                swipeRefreshLayout.setBackgroundColor(Color.BLACK);
+                                swipeRefreshLayout.setPadding(0, 0, 0, 0);
+                            }
+                        } catch (Exception ignored) {}
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            window.setStatusBarColor(Color.TRANSPARENT);
+                            window.setNavigationBarColor(Color.TRANSPARENT);
                         }
-                    } catch (Exception ignored) {}
-
-                    // 4. Torna a barra de navegação e status 100% transparentes para não sobrepor o vídeo
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        window.setStatusBarColor(Color.TRANSPARENT);
-                        window.setNavigationBarColor(Color.TRANSPARENT);
                     }
 
-                    // 5. Oculta barra de status e navegação com Auto-Hide imersivo (swipe temporário)
-                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, decorView);
-                    if (controller != null) {
-                        controller.hide(WindowInsetsCompat.Type.systemBars());
-                        controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                        controller.setAppearanceLightStatusBars(false);
-                        controller.setAppearanceLightNavigationBars(false);
+                    // 3. Oculta barras com overlay transiente ao deslizar (sem gerar layout shift)
+                    reapplyFullscreenBarsOnly();
+                    if (contentView != null && !lastAppliedFullscreen) {
+                        ViewCompat.requestApplyInsets(contentView);
                     }
-
-                    // 6. Flags de fallback para garantir 100% de imersão em qualquer versão do Android
-                    decorView.setSystemUiVisibility(
-                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    );
+                    lastAppliedFullscreen = true;
                 } else {
-                    // Restauração das barras fora do fullscreen: cor escura #0b0c10 igual ao fundo do app
-                    WindowCompat.setDecorFitsSystemWindows(window, true);
-
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         WindowManager.LayoutParams params = window.getAttributes();
-                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
-                        window.setAttributes(params);
+                        if (params.layoutInDisplayCutoutMode != WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT) {
+                            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+                            window.setAttributes(params);
+                        }
                     }
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -342,6 +356,9 @@ public class MainActivity extends BridgeActivity {
                         window.setNavigationBarColor(SYSTEM_BAR_COLOR_DARK);
                     }
 
+                    if (contentView != null) {
+                        contentView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
+                    }
                     window.setBackgroundDrawable(new ColorDrawable(SYSTEM_BAR_COLOR_DARK));
                     decorView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
                     try {
@@ -357,7 +374,15 @@ public class MainActivity extends BridgeActivity {
                         controller.setAppearanceLightNavigationBars(false);
                     }
 
-                    decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                        decorView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+                    }
+
+                    if (contentView != null && lastAppliedFullscreen) {
+                        ViewCompat.requestApplyInsets(contentView);
+                    }
+                    lastAppliedFullscreen = false;
+
                     if (swipeRefreshLayout != null && !isTvApp() && !pullToRefreshBlockedByJs) {
                         try {
                             WebView wv = getBridge().getWebView();
@@ -376,7 +401,7 @@ public class MainActivity extends BridgeActivity {
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         if (isCutoutFullscreenActive) {
-            applyCutoutFullscreen(true);
+            reapplyFullscreenBarsOnly();
         }
     }
 
@@ -645,6 +670,8 @@ public class MainActivity extends BridgeActivity {
         try {
             Window window = getWindow();
             if (window != null) {
+                // Edge-to-Edge fixo uma única vez no ciclo de vida (evita layout shift ao puxar barras do sistema)
+                WindowCompat.setDecorFitsSystemWindows(window, false);
                 window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
                 window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS | WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -662,6 +689,25 @@ public class MainActivity extends BridgeActivity {
                 if (controller != null) {
                     controller.setAppearanceLightStatusBars(false);
                     controller.setAppearanceLightNavigationBars(false);
+                }
+
+                View contentView = findViewById(android.R.id.content);
+                if (contentView != null) {
+                    contentView.setBackgroundColor(SYSTEM_BAR_COLOR_DARK);
+                    ViewCompat.setOnApplyWindowInsetsListener(contentView, (v, insets) -> {
+                        if (isCutoutFullscreenActive) {
+                            v.setPadding(0, 0, 0, 0);
+                            return insets;
+                        }
+                        Insets bars = insets.getInsets(
+                            WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout()
+                            | WindowInsetsCompat.Type.ime()
+                        );
+                        v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                        return WindowInsetsCompat.CONSUMED;
+                    });
+                    ViewCompat.requestApplyInsets(contentView);
                 }
             }
         } catch (Exception ignored) {}
@@ -1142,12 +1188,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) {
-            if (isCutoutFullscreenActive) {
-                applyCutoutFullscreen(true);
-            } else {
-                applyCutoutFullscreen(false);
-            }
+        if (hasFocus && isCutoutFullscreenActive) {
+            reapplyFullscreenBarsOnly();
         }
     }
 
@@ -1156,9 +1198,7 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         startLocalVideoServer();
         if (isCutoutFullscreenActive) {
-            applyCutoutFullscreen(true);
-        } else {
-            applyCutoutFullscreen(false);
+            reapplyFullscreenBarsOnly();
         }
         try {
             WebView webView = getBridge().getWebView();

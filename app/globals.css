@@ -22,6 +22,15 @@
   }
 }
 
+/* Utilitários reais de Safe Area para barras fixas no mobile/APK */
+.safe-area-pb {
+  padding-bottom: max(6px, env(safe-area-inset-bottom, 0px));
+}
+
+.safe-area-pt {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 /* Custom Glassmorphism and Miruro Aesthetic Utilities */
 .glass-panel {
   background: rgba(19, 20, 27, 0.75);
@@ -100,10 +109,8 @@ body.art-immersive-active {
 .artplayer-app.art-fullscreen-web,
 .art-video-player.art-fullscreen,
 .art-video-player.art-fullscreen-web {
-  width: 100vw !important;
-  width: 100dvw !important;
-  height: 100vh !important;
-  height: 100dvh !important;
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   margin: 0 !important;
@@ -240,21 +247,21 @@ body:has(.art-fullscreen-web) nav {
   display: none !important;
 }
 
-/* Protege os controles contra o recorte físico do notch sem criar barras pretas no vídeo */
+/* Controles estilo YouTube: recuo simétrico nas duas laterais protegendo contra o notch sem shift vertical */
 .artplayer-app.art-fullscreen .art-bottom,
 .artplayer-app.art-fullscreen-web .art-bottom,
 .art-video-player.art-fullscreen .art-bottom,
 .art-video-player.art-fullscreen-web .art-bottom {
-  padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
-  padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
-  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+  padding-left: max(16px, calc(max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)) + 8px)) !important;
+  padding-right: max(16px, calc(max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)) + 8px)) !important;
+  padding-bottom: 12px !important;
 }
 
 .artplayer-app.art-fullscreen .art-top,
 .artplayer-app.art-fullscreen-web .art-top,
 .art-video-player.art-fullscreen .art-top,
 .art-video-player.art-fullscreen-web .art-top {
-  padding-left: max(16px, env(safe-area-inset-left, 0px)) !important;
-  padding-right: max(16px, env(safe-area-inset-right, 0px)) !important;
-  padding-top: max(12px, env(safe-area-inset-top, 0px)) !important;
+  padding-left: max(16px, calc(max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)) + 8px)) !important;
+  padding-right: max(16px, calc(max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)) + 8px)) !important;
+  padding-top: 12px !important;
 }

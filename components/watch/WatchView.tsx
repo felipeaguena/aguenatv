@@ -163,10 +163,14 @@ export default function WatchView({ type, id }: WatchViewProps) {
     const checkSize = () => {
       const desktop = typeof window !== 'undefined' && window.innerWidth >= 1024;
       setIsDesktop(desktop);
+      if (!desktop) {
+        setPlayerHeight(null);
+        return;
+      }
       if (playerContainerRef.current) {
         const width = playerContainerRef.current.clientWidth;
         if (width > 0) {
-          // Altura exata da proporcao 16:9 widescreen do player de video
+          // Altura exata da proporcao 16:9 widescreen do player de video no desktop
           const exactVideoHeight = Math.round((width * 9) / 16);
           setPlayerHeight(exactVideoHeight);
         }

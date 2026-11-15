@@ -92,12 +92,6 @@ function isMobileDevice(): boolean {
 function setDynamicViewportCover(enable: boolean) {
   if (typeof document === 'undefined') return;
   try {
-    let meta = document.querySelector('meta[name="viewport"]');
-    if (!meta) {
-      meta = document.createElement('meta');
-      meta.setAttribute('name', 'viewport');
-      document.head.appendChild(meta);
-    }
     let themeMeta = document.querySelector('meta[name="theme-color"]');
     if (!themeMeta) {
       themeMeta = document.createElement('meta');
@@ -105,18 +99,10 @@ function setDynamicViewportCover(enable: boolean) {
       document.head.appendChild(themeMeta);
     }
     if (enable) {
-      meta.setAttribute(
-        'content',
-        'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
-      );
       themeMeta.setAttribute('content', '#000000');
       document.documentElement.classList.add('art-immersive-active');
       document.body.classList.add('art-immersive-active');
     } else {
-      meta.setAttribute(
-        'content',
-        'width=device-width, initial-scale=1, maximum-scale=1'
-      );
       themeMeta.setAttribute('content', '#0b0c10');
       document.documentElement.classList.remove('art-immersive-active');
       document.body.classList.remove('art-immersive-active');
@@ -127,22 +113,29 @@ function setDynamicViewportCover(enable: boolean) {
 async function setFullscreenCutoutMode(enable: boolean) {
   setDynamicViewportCover(enable);
 
-  // 1. Bridge nativa do Android (LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES e ocultação de barras)
-  try {
-    if (typeof window !== 'undefined' && (window as any).AndroidBridge?.setCutoutFullscreen) {
-      (window as any).AndroidBridge.setCutoutFullscreen(enable);
-    }
-  } catch (e) {}
+  // 1. Bridge nativa do Android é a fonte única de verdade para cutout, insets e barras do sistema (evita corrida com StatusBar plugin)
+  const hasAndroidBridge =
+    typeof window !== 'undefined' && typeof (window as any).AndroidBridge?.setCutoutFullscreen === 'function';
 
-  // 2. Plugins Capacitor (StatusBar e ScreenOrientation)
+  if (hasAndroidBridge) {
+    try {
+      (window as any).AndroidBridge.setCutoutFullscreen(enable);
+    } catch (e) {}
+  }
+
+  // 2. Plugins Capacitor: gerencia orientação; StatusBar só é chamado se não houver AndroidBridge
   if (Capacitor.isNativePlatform()) {
     try {
       if (enable) {
-        await StatusBar.hide().catch(() => {});
+        if (!hasAndroidBridge) {
+          await StatusBar.hide().catch(() => {});
+        }
         await ScreenOrientation.lock({ orientation: 'landscape' }).catch(() => {});
       } else {
-        await StatusBar.show().catch(() => {});
-        await StatusBar.setBackgroundColor({ color: '#0b0c10' }).catch(() => {});
+        if (!hasAndroidBridge) {
+          await StatusBar.show().catch(() => {});
+          await StatusBar.setBackgroundColor({ color: '#0b0c10' }).catch(() => {});
+        }
         await ScreenOrientation.unlock().catch(() => {});
       }
     } catch (e) {}
