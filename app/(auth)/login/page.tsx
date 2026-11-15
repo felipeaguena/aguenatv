@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Tv, Lock, User, AlertCircle, ShieldAlert, Sparkles, Server } from 'lucide-react';
 
 export default function LoginPage() {
@@ -12,12 +12,17 @@ export default function LoginPage() {
   const [isBlocked, setIsBlocked] = useState(false);
   const [remainingMinutes, setRemainingMinutes] = useState<number | null>(null);
   const [savedServer, setSavedServer] = useState<string | null>(null);
+  const usernameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const server = localStorage.getItem('aguenatv_server_url');
       if (server) {
         setSavedServer(server);
+      }
+      // Auto-foco apenas no desktop para não abrir o teclado virtual de forma abrupta no mobile/APK
+      if (window.innerWidth >= 1024) {
+        usernameInputRef.current?.focus();
       }
     }
   }, []);
@@ -70,12 +75,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 bg-[#0b0c10] relative overflow-hidden">
+    <div className="min-h-dvh w-full flex flex-col items-center p-4 bg-[#0b0c10] relative overflow-y-auto">
       {/* Luzes de Fundo Atmosféricas / Efeito Miruro */}
-      <div className="absolute top-1/4 -left-20 w-96 h-96 bg-violet-600/15 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-600/15 rounded-full blur-[120px] pointer-events-none" />
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 -left-20 w-96 h-96 bg-violet-600/15 rounded-full blur-[120px]" />
+        <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-600/15 rounded-full blur-[120px]" />
+      </div>
 
-      <div className="relative w-full max-w-sm">
+      <div className="relative w-full max-w-sm my-auto">
         {/* Card de Login Glassmorphism */}
         <div className="glass-panel rounded-3xl p-8 shadow-2xl relative overflow-hidden">
           <div className="text-center mb-8">
@@ -136,15 +143,15 @@ export default function LoginPage() {
               <div className="relative">
                 <User className="w-4 h-4 text-neutral-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={usernameInputRef}
                   type="text"
                   placeholder="Nome de usuário"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={loading || isBlocked}
                   required
-                  autoFocus
                   autoComplete="username"
-                  className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
+                  className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-base sm:text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
                 />
               </div>
             </div>
@@ -163,7 +170,7 @@ export default function LoginPage() {
                   disabled={loading || isBlocked}
                   required
                   autoComplete="current-password"
-                  className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
+                  className="w-full bg-[#0b0c10] border border-white/10 hover:border-violet-500/40 focus:border-violet-500 rounded-xl pl-9 pr-3.5 py-2.5 text-base sm:text-xs text-white placeholder:text-neutral-600 focus:outline-none transition disabled:opacity-50"
                 />
               </div>
             </div>
