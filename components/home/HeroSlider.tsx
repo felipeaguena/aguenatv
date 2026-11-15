@@ -139,7 +139,7 @@ export default function HeroSlider({ items, onSyncClick }: HeroSliderProps) {
       </div>
 
       {/* Conteúdo Principal do Slide */}
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14 sm:pb-16 w-full z-10 flex flex-col items-start gap-4">
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 sm:pt-20 pb-10 sm:pb-14 w-full z-10 flex flex-col items-start gap-4">
         {/* Badges de Identificação e Categoria */}
         <div className="flex flex-wrap items-center gap-2">
           <span className="px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider bg-violet-600 text-white shadow-lg shadow-violet-600/30 flex items-center gap-1.5">
@@ -207,11 +207,20 @@ export default function HeroSlider({ items, onSyncClick }: HeroSliderProps) {
         </div>
       </div>
 
-      {/* CONTROLES NO CANTO DIREITO INFERIOR (Requisito Explícito do Usuário) */}
-      <div className="absolute bottom-5 sm:bottom-7 right-4 sm:right-8 z-30 flex flex-col items-end gap-3 pointer-events-auto">
+      {/* Controles no canto superior direito: Slide Anterior + Contagem + Próximo Slide */}
+      <div className="absolute top-4 sm:top-6 right-4 sm:right-8 z-30 flex items-center gap-2 pointer-events-auto">
+        {/* Botão Anterior */}
+        <button
+          onClick={prevSlide}
+          aria-label="Slide anterior"
+          className="p-2.5 sm:p-3 rounded-2xl bg-black/60 hover:bg-violet-600/80 border border-white/10 hover:border-violet-500/50 text-white transition-all backdrop-blur-md cursor-pointer hover:scale-105 active:scale-95 shadow-xl group"
+        >
+          <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-0.5 transition-transform" />
+        </button>
+
         {/* Indicador de Slide Numérico (Ex: 01 / 10) */}
-        <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-white/10 text-xs shadow-xl">
-          <span className="font-mono font-black text-white text-sm">
+        <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-3.5 py-2 sm:py-2.5 rounded-2xl border border-white/10 text-xs shadow-xl">
+          <span className="font-mono font-black text-white text-xs sm:text-sm">
             {String(currentIndex + 1).padStart(2, '0')}
           </span>
           <span className="text-neutral-500 font-mono text-xs">/</span>
@@ -220,42 +229,14 @@ export default function HeroSlider({ items, onSyncClick }: HeroSliderProps) {
           </span>
         </div>
 
-        {/* Botões de Navegação Prev/Next e Barra de Indicadores */}
-        <div className="flex items-center gap-2">
-          {/* Botão Anterior */}
-          <button
-            onClick={prevSlide}
-            aria-label="Slide anterior"
-            className="p-2.5 sm:p-3 rounded-2xl bg-black/60 hover:bg-violet-600/80 border border-white/10 hover:border-violet-500/50 text-white transition-all backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95 shadow-xl group"
-          >
-            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 group-hover:-translate-x-0.5 transition-transform" />
-          </button>
-
-          {/* Indicadores Visuais de Cada Slide */}
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-black/60 backdrop-blur-md border border-white/10 shadow-xl">
-            {items.map((_, idx) => (
-              <button
-                key={`dot_${idx}`}
-                onClick={() => setCurrentIndex(idx)}
-                aria-label={`Ir para slide ${idx + 1}`}
-                className={`transition-all duration-300 rounded-full cursor-pointer ${
-                  idx === currentIndex
-                    ? 'w-6 h-1.5 bg-violet-500 shadow-md shadow-violet-500/50'
-                    : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/60'
-                }`}
-              />
-            ))}
-          </div>
-
-          {/* Botão Próximo */}
-          <button
-            onClick={nextSlide}
-            aria-label="Próximo slide"
-            className="p-2.5 sm:p-3 rounded-2xl bg-black/60 hover:bg-violet-600/80 border border-white/10 hover:border-violet-500/50 text-white transition-all backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95 shadow-xl group"
-          >
-            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-0.5 transition-transform" />
-          </button>
-        </div>
+        {/* Botão Próximo */}
+        <button
+          onClick={nextSlide}
+          aria-label="Próximo slide"
+          className="p-2.5 sm:p-3 rounded-2xl bg-black/60 hover:bg-violet-600/80 border border-white/10 hover:border-violet-500/50 text-white transition-all backdrop-blur-md cursor-pointer hover:scale-105 active:scale-95 shadow-xl group"
+        >
+          <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 group-hover:translate-x-0.5 transition-transform" />
+        </button>
       </div>
     </section>
   );
