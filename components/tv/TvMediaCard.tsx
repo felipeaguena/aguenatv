@@ -2,23 +2,40 @@
 
 import { useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Play, Info, Tv, Star, Heart } from 'lucide-react';
+import { Play, Info, Tv, Star, Heart, CheckCircle2 } from 'lucide-react';
 import { BaseStreamItem } from '@/lib/types';
-import { getWatchUrl, getInfoUrl } from '@/lib/routes';
+import { getTvWatchUrl, getTvInfoUrl } from '@/lib/tv-routes';
 import { useFavorites } from '@/hooks/useFavorites';
+import { useWatched } from '@/hooks/useWatched';
 import ImageWithFallback from '@/components/ui/ImageWithFallback';
-import { cleanCategoryName } from '@/lib/stream-utils';
+import { cleanCategoryName, isRecentlyAdded } from '@/lib/stream-utils';
 
 interface TvMediaCardProps {
   item: BaseStreamItem;
+  isNew?: boolean;
+  onFocusItem?: (item: BaseStreamItem) => void;
+  onSelect?: (item: BaseStreamItem) => void;
+  autoFocus?: boolean;
 }
 
-export default function TvMediaCard({ item }: TvMediaCardProps) {
+export default function TvMediaCard({
+  item,
+  isNew,
+  onFocusItem,
+  onSelect,
+  autoFocus = false,
+}: TvMediaCardProps) {
   const router = useRouter();
   const { isFavorite } = useFavorites();
+  const { isWatched } = useWatched();
 
   const isLive = item.stream_type === 'live';
   const favorited = isFavorite(item.stream_id, item.stream_type);
+  const watched = !isLive && isWatched(item.stream_id, item.stream_type);
+  const extraItem = item as BaseStreamItem & { isNew?: boolean; is_new?: boolean };
+  const isItemNew = Boolean(
+    !isLive && (isNew || extraItem.isNew || extraItem.is_new || isRecentlyAdded(item))
+  );
 
   const cleanIcon =
     item.stream_icon &&
@@ -30,17 +47,20 @@ export default function TvMediaCard({ item }: TvMediaCardProps) {
       : null;
 
   const resolutionTag = useMemo(() => {
-    if (!isLive) return null;
     const text = `${item.title || ''} ${item.name || ''}`;
     const match = text.match(/\b(4K|UHD|FHD|1080p|720p|60FPS)\b/i);
     return match ? match[0].toUpperCase() : null;
-  }, [isLive, item.title, item.name]);
+  }, [item.title, item.name]);
 
   const handleAction = () => {
+    if (onSelect) {
+      onSelect(item);
+      return;
+    }
     if (isLive) {
-      router.push(getWatchUrl(item.stream_type, item.stream_id));
+      router.push(getTvWatchUrl(item.stream_type, item.stream_id));
     } else {
-      router.push(getInfoUrl(item.stream_type, item.stream_id));
+      router.push(getTvInfoUrl(item.stream_type, item.stream_id));
     }
   };
 
@@ -49,16 +69,24 @@ export default function TvMediaCard({ item }: TvMediaCardProps) {
       tabIndex={0}
       role="button"
       data-tv-focusable="true"
+      data-tv-focus="card"
+      data-tv-autofocus={autoFocus ? 'true' : undefined}
       onClick={handleAction}
+      onFocus={() => onFocusItem?.(item)}
+      onMouseEnter={() => onFocusItem?.(item)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
           handleAction();
         }
       }}
-      className="tv-card group relative flex flex-col rounded-2xl overflow-hidden cursor-pointer bg-[#12131a] border border-white/10 transition-all duration-200 focus:outline-none shrink-0"
+      className={`tv-card group relative flex flex-col rounded-2xl overflow-hidden cursor-pointer bg-[#12131c] border transition-all duration-200 focus:outline-none shrink-0 ${
+        watched
+          ? 'border-emerald-500/70 shadow-[0_0_14px_rgba(16,185,129,0.2)]'
+          : 'border-white/10'
+      }`}
     >
-      {/* Imagem / Poster com proporção 16:9 widescreen para TV ao vivo ou 3:4 para filmes/séries */}
+      {/* Imagem / Poster */}
       <div className={`relative w-full bg-[#0a0a0f] overflow-hidden ${isLive ? 'aspect-video' : 'aspect-[3/4]'}`}>
         {isLive ? (
           <>
@@ -112,9 +140,16 @@ export default function TvMediaCard({ item }: TvMediaCardProps) {
           </>
         )}
 
-        {/* Badges superiores (AO VIVO, 4K, Favorito) */}
-        <div className="absolute top-2 left-2 right-2 z-20 flex items-center justify-between pointer-events-none">
-          <div className="flex items-center gap-1.5 truncate">
+        {/* Overlay de ação ao focar ou passar mouse */}
+        <div className="absolute inset-0 z-10 flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity bg-black/35 pointer-events-none">
+          <div className="w-11 h-11 rounded-full bg-violet-600/95 text-white flex items-center justify-center shadow-xl shadow-violet-600/40 border border-white/20">
+            {isLive ? <Play className="w-5 h-5 fill-white ml-0.5" /> : <Info className="w-5 h-5" />}
+          </div>
+        </div>
+
+        {/* Badges superiores */}
+        <div className="absolute top-2 left-2 right-2 z-20 flex items-center justify-between gap-1 pointer-events-none">
+          <div className="flex items-center gap-1 truncate">
             {isLive ? (
               <>
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-rose-600 text-white shadow-md">
@@ -122,39 +157,58 @@ export default function TvMediaCard({ item }: TvMediaCardProps) {
                   AO VIVO
                 </span>
                 {resolutionTag && (
-                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-black/60 text-neutral-200 border border-white/15">
+                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-black/70 text-neutral-200 border border-white/15">
                     {resolutionTag}
                   </span>
                 )}
               </>
             ) : (
-              item.rating && Number(item.rating) > 0 && (
-                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-black/60 text-amber-300 border border-white/15">
-                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                  {item.rating}
-                </span>
-              )
+              <>
+                {isItemNew && (
+                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded tracking-wider bg-emerald-500 text-black shadow">
+                    NOVO
+                  </span>
+                )}
+                {resolutionTag === '4K' || resolutionTag === 'UHD' ? (
+                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-amber-500/25 text-amber-300 border border-amber-500/40">
+                    4K
+                  </span>
+                ) : null}
+                {item.rating && Number(item.rating) > 0 ? (
+                  <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-black/70 text-amber-300 border border-white/15">
+                    <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                    {Number(item.rating).toFixed(1)}
+                  </span>
+                ) : null}
+              </>
             )}
           </div>
 
-          {favorited && (
-            <div className="p-1 rounded-md bg-rose-600 text-white shadow">
-              <Heart className="w-3 h-3 fill-white" />
-            </div>
-          )}
+          <div className="flex items-center gap-1 shrink-0">
+            {watched && (
+              <div className="p-1 rounded-md bg-emerald-600 text-white shadow">
+                <CheckCircle2 className="w-3 h-3" />
+              </div>
+            )}
+            {favorited && (
+              <div className="p-1 rounded-md bg-rose-600 text-white shadow">
+                <Heart className="w-3 h-3 fill-white" />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Detalhes do Card */}
       <div className="p-3 flex flex-col justify-between flex-1">
-        <h3 className="text-xs sm:text-sm font-bold text-neutral-100 line-clamp-1 group-focus:text-violet-400">
+        <h3 className="text-xs sm:text-sm font-bold text-neutral-100 line-clamp-1 group-focus:text-violet-300 group-hover:text-violet-300 transition-colors">
           {item.title || item.name}
         </h3>
-        <div className="flex items-center justify-between text-[11px] text-neutral-400 mt-1">
-          <span className="truncate max-w-[130px]">
-            {cleanCategoryName(item.category_name) || item.category_name || (isLive ? 'Canal' : 'Geral')}
+        <div className="flex items-center justify-between text-[11px] text-neutral-400 mt-1 gap-2">
+          <span className="truncate">
+            {cleanCategoryName(item.category_name || '') || item.category_name || (isLive ? 'Canal' : 'Geral')}
           </span>
-          <span className="text-[10px] font-semibold text-violet-400 flex items-center gap-1">
+          <span className="text-[10px] font-bold text-violet-400 shrink-0">
             {isLive ? 'Assistir' : 'Detalhes'}
           </span>
         </div>

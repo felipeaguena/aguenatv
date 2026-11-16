@@ -1,14 +1,14 @@
 /* =========================================================================
-   ESTILOS EXCLUSIVOS DO MODO ANDROID TV & TABLET (ESCOPO .tv-root)
-   Garante 0% de interferência na versão mobile de celulares
+   ESTILOS EXCLUSIVOS DO MODO ANDROID TV, TABLET & APK DESKTOP (.tv-root)
+   Garante 0% de interferência nas páginas Mobile e Desktop padrão
    ========================================================================= */
 
 @keyframes tv-pulse-glow-scoped {
   0%, 100% {
-    box-shadow: 0 0 22px rgba(139, 92, 246, 0.75), 0 0 6px rgba(139, 92, 246, 0.5);
+    box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.9), 0 0 22px rgba(139, 92, 246, 0.55);
   }
   50% {
-    box-shadow: 0 0 38px rgba(139, 92, 246, 1), 0 0 16px rgba(167, 139, 250, 0.8);
+    box-shadow: 0 0 0 2px rgba(167, 139, 250, 1), 0 0 32px rgba(139, 92, 246, 0.85);
   }
 }
 
@@ -19,36 +19,73 @@
   color: #f8fafc;
 }
 
-/* Foco D-Pad Neon com zoom e realce violeta */
-.tv-root :focus-visible,
-.tv-root .tv-focused,
-.tv-root [data-tv-focusable="true"]:focus,
-.tv-root button:focus,
-.tv-root a:focus {
-  outline: 3px solid #8b5cf6 !important;
-  outline-offset: 4px !important;
-  transform: scale(1.06) !important;
-  animation: tv-pulse-glow-scoped 2s infinite ease-in-out !important;
-  z-index: 40 !important;
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease !important;
+.tv-root input,
+.tv-root textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-/* Em telas com controle remoto, desativa hover sticky */
-.tv-root .tv-card:hover {
-  transform: none;
-}
-
+/* Foco D-Pad/Teclado para Cards (efeito Netflix com elevação e brilho sem cortar layout) */
 .tv-root .tv-card:focus,
-.tv-root .tv-card:focus-visible {
-  transform: scale(1.08) !important;
-  border-color: #8b5cf6 !important;
+.tv-root .tv-card:focus-visible,
+.tv-root [data-tv-focus="card"]:focus,
+.tv-root [data-tv-focus="card"]:focus-visible {
+  outline: none !important;
+  border-color: #a78bfa !important;
+  transform: scale(1.05) translateY(-2px) !important;
+  animation: tv-pulse-glow-scoped 2s infinite ease-in-out !important;
+  z-index: 35 !important;
 }
 
-/* Oculta scrollbars feias na TV mantendo rolagem suave */
-.tv-root .tv-scroll-row {
+/* Hover suave apenas quando usando mouse/touch (APK em Desktop & Tablet) */
+.tv-root.tv-input-pointer .tv-card:hover {
+  border-color: rgba(139, 92, 246, 0.65);
+  transform: translateY(-3px) scale(1.025);
+  box-shadow: 0 14px 28px -8px rgba(0, 0, 0, 0.75), 0 0 18px rgba(139, 92, 246, 0.25);
+}
+
+/* Foco para botões, pílulas e itens de navegação (sem zoom excessivo que distorce sidebars) */
+.tv-root [data-tv-focus="button"]:focus,
+.tv-root [data-tv-focus="button"]:focus-visible,
+.tv-root [data-tv-focus="pill"]:focus,
+.tv-root [data-tv-focus="pill"]:focus-visible,
+.tv-root [data-tv-focus="nav"]:focus,
+.tv-root [data-tv-focus="nav"]:focus-visible,
+.tv-root [data-tv-focus="key"]:focus,
+.tv-root [data-tv-focus="key"]:focus-visible {
+  outline: 2px solid #a78bfa !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.5) !important;
+  z-index: 30 !important;
+}
+
+.tv-root [data-tv-focus="button"]:focus {
+  transform: scale(1.03);
+}
+
+/* Foco limpo para inputs */
+.tv-root [data-tv-focus="input"]:focus,
+.tv-root input:focus {
+  outline: none !important;
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25) !important;
+}
+
+/* Fallback de foco acessível para links/botões sem data-tv-focus explícito */
+.tv-root.tv-input-dpad a:focus:not([data-tv-focus]):not(.tv-card),
+.tv-root.tv-input-dpad button:focus:not([data-tv-focus]):not(.tv-card) {
+  outline: 2px solid #a78bfa !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.45) !important;
+}
+
+/* Oculta scrollbars mantendo rolagem suave */
+.tv-root .tv-scroll-row,
+.tv-root .tv-scroll-col {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.tv-root .tv-scroll-row::-webkit-scrollbar {
+.tv-root .tv-scroll-row::-webkit-scrollbar,
+.tv-root .tv-scroll-col::-webkit-scrollbar {
   display: none;
 }

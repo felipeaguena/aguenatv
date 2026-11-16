@@ -32,6 +32,7 @@ export function createSyncedListStore<T>(
   config: SyncedListStoreConfig<T>
 ): SyncedListStore<T> {
   const ttlMs = config.cacheTtlMs ?? 60_000;
+  const emptyList: T[] = [];
 
   let itemsCache: T[] | null = null;
   let keySet = new Set<string>();
@@ -170,7 +171,7 @@ export function createSyncedListStore<T>(
         listeners.delete(listener);
       };
     },
-    getItems: () => itemsCache || [],
+    getItems: () => itemsCache ?? emptyList,
     getKeySet: () => keySet,
     getUserId: () => currentUserId,
     isLoaded: () => itemsCache !== null,

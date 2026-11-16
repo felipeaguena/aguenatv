@@ -1,13 +1,9 @@
 // AGUENATV Service Worker para Suporte Completo Offline e Modo Avião
-const CACHE_NAME = 'aguenatv-v3';
+const CACHE_NAME = 'aguenatv-v4';
 
-// Recursos críticos pré-cacheados para navegação sem internet
+// Recursos estáticos essenciais pré-cacheados (páginas HTML dinâmicas do Next.js são cacheadas em Network-First sob demanda)
 const PRECACHE_URLS = [
-  '/',
   '/offline',
-  '/favorites',
-  '/movies',
-  '/series',
   '/icon.svg',
   '/placeholder.svg'
 ];
@@ -41,12 +37,17 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Não intercepta chamadas de API, origens externas, stream de vídeo, requisições com Range
-  // ou vídeos locais servidos na memória do APK (_local_video_, _capacitor_file_, /videos/offline_)
+  // Não intercepta chamadas de API, origens externas, stream de vídeo, requisições com Range,
+  // requisições internas RSC/Prefetch do Next.js App Router, ou vídeos locais do APK
   if (
     request.method !== 'GET' ||
     url.origin !== self.location.origin ||
     url.pathname.startsWith('/api/') ||
+    url.searchParams.has('_rsc') ||
+    request.headers.get('rsc') === '1' ||
+    request.headers.has('next-router-prefetch') ||
+    request.headers.has('next-router-state-tree') ||
+    request.headers.has('next-url') ||
     request.headers.has('range') ||
     request.headers.has('Range') ||
     request.destination === 'video' ||
@@ -119,7 +120,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Demais requisições: tenta a rede, se falhar tenta o cache
+  // 3. Demais requisições: tenta a rede, se falhar tenta o cache (nunca retorna undefined)
   event.respondWith(
     fetch(request)
       .then((response) => {
@@ -129,6 +130,9 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(request))
+      .catch(async () => {
+        const cached = await caches.match(request);
+        return cached || Response.error();
+      })
   );
 });
