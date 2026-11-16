@@ -864,7 +864,7 @@ export default function InfoView({ type, id }: InfoViewProps) {
             <img
               src={heroImage}
               alt={item.title || item.name}
-              className="w-full h-full object-cover object-top sm:object-center md:filter md:blur-sm opacity-60 md:opacity-35 scale-100 md:scale-105"
+              className="w-full h-full object-cover object-top sm:object-center opacity-55 md:opacity-30"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#0b0c10] via-[#0b0c10]/75 md:via-[#0b0c10]/75 to-transparent" />
             <div className="hidden md:block absolute inset-0 bg-gradient-to-r from-[#0b0c10] via-[#0b0c10]/85 to-transparent" />

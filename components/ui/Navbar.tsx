@@ -79,13 +79,9 @@ export default function Navbar() {
     // Pré-carrega e sincroniza os títulos salvos offline na inicialização do APK/App
     warmupOfflineDownloads().catch(() => {});
 
-    // Pré-aquece o cache de busca em background após a inicialização da aplicação
-    const preheatTimer = setTimeout(() => {
-      ensureSearchDataLoaded();
-    }, 1200);
-
+    // O índice de busca é carregado sob demanda ao focar/interagir na barra de busca,
+    // evitando leitura completa do IndexedDB em cada carregamento de página.
     return () => {
-      clearTimeout(preheatTimer);
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
   }, []);

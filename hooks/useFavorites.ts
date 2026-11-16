@@ -1,136 +1,56 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { FavoriteItem, StreamType } from '@/lib/types';
+import { createSyncedListStore, normalizeStreamType } from '@/lib/synced-list-store';
 
-const EVENT_NAME = 'miruro_favorites_updated';
+const EMPTY_FAVORITES: FavoriteItem[] = [];
 
-function getStorageKey(userId?: string | null): string {
-  return userId ? `miruro_fav_${userId}` : 'miruro_local_favorites';
-}
-
-function normalizeType(t: string): string {
-  if (t === 'movies') return 'movie';
-  return t;
-}
-
-// Cache em memória compartilhado
-let globalFavoritesCache: FavoriteItem[] | null = null;
-let globalFavoritesUserId: string | null = null;
-let lastFavoritesFetch = 0;
-let favoritesInFlight: Promise<FavoriteItem[]> | null = null;
-const CACHE_TTL_MS = 60 * 1000; // 60 segundos de cooldown entre chamadas à API
+const favoritesStore = createSyncedListStore<FavoriteItem>({
+  storagePrefix: 'miruro_fav_',
+  fallbackStorageKey: 'miruro_local_favorites',
+  apiEndpoint: '/api/favorites',
+  extractItems: (data) => (Array.isArray(data.favorites) ? (data.favorites as FavoriteItem[]) : []),
+  buildKey: (f) => `${normalizeStreamType(f.stream_type)}_${String(f.stream_id)}`,
+});
 
 export function resetFavoritesCache() {
-  globalFavoritesCache = null;
-  globalFavoritesUserId = null;
-  lastFavoritesFetch = 0;
-  favoritesInFlight = null;
-}
-
-function broadcastFavoritesUpdated(next: FavoriteItem[], userId?: string | null) {
-  globalFavoritesCache = next;
-  lastFavoritesFetch = Date.now();
-  if (userId) {
-    globalFavoritesUserId = userId;
-  }
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem(getStorageKey(globalFavoritesUserId), JSON.stringify(next));
-    } catch (e) {}
-    setTimeout(() => {
-      window.dispatchEvent(new Event(EVENT_NAME));
-    }, 0);
-  }
-}
-
-async function syncFavoritesFromServer(): Promise<FavoriteItem[]> {
-  if (favoritesInFlight) {
-    return favoritesInFlight;
-  }
-
-  favoritesInFlight = (async () => {
-    try {
-      const res = await fetch('/api/favorites');
-      if (res.ok) {
-        const data = await res.json();
-        const serverFavs: FavoriteItem[] = data.favorites || [];
-        const resUserId: string | null = data.userId || null;
-
-        // Se o usuário logado mudou, invalida o cache antigo
-        if (resUserId && globalFavoritesUserId && resUserId !== globalFavoritesUserId) {
-          globalFavoritesCache = null;
-        }
-        globalFavoritesUserId = resUserId;
-        broadcastFavoritesUpdated(serverFavs, resUserId);
-        return serverFavs;
-      }
-    } catch (e) {
-      console.warn('[useFavorites] Erro ao carregar favoritos da API:', e);
-    } finally {
-      favoritesInFlight = null;
-    }
-    return globalFavoritesCache || [];
-  })();
-
-  return favoritesInFlight;
+  favoritesStore.reset();
 }
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useState<FavoriteItem[]>(() => {
-    return globalFavoritesCache || [];
-  });
-  const [loading, setLoading] = useState(!globalFavoritesCache);
+  const favorites = useSyncExternalStore(
+    favoritesStore.subscribe,
+    favoritesStore.getItems,
+    () => EMPTY_FAVORITES
+  );
+  const [loading, setLoading] = useState(() => !favoritesStore.isLoaded());
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      favoritesStore.hydrateFromStorage();
+      if (favoritesStore.isLoaded()) {
+        setLoading(false);
+      }
+    });
+
+    favoritesStore.syncFromServer().finally(() => {
+      if (active) setLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const fetchFavorites = useCallback(async (force = false) => {
-    const now = Date.now();
-    if (!force && globalFavoritesCache && now - lastFavoritesFetch < CACHE_TTL_MS) {
-      setFavorites(globalFavoritesCache);
-      setLoading(false);
-      return;
-    }
-
     try {
-      const serverFavs = await syncFavoritesFromServer();
-      setFavorites(serverFavs);
+      await favoritesStore.syncFromServer(force);
     } finally {
       setLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (!globalFavoritesCache && typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem(getStorageKey(globalFavoritesUserId));
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          globalFavoritesCache = parsed;
-          setFavorites(parsed);
-        }
-      } catch (e) {}
-    }
-
-    fetchFavorites();
-
-    const handleSync = () => {
-      try {
-        const cached = localStorage.getItem(getStorageKey(globalFavoritesUserId));
-        if (cached) {
-          const parsed: FavoriteItem[] = JSON.parse(cached);
-          globalFavoritesCache = parsed;
-          setFavorites(parsed);
-        } else if (globalFavoritesCache) {
-          setFavorites(globalFavoritesCache);
-        }
-      } catch (e) {}
-    };
-
-    window.addEventListener(EVENT_NAME, handleSync);
-    window.addEventListener('storage', handleSync);
-    return () => {
-      window.removeEventListener(EVENT_NAME, handleSync);
-      window.removeEventListener('storage', handleSync);
-    };
-  }, [fetchFavorites]);
 
   const addFavorite = useCallback(
     async (item: {
@@ -141,12 +61,13 @@ export function useFavorites() {
       categoryName?: string;
       rating?: string | number;
     }) => {
-      const normType = normalizeType(item.streamType) as StreamType;
+      const normType = normalizeStreamType(item.streamType) as StreamType;
       const targetId = String(item.streamId);
+      const userId = favoritesStore.getUserId();
 
       const tempItem: FavoriteItem = {
         id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        user_id: globalFavoritesUserId || 'me',
+        user_id: userId || 'me',
         stream_id: targetId,
         stream_type: normType,
         title: item.title,
@@ -156,17 +77,12 @@ export function useFavorites() {
         created_at: new Date().toISOString(),
       };
 
-      const currentList = globalFavoritesCache || favorites;
-      const filtered = currentList.filter(
-        (f) => !(String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType)
-      );
+      const filtered = favoritesStore
+        .getItems()
+        .filter((f) => !(String(f.stream_id) === targetId && normalizeStreamType(f.stream_type) === normType));
       const next = [tempItem, ...filtered];
+      favoritesStore.updateItems(next, userId);
 
-      // 1. Otimista imediato
-      setFavorites(next);
-      broadcastFavoritesUpdated(next, globalFavoritesUserId);
-
-      // 2. Persistência na API
       try {
         const res = await fetch('/api/favorites', {
           method: 'POST',
@@ -181,58 +97,46 @@ export function useFavorites() {
         if (res.ok) {
           const data = await res.json();
           if (data.favorite) {
-            const listNow = globalFavoritesCache || next;
-            const updated = listNow.map((f) =>
-              String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType
-                ? data.favorite
-                : f
-            );
-            setFavorites(updated);
-            broadcastFavoritesUpdated(updated, data.userId || globalFavoritesUserId);
+            const updated = favoritesStore
+              .getItems()
+              .map((f) =>
+                String(f.stream_id) === targetId && normalizeStreamType(f.stream_type) === normType
+                  ? data.favorite
+                  : f
+              );
+            favoritesStore.updateItems(updated, data.userId || userId);
           }
         }
       } catch (err) {
         console.warn('[useFavorites] Erro ao sincronizar adição com a API:', err);
       }
     },
-    [favorites]
+    []
   );
 
-  const removeFavorite = useCallback(
-    async (streamId: string | number, streamType: string) => {
-      const normType = normalizeType(streamType);
-      const targetId = String(streamId);
+  const removeFavorite = useCallback(async (streamId: string | number, streamType: string) => {
+    const normType = normalizeStreamType(streamType);
+    const targetId = String(streamId);
+    const userId = favoritesStore.getUserId();
 
-      const currentList = globalFavoritesCache || favorites;
-      const next = currentList.filter(
-        (f) => !(String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType)
-      );
+    const next = favoritesStore
+      .getItems()
+      .filter((f) => !(String(f.stream_id) === targetId && normalizeStreamType(f.stream_type) === normType));
+    favoritesStore.updateItems(next, userId);
 
-      setFavorites(next);
-      broadcastFavoritesUpdated(next, globalFavoritesUserId);
+    try {
+      await fetch(`/api/favorites?streamId=${targetId}&streamType=${normType}`, {
+        method: 'DELETE',
+      });
+    } catch (e) {
+      console.warn('[useFavorites] Erro ao sincronizar remoção com a API:', e);
+    }
+  }, []);
 
-      try {
-        await fetch(`/api/favorites?streamId=${targetId}&streamType=${normType}`, {
-          method: 'DELETE',
-        });
-      } catch (e) {
-        console.warn('[useFavorites] Erro ao sincronizar remoção com a API:', e);
-      }
-    },
-    [favorites]
-  );
-
-  const isFavorite = useCallback(
-    (streamId?: string | number, streamType?: string) => {
-      if (!streamId || !streamType) return false;
-      const normType = normalizeType(streamType);
-      const targetId = String(streamId);
-      return favorites.some(
-        (f) => String(f.stream_id) === targetId && normalizeType(f.stream_type) === normType
-      );
-    },
-    [favorites]
-  );
+  const isFavorite = useCallback((streamId?: string | number, streamType?: string) => {
+    if (!streamId || !streamType) return false;
+    return favoritesStore.getKeySet().has(`${normalizeStreamType(streamType)}_${String(streamId)}`);
+  }, []);
 
   return {
     favorites,

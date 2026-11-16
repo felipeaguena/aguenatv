@@ -10,7 +10,7 @@ export interface SearchItemEntry {
 }
 
 let cachedSearchEntries: SearchItemEntry[] | null = null;
-let isPreloading = false;
+let preloadPromise: Promise<SearchItemEntry[]> | null = null;
 
 export function normalizeSearchText(str: string): string {
   return str
@@ -22,10 +22,23 @@ export function normalizeSearchText(str: string): string {
     .trim();
 }
 
+function toSearchEntry(item: BaseStreamItem, idx: number): SearchItemEntry {
+  const rawTitle = (item.title || item.name || '').trim();
+  const normTitle = normalizeSearchText(rawTitle);
+  const normCat = normalizeSearchText(item.category_name || '');
+  return {
+    item: {
+      ...item,
+      id: item.id || `${item.stream_type}_${item.stream_id || idx}`,
+    },
+    normTitle,
+    normCat,
+    words: normTitle.split(/\s+/).filter(Boolean),
+  };
+}
+
 /**
  * Inicializa ou atualiza o cache em memória de busca com itens pré-normalizados.
- * Processa 30.000+ itens em ~60ms em uma única passagem, tornando todas as
- * pesquisas subsequentes instantâneas (< 1ms).
  */
 export function initSearchIndex(items: BaseStreamItem[]): void {
   if (!items || items.length === 0) {
@@ -33,53 +46,51 @@ export function initSearchIndex(items: BaseStreamItem[]): void {
     return;
   }
 
-  cachedSearchEntries = items.map((item, idx) => {
-    const rawTitle = (item.title || item.name || '').trim();
-    const normTitle = normalizeSearchText(rawTitle);
-    const normCat = normalizeSearchText(item.category_name || '');
-    return {
-      item: {
-        ...item,
-        id: item.id || `${item.stream_type}_${item.stream_id || idx}`,
-      },
-      normTitle,
-      normCat,
-      words: normTitle.split(/\s+/).filter(Boolean),
-    };
-  });
+  cachedSearchEntries = items.map(toSearchEntry);
 }
 
 /**
  * Garante que os itens do IndexedDB estejam carregados no cache em memória.
- * Executado ao focar ou passar o mouse na Omnibar, deixando a busca pré-aquecida.
+ * Processa em lotes com pequenos yields para não travar a thread principal no Android WebView.
  */
 export async function ensureSearchDataLoaded(): Promise<SearchItemEntry[]> {
   if (cachedSearchEntries && cachedSearchEntries.length > 0) {
     return cachedSearchEntries;
   }
 
-  if (isPreloading) {
-    while (isPreloading) {
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-    return cachedSearchEntries || [];
+  if (preloadPromise) {
+    return preloadPromise;
   }
 
   if (!localDB) return [];
 
-  isPreloading = true;
-  try {
-    const items = await localDB.streams.toArray();
-    if (items && items.length > 0) {
-      initSearchIndex(items as unknown as BaseStreamItem[]);
-    }
-  } catch (err) {
-    console.warn('[search-index] Erro ao carregar itens do IndexedDB para memória:', err);
-  } finally {
-    isPreloading = false;
-  }
+  preloadPromise = (async () => {
+    try {
+      const items = await localDB.streams.toArray();
+      if (!items || items.length === 0) {
+        cachedSearchEntries = [];
+        return [];
+      }
 
-  return cachedSearchEntries || [];
+      const BATCH_SIZE = 2500;
+      const entries: SearchItemEntry[] = new Array(items.length);
+      for (let i = 0; i < items.length; i++) {
+        entries[i] = toSearchEntry(items[i] as unknown as BaseStreamItem, i);
+        if (i > 0 && i % BATCH_SIZE === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      cachedSearchEntries = entries;
+      return entries;
+    } catch (err) {
+      console.warn('[search-index] Erro ao carregar itens do IndexedDB para memória:', err);
+      return cachedSearchEntries || [];
+    } finally {
+      preloadPromise = null;
+    }
+  })();
+
+  return preloadPromise;
 }
 
 /**

@@ -41,10 +41,12 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // Não intercepta chamadas de stream de vídeo de terceiros, requisições com Range (seek de vídeo)
+  // Não intercepta chamadas de API, origens externas, stream de vídeo, requisições com Range
   // ou vídeos locais servidos na memória do APK (_local_video_, _capacitor_file_, /videos/offline_)
   if (
     request.method !== 'GET' ||
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith('/api/') ||
     request.headers.has('range') ||
     request.headers.has('Range') ||
     request.destination === 'video' ||

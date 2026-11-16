@@ -53,7 +53,10 @@ export async function GET(req: NextRequest) {
       if (first) {
         // Busca detalhes completos (elenco, trailers do YouTube, classificação, traduções e títulos alternativos)
         const detailsUrl = `https://api.themoviedb.org/3/${endpoint}/${first.id}?api_key=${tmdbKey}&language=pt-BR&append_to_response=credits,videos,translations,alternative_titles`;
-        const detailsRes = await fetch(detailsUrl, { next: { revalidate: 86400 } });
+        const detailsRes = await fetch(detailsUrl, {
+          next: { revalidate: 86400 },
+          signal: AbortSignal.timeout(5000),
+        });
 
         if (detailsRes.ok) {
           const d = await detailsRes.json();
@@ -182,10 +185,10 @@ export async function GET(req: NextRequest) {
             aliases: Array.from(aliasesSet),
             overview: d.overview || first.overview || kitsuEnrichment?.synopsis,
             backdropUrl: d.backdrop_path
-              ? `https://image.tmdb.org/t/p/original${d.backdrop_path}`
+              ? `https://image.tmdb.org/t/p/w1280${d.backdrop_path}`
               : (kitsuEnrichment?.coverImage?.original || kitsuEnrichment?.coverImage?.large),
             posterUrl: d.poster_path
-              ? `https://image.tmdb.org/t/p/w600_and_h900_bestv2${d.poster_path}`
+              ? `https://image.tmdb.org/t/p/w500${d.poster_path}`
               : (kitsuEnrichment?.posterImage?.large || kitsuEnrichment?.posterImage?.original),
             rating: d.vote_average
               ? Number(d.vote_average.toFixed(1))

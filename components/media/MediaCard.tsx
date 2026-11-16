@@ -157,7 +157,7 @@ export default function MediaCard({ item }: MediaCardProps) {
         )}
 
         {/* Overlay com Ações ao passar o mouse */}
-        <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/55 backdrop-blur-[2px]">
+        <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/60">
           {/* Botão Assistir Direto */}
           <button
             type="button"
@@ -185,12 +185,12 @@ export default function MediaCard({ item }: MediaCardProps) {
           <div className="flex items-center gap-1.5 max-w-[65%] truncate pointer-events-auto">
             {isLive ? (
               <>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wider rounded-md bg-rose-600/95 text-white shadow-lg shadow-rose-600/35 border border-rose-400/30 backdrop-blur-md">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wider rounded-md bg-rose-600/95 text-white shadow-lg shadow-rose-600/35 border border-rose-400/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                   AO VIVO
                 </span>
                 {resolutionTag && (
-                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-black/60 text-neutral-200 border border-white/15 backdrop-blur-md">
+                  <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded bg-black/75 text-neutral-200 border border-white/15">
                     {resolutionTag}
                   </span>
                 )}
@@ -211,10 +211,10 @@ export default function MediaCard({ item }: MediaCardProps) {
               <button
                 type="button"
                 onClick={handleWatchedClick}
-                className={`p-1.5 rounded-lg backdrop-blur-md transition-all border shadow-lg cursor-pointer ${
+                className={`p-1.5 rounded-lg transition-all border shadow-lg cursor-pointer ${
                   watched
                     ? 'bg-emerald-600 text-white border-emerald-400 scale-105 shadow-emerald-600/40'
-                    : 'bg-black/70 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-emerald-500/50 hover:scale-110'
+                    : 'bg-black/80 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-emerald-500/50 hover:scale-110'
                 }`}
                 title={watched ? 'Concluído (clique para desmarcar)' : 'Marcar como concluído'}
                 aria-label={watched ? 'Concluído (clique para desmarcar)' : 'Marcar como concluído'}
@@ -227,10 +227,10 @@ export default function MediaCard({ item }: MediaCardProps) {
             <button
               type="button"
               onClick={handleFavoriteClick}
-              className={`p-1.5 rounded-lg backdrop-blur-md transition-all border shadow-lg cursor-pointer ${
+              className={`p-1.5 rounded-lg transition-all border shadow-lg cursor-pointer ${
                 favorited
                   ? 'bg-rose-500 text-white border-rose-400 scale-105 shadow-rose-500/40'
-                  : 'bg-black/70 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-rose-500/50 hover:scale-110'
+                  : 'bg-black/80 text-neutral-400 border-white/15 hover:text-white hover:bg-black/90 hover:border-rose-500/50 hover:scale-110'
               }`}
               title={favorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
               aria-label={favorited ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}

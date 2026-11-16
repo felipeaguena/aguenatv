@@ -108,15 +108,15 @@ export async function searchTMDbWithVariants(
   const { variants, year: extractedYear } = generateSearchVariants(rawTitle);
   const searchYear = customYear || extractedYear;
 
-  // 1. Itera pelas variantes no TMDb (ordem de maior para menor fidelidade)
-  for (const query of variants) {
+  // 1. Itera pelas principais variantes no TMDb (ordem de maior para menor fidelidade)
+  for (const query of variants.slice(0, 4)) {
     // A. Com ano especificado
     if (searchYear) {
       try {
         const url = `https://api.themoviedb.org/3/search/${endpoint}?api_key=${tmdbKey}&query=${encodeURIComponent(
           query
         )}&language=pt-BR&${endpoint === 'movie' ? 'primary_release_year' : 'first_air_date_year'}=${searchYear}`;
-        const res = await fetch(url, { next: { revalidate: 86400 } });
+        const res = await fetch(url, { next: { revalidate: 86400 }, signal: AbortSignal.timeout(4000) });
         if (res.ok) {
           const data = await res.json();
           if (data.results && data.results.length > 0) {
@@ -133,7 +133,7 @@ export async function searchTMDbWithVariants(
       const url = `https://api.themoviedb.org/3/search/${endpoint}?api_key=${tmdbKey}&query=${encodeURIComponent(
         query
       )}&language=pt-BR`;
-      const res = await fetch(url, { next: { revalidate: 86400 } });
+      const res = await fetch(url, { next: { revalidate: 86400 }, signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const data = await res.json();
         if (data.results && data.results.length > 0) {
@@ -149,7 +149,7 @@ export async function searchTMDbWithVariants(
       const url = `https://api.themoviedb.org/3/search/${endpoint}?api_key=${tmdbKey}&query=${encodeURIComponent(
         query
       )}`;
-      const res = await fetch(url, { next: { revalidate: 86400 } });
+      const res = await fetch(url, { next: { revalidate: 86400 }, signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const data = await res.json();
         if (data.results && data.results.length > 0) {

@@ -1,41 +1,86 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { ContinueWatchingItem, StreamType } from '@/lib/types';
 
-const EVENT_NAME = 'miruro_continue_watching_updated';
+const EMPTY_CONTINUE_LIST: ContinueWatchingItem[] = [];
 
 function getStorageKey(userId?: string | null): string {
   return userId ? `miruro_con_${userId}` : 'miruro_continue_watching';
 }
 
-// Cache em memória a nível de módulo
+// Store singleton em memória compartilhado
 let globalContinueCache: ContinueWatchingItem[] | null = null;
 let globalContinueUserId: string | null = null;
 let lastContinueFetch = 0;
+let lastUiBroadcast = 0;
 let continueInFlight: Promise<ContinueWatchingItem[]> | null = null;
-const CACHE_TTL_MS = 60 * 1000; // 60 segundos de cooldown entre chamadas à API
+let storageListenerAttached = false;
+const listeners = new Set<() => void>();
+const CACHE_TTL_MS = 60 * 1000;
+const UI_BROADCAST_THROTTLE_MS = 10 * 1000;
+
+function notifyContinueListeners() {
+  for (const listener of Array.from(listeners)) {
+    try {
+      listener();
+    } catch {}
+  }
+}
+
+function getContinueSnapshot(): ContinueWatchingItem[] {
+  return globalContinueCache || EMPTY_CONTINUE_LIST;
+}
+
+function getContinueServerSnapshot(): ContinueWatchingItem[] {
+  return EMPTY_CONTINUE_LIST;
+}
+
+function subscribeNoop(): () => void {
+  return () => {};
+}
+
+function subscribeContinue(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 export function resetContinueCache() {
   globalContinueCache = null;
   globalContinueUserId = null;
   lastContinueFetch = 0;
+  lastUiBroadcast = 0;
   continueInFlight = null;
+  notifyContinueListeners();
 }
 
-function broadcastContinueUpdated(next: ContinueWatchingItem[], userId?: string | null) {
+function broadcastContinueUpdated(next: ContinueWatchingItem[], userId?: string | null, persist = true) {
   globalContinueCache = next;
-  lastContinueFetch = Date.now();
+  lastUiBroadcast = Date.now();
   if (userId) {
     globalContinueUserId = userId;
   }
-  if (typeof window !== 'undefined') {
+  if (persist && typeof window !== 'undefined') {
     try {
       localStorage.setItem(getStorageKey(globalContinueUserId), JSON.stringify(next));
-    } catch (e) {}
-    setTimeout(() => {
-      window.dispatchEvent(new Event(EVENT_NAME));
-    }, 0);
+    } catch {}
   }
+  notifyContinueListeners();
+}
+
+function attachCrossTabContinueListener() {
+  if (storageListenerAttached || typeof window === 'undefined') return;
+  storageListenerAttached = true;
+  window.addEventListener('storage', (e: StorageEvent) => {
+    if (e.key !== getStorageKey(globalContinueUserId) || !e.newValue) return;
+    try {
+      const parsed = JSON.parse(e.newValue) as ContinueWatchingItem[];
+      if (Array.isArray(parsed)) {
+        broadcastContinueUpdated(parsed, globalContinueUserId, false);
+      }
+    } catch {}
+  });
 }
 
 async function syncContinueFromServer(): Promise<ContinueWatchingItem[]> {
@@ -55,7 +100,8 @@ async function syncContinueFromServer(): Promise<ContinueWatchingItem[]> {
           globalContinueCache = null;
         }
         globalContinueUserId = resUserId;
-        broadcastContinueUpdated(serverItems, resUserId);
+        lastContinueFetch = Date.now();
+        broadcastContinueUpdated(serverItems, resUserId, true);
         return serverItems;
       }
     } catch (e) {
@@ -86,64 +132,63 @@ export interface SaveProgressPayload {
   duration: number;
 }
 
-const syncThrottles = new Map<string, { lastSent: number; timeoutId: any }>();
+const syncThrottles = new Map<string, { lastSent: number; timeoutId: ReturnType<typeof setTimeout> | null }>();
 
-export function useContinueWatching() {
-  const [items, setItems] = useState<ContinueWatchingItem[]>(() => {
-    return globalContinueCache || [];
-  });
-  const [loading, setLoading] = useState(!globalContinueCache);
+export function useContinueWatching(options: { subscribe?: boolean } = {}) {
+  const { subscribe = true } = options;
+  const items = useSyncExternalStore(
+    subscribe ? subscribeContinue : subscribeNoop,
+    subscribe ? getContinueSnapshot : getContinueServerSnapshot,
+    getContinueServerSnapshot
+  );
+  const [loading, setLoading] = useState(() => globalContinueCache === null);
 
   const fetchItems = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && globalContinueCache && now - lastContinueFetch < CACHE_TTL_MS) {
-      setItems(globalContinueCache);
       setLoading(false);
       return;
     }
 
     try {
-      const serverItems = await syncContinueFromServer();
-      setItems(serverItems);
+      await syncContinueFromServer();
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!globalContinueCache && typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          globalContinueCache = parsed;
-          setItems(parsed);
-        }
-      } catch (e) {}
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active || typeof window === 'undefined') return;
+      attachCrossTabContinueListener();
+      if (!globalContinueCache) {
+        try {
+          const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
+          if (cached) {
+            const parsed = JSON.parse(cached) as ContinueWatchingItem[];
+            if (Array.isArray(parsed)) {
+              globalContinueCache = parsed;
+              if (subscribe) notifyContinueListeners();
+            }
+          }
+        } catch {}
+      }
+      if (globalContinueCache !== null) {
+        setLoading(false);
+      }
+    });
+
+    if (globalContinueCache === null || (subscribe && Date.now() - lastContinueFetch >= CACHE_TTL_MS)) {
+      syncContinueFromServer().finally(() => {
+        if (active) setLoading(false);
+      });
     }
 
-    fetchItems();
-
-    const handleSync = () => {
-      try {
-        const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
-        if (cached) {
-          const parsed: ContinueWatchingItem[] = JSON.parse(cached);
-          globalContinueCache = parsed;
-          setItems(parsed);
-        } else if (globalContinueCache) {
-          setItems(globalContinueCache);
-        }
-      } catch (e) {}
-    };
-
-    window.addEventListener(EVENT_NAME, handleSync);
-    window.addEventListener('storage', handleSync);
     return () => {
-      window.removeEventListener(EVENT_NAME, handleSync);
-      window.removeEventListener('storage', handleSync);
+      active = false;
     };
-  }, [fetchItems]);
+  }, [fetchItems, subscribe]);
 
   const saveProgress = useCallback(async (payload: SaveProgressPayload, immediate = false) => {
     const curTime = Math.floor(payload.currentTime);
@@ -151,9 +196,10 @@ export function useContinueWatching() {
     if (dur <= 0 || curTime < 5) return;
 
     const progressPercent = Math.min(100, Math.round((curTime / dur) * 1000) / 10);
-    const effectiveStreamId = payload.streamType === 'series' && payload.seriesId
-      ? String(payload.seriesId)
-      : String(payload.streamId);
+    const effectiveStreamId =
+      payload.streamType === 'series' && payload.seriesId
+        ? String(payload.seriesId)
+        : String(payload.streamId);
     const uniqueId = `${payload.streamType}_${effectiveStreamId}`;
 
     const optimisticItem: ContinueWatchingItem = {
@@ -165,36 +211,42 @@ export function useContinueWatching() {
       poster_url: payload.posterUrl,
       backdrop_url: payload.backdropUrl,
       category_name: payload.categoryName,
-
       series_id: payload.seriesId ? String(payload.seriesId) : undefined,
       series_title: payload.seriesTitle,
       episode_id: payload.episodeId ? String(payload.episodeId) : undefined,
       episode_num: payload.episodeNum,
       season_num: payload.seasonNum,
       episode_title: payload.episodeTitle,
-
       current_time: curTime,
       duration: dur,
       progress_percentage: progressPercent,
       last_watched_at: new Date().toISOString(),
     };
 
-    const currentList = globalContinueCache || items;
+    const currentList = globalContinueCache || [];
+    const hadItemBefore = currentList.some((i) => i.id === uniqueId);
     const filtered = currentList.filter(
       (i) =>
         i.id !== uniqueId &&
-        !(i.stream_type === payload.streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) &&
+        !(
+          i.stream_type === payload.streamType &&
+          (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)
+        ) &&
         !String(i.id).startsWith(`${payload.streamType}_${effectiveStreamId}_`)
     );
     const next = [optimisticItem, ...filtered].slice(0, 24);
 
-    setItems(next);
-    broadcastContinueUpdated(next, globalContinueUserId);
+    // Atualiza o cache em memória sempre, mas só persiste no localStorage e notifica a UI
+    // no máximo a cada 10s (ou imediatamente ao pausar/sair/novo título), evitando re-render 4x/s
+    globalContinueCache = next;
+    const now = Date.now();
+    if (immediate || !hadItemBefore || now - lastUiBroadcast >= UI_BROADCAST_THROTTLE_MS) {
+      broadcastContinueUpdated(next, globalContinueUserId, true);
+    }
 
-    // Sincronização inteligente com throttling ajustado para 15 segundos
+    // Sincronização inteligente com servidor (throttle de 15s)
     const itemKey = `${payload.streamType}_${effectiveStreamId}`;
     const throttleInfo = syncThrottles.get(itemKey) || { lastSent: 0, timeoutId: null };
-    const now = Date.now();
     const MIN_INTERVAL_MS = 15000;
 
     const sendServerSync = async () => {
@@ -215,7 +267,6 @@ export function useContinueWatching() {
       throttleInfo.timeoutId = null;
     }
 
-    // Se for salvamento imediato (evento de pause, ended, unmount ou saída de página)
     if (immediate || now - throttleInfo.lastSent >= MIN_INTERVAL_MS) {
       throttleInfo.lastSent = now;
       syncThrottles.set(itemKey, throttleInfo);
@@ -228,14 +279,12 @@ export function useContinueWatching() {
       }, waitTime);
       syncThrottles.set(itemKey, throttleInfo);
     }
-  }, [items]);
+  }, []);
 
   const removeItem = useCallback(async (id: string) => {
-    const currentList = globalContinueCache || items;
+    const currentList = globalContinueCache || [];
     const next = currentList.filter((i) => i.id !== id);
-
-    setItems(next);
-    broadcastContinueUpdated(next, globalContinueUserId);
+    broadcastContinueUpdated(next, globalContinueUserId, true);
 
     try {
       await fetch(`/api/continue-watching?id=${encodeURIComponent(id)}`, {
@@ -244,7 +293,7 @@ export function useContinueWatching() {
     } catch (e) {
       console.warn('[useContinueWatching] Falha ao remover item:', e);
     }
-  }, [items]);
+  }, []);
 
   return {
     items,

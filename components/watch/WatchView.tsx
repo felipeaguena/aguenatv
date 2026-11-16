@@ -76,7 +76,6 @@ import {
   extractSizeFromXtreamPayload,
   formatVodSize,
   getCachedVodSizeEntry,
-  probeVodSizeViaCapacitorHead,
   setCachedVodSizeEntry,
 } from '@/lib/vod-size';
 
@@ -126,7 +125,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   }>({});
   const [vodMetadataPayload, setVodMetadataPayload] = useState<{ streamId: string; payload: unknown } | null>(null);
   const [vodHeadSize, setVodHeadSize] = useState<{ cacheKey: string; bytes: number; approximate: boolean } | null>(null);
-  const [vodProbeReadyUrl, setVodProbeReadyUrl] = useState<string | null>(null);
+  const [visibleRelatedLimit, setVisibleRelatedLimit] = useState(40);
 
   // Metadados enriquecidos da API (TMDb / Kitsu / TVMaze) e Sugestões Inteligentes
   const [enrichedMetadata, setEnrichedMetadata] = useState<EnrichedMetadata | null>(null);
@@ -135,7 +134,7 @@ export default function WatchView({ type, id }: WatchViewProps) {
   // Custom Hooks para Favoritos e Histórico
   const { isFavorite, addFavorite, removeFavorite } = useFavorites();
   const { isWatched, markWatched, removeWatched } = useWatched();
-  const { saveProgress } = useContinueWatching();
+  const { saveProgress } = useContinueWatching({ subscribe: false });
 
   // Estados e Gerenciamento Unificado de Download Offline (0ms e sincronização total)
   const {
@@ -310,9 +309,11 @@ export default function WatchView({ type, id }: WatchViewProps) {
               .where('category_id')
               .equals(foundItem.category_id)
               .filter((s) => s.stream_type === foundItem.stream_type)
+              .limit(200)
               .toArray();
             if (isMounted) {
               setRelatedItems(related as unknown as BaseStreamItem[]);
+              setVisibleRelatedLimit(40);
             }
           }
         }
@@ -909,17 +910,9 @@ export default function WatchView({ type, id }: WatchViewProps) {
   );
 
   const vodCacheKey = `${streamType}_${currentActiveId}`;
-  const needsApkVodProbe = Boolean(
-    streamUrl &&
-      !isLive &&
-      !isCurrentDownloaded &&
-      isNative &&
-      !streamUrl.toLowerCase().includes('.m3u8')
-  );
-  const isProbingVodSize = needsApkVodProbe && vodProbeReadyUrl !== streamUrl;
-  const effectivePlayUrl = isProbingVodSize ? '' : finalPlayUrl;
+  const effectivePlayUrl = finalPlayUrl;
 
-  // Coleta tamanho via metadados JSON Xtream (Web e APK, zero conexões extras de stream) e cache local
+  // Coleta tamanho via metadados JSON Xtream (Web e APK, zero conexões extras no servidor de mídia) e cache local
   useEffect(() => {
     if (isLive || isCurrentDownloaded || !currentActiveId) return;
     let cancelled = false;
@@ -946,6 +939,10 @@ export default function WatchView({ type, id }: WatchViewProps) {
         .then((data) => {
           if (!cancelled && data) {
             setVodMetadataPayload({ streamId: String(currentStreamId), payload: data });
+            const extracted = extractSizeFromXtreamPayload(data);
+            if (extracted && extracted.bytes > 0) {
+              setCachedVodSizeEntry(vodCacheKey, extracted);
+            }
           }
         })
         .catch(() => {});
@@ -955,46 +952,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
       cancelled = true;
     };
   }, [isLive, isCurrentDownloaded, currentActiveId, vodCacheKey, isMovie, config, vodMetadataPayload, currentStreamId]);
-
-  // No APK Android, realiza 1 HEAD rápido pelo mesmo IP do aparelho ANTES de montar o player (nunca em paralelo)
-  useEffect(() => {
-    if (!needsApkVodProbe || !streamUrl) return;
-    let cancelled = false;
-
-    (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-
-      const cached = getCachedVodSizeEntry(vodCacheKey);
-      if (cached) {
-        if (cached.bytes > 0) {
-          setVodHeadSize({ cacheKey: vodCacheKey, bytes: cached.bytes, approximate: cached.approximate });
-        }
-        setVodProbeReadyUrl(streamUrl);
-        return;
-      }
-
-      try {
-        const bytes = await probeVodSizeViaCapacitorHead(streamUrl, 1000);
-        if (!cancelled) {
-          if (bytes && bytes > 0) {
-            setCachedVodSizeEntry(vodCacheKey, { bytes, approximate: false });
-            setVodHeadSize({ cacheKey: vodCacheKey, bytes, approximate: false });
-          } else {
-            setCachedVodSizeEntry(vodCacheKey, { bytes: 0, approximate: false });
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          setVodProbeReadyUrl(streamUrl);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [needsApkVodProbe, streamUrl, vodCacheKey]);
 
   const resolvedVodSize = useMemo(() => {
     if (vodHeadSize && vodHeadSize.cacheKey === vodCacheKey && vodHeadSize.bytes > 0 && !vodHeadSize.approximate) {
@@ -1623,11 +1580,6 @@ export default function WatchView({ type, id }: WatchViewProps) {
                   Tentar Novamente
                 </button>
               </div>
-            ) : isProbingVodSize ? (
-              <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-neutral-950">
-                <div className="w-10 h-10 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-xs text-neutral-400 font-medium">Preparando reprodução...</p>
-              </div>
             ) : effectivePlayUrl ? (
               <VideoPlayer
                 streamUrl={effectivePlayUrl}
@@ -2123,96 +2075,107 @@ export default function WatchView({ type, id }: WatchViewProps) {
                   />
                 </div>
 
-                {/* Lista de Canais / Filmes */}
+                {/* Lista de Canais / Filmes (renderização paginada para evitar travar WebView em categorias grandes) */}
                 <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-1 divide-y divide-white/[0.03]">
                   {filteredRelated.length === 0 ? (
                     <div className="py-10 text-center text-xs text-neutral-500">
                       Nenhum item encontrado nesta categoria.
                     </div>
                   ) : (
-                    filteredRelated.map((channel) => {
-                      const isCurrent = channel.stream_id === item?.stream_id;
-                      const isItemWatched = isWatched(channel.stream_id, streamType);
+                    <>
+                      {filteredRelated.slice(0, visibleRelatedLimit).map((channel) => {
+                        const isCurrent = channel.stream_id === item?.stream_id;
+                        const isItemWatched = isWatched(channel.stream_id, streamType);
 
-                      return (
-                        <div
-                          key={`side_${channel.id || channel.stream_id}`}
-                          onClick={() => handleSwitchStream(channel)}
-                          className={`p-1.5 sm:p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group shrink-0 ${
-                            isCurrent
-                              ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
-                              : 'hover:bg-white/5 text-neutral-300 hover:text-white'
-                          }`}
+                        return (
+                          <div
+                            key={`side_${channel.id || channel.stream_id}`}
+                            onClick={() => handleSwitchStream(channel)}
+                            className={`p-1.5 sm:p-2 rounded-xl flex items-center gap-2.5 cursor-pointer transition group shrink-0 ${
+                              isCurrent
+                                ? 'bg-violet-600/20 border border-violet-500/40 text-violet-200 shadow-md'
+                                : 'hover:bg-white/5 text-neutral-300 hover:text-white'
+                            }`}
+                          >
+                            <div className="w-9 h-9 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
+                              <ImageWithFallback
+                                src={channel.stream_icon}
+                                alt={channel.title || channel.name}
+                                isSmallThumb={true}
+                              />
+                            </div>
+
+                            <div className="flex-1 truncate">
+                              <p className={`text-xs font-semibold truncate ${isCurrent ? 'text-violet-300' : 'group-hover:text-violet-400'}`}>
+                                {channel.title || channel.name}
+                              </p>
+                              <p className="text-[10px] text-neutral-500 truncate">
+                                {channel.category_name || (isLive ? 'Canal de TV' : 'Filme')}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Botão de Download para Filmes Relacionados (No APK / App Nativo) */}
+                              {isNative && !isLive && (() => {
+                                const movieDownloadId = buildDownloadId('movie', channel.stream_id);
+                                const isItemDownloaded = isDownloaded('movie', channel.stream_id);
+                                const itemProgress = getProgress(movieDownloadId);
+                                const isItemDownloading = isDownloading(movieDownloadId) || !!downloadingIds[movieDownloadId] || !!itemProgress;
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleToggleRelatedMovieDownload(channel, e)}
+                                    disabled={isItemDownloading}
+                                    className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shadow-md min-w-[28px] ${
+                                      isItemDownloaded
+                                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-rose-500/25 hover:border-rose-500/40 hover:text-rose-300'
+                                        : isItemDownloading
+                                        ? 'bg-violet-600/30 text-violet-300 border-violet-500/50 px-2'
+                                        : 'bg-white/5 text-neutral-400 border-white/5 hover:text-white hover:border-violet-500/40 hover:bg-white/10'
+                                    }`}
+                                    title={
+                                      isItemDownloaded
+                                        ? 'Filme baixado no celular (clique para excluir da memória)'
+                                        : isItemDownloading
+                                        ? `Baixando filme (${itemProgress?.percentage ?? 0}%)`
+                                        : 'Baixar este filme para assistir offline'
+                                    }
+                                    aria-label={isItemDownloaded ? 'Excluir Filme Baixado' : 'Baixar Filme'}
+                                  >
+                                    {isItemDownloading ? (
+                                      <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                                        <span className="text-[9px] font-black text-violet-300">
+                                          {itemProgress?.percentage ?? 0}%
+                                        </span>
+                                      </div>
+                                    ) : isItemDownloaded ? (
+                                      <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <Download className="w-3.5 h-3.5 text-neutral-400" />
+                                    )}
+                                  </button>
+                                );
+                              })()}
+
+                              {isItemWatched && (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-500/20" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {filteredRelated.length > visibleRelatedLimit && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleRelatedLimit((prev) => prev + 40)}
+                          className="w-full py-2 mt-1 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-semibold text-violet-300 transition cursor-pointer"
                         >
-                          <div className="w-9 h-9 rounded-lg bg-black overflow-hidden shrink-0 flex items-center justify-center border border-white/5 relative">
-                            <ImageWithFallback
-                              src={channel.stream_icon}
-                              alt={channel.title || channel.name}
-                              isSmallThumb={true}
-                            />
-                          </div>
-
-                          <div className="flex-1 truncate">
-                            <p className={`text-xs font-semibold truncate ${isCurrent ? 'text-violet-300' : 'group-hover:text-violet-400'}`}>
-                              {channel.title || channel.name}
-                            </p>
-                            <p className="text-[10px] text-neutral-500 truncate">
-                              {channel.category_name || (isLive ? 'Canal de TV' : 'Filme')}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Botão de Download para Filmes Relacionados (No APK / App Nativo) */}
-                            {isNative && !isLive && (() => {
-                              const movieDownloadId = buildDownloadId('movie', channel.stream_id);
-                              const isItemDownloaded = isDownloaded('movie', channel.stream_id);
-                              const itemProgress = getProgress(movieDownloadId);
-                              const isItemDownloading = isDownloading(movieDownloadId) || !!downloadingIds[movieDownloadId] || !!itemProgress;
-
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleToggleRelatedMovieDownload(channel, e)}
-                                  disabled={isItemDownloading}
-                                  className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center shadow-md min-w-[28px] ${
-                                    isItemDownloaded
-                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-rose-500/25 hover:border-rose-500/40 hover:text-rose-300'
-                                      : isItemDownloading
-                                      ? 'bg-violet-600/30 text-violet-300 border-violet-500/50 px-2'
-                                      : 'bg-white/5 text-neutral-400 border-white/5 hover:text-white hover:border-violet-500/40 hover:bg-white/10'
-                                  }`}
-                                  title={
-                                    isItemDownloaded
-                                      ? 'Filme baixado no celular (clique para excluir da memória)'
-                                      : isItemDownloading
-                                      ? `Baixando filme (${itemProgress?.percentage ?? 0}%)`
-                                      : 'Baixar este filme para assistir offline'
-                                  }
-                                  aria-label={isItemDownloaded ? 'Excluir Filme Baixado' : 'Baixar Filme'}
-                                >
-                                  {isItemDownloading ? (
-                                    <div className="flex items-center gap-1">
-                                      <div className="w-3 h-3 border-2 border-violet-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                                      <span className="text-[9px] font-black text-violet-300">
-                                        {itemProgress?.percentage ?? 0}%
-                                      </span>
-                                    </div>
-                                  ) : isItemDownloaded ? (
-                                    <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                                  ) : (
-                                    <Download className="w-3.5 h-3.5 text-neutral-400" />
-                                  )}
-                                </button>
-                              );
-                            })()}
-
-                            {isItemWatched && (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 fill-emerald-500/20" />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
+                          Carregar mais ({Math.min(40, filteredRelated.length - visibleRelatedLimit)} de {filteredRelated.length - visibleRelatedLimit} restantes)
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

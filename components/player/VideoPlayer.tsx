@@ -881,7 +881,7 @@ export default function VideoPlayer({
       miniProgressBar: true,
       playsInline: true,
       moreVideoAttr: {
-        preload: 'auto',
+        preload: 'metadata',
         ...({ referrerPolicy: 'no-referrer' } as Partial<HTMLVideoElement>),
       },
       autoOrientation: false, // Desabilitado para evitar corrida de rotação com Capacitor
@@ -1643,16 +1643,21 @@ export default function VideoPlayer({
     });
 
     // Monitoramento contínuo de tempo e progresso
+    let lastPosPersistTs = 0;
     art.on('video:timeupdate', () => {
       const currentTime = art.currentTime || 0;
       const duration = art.duration || 0;
 
-      // Persistência periódica do progresso
+      // Persistência periódica do progresso (throttle de 2s no localStorage para poupar I/O no WebView)
       if (streamType !== 'live' && currentTime > 5 && duration > 0) {
         if (currentTime < duration - 10) {
-          try {
-            localStorage.setItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`, currentTime.toFixed(1));
-          } catch (e) {}
+          const nowTs = Date.now();
+          if (nowTs - lastPosPersistTs >= 2000) {
+            lastPosPersistTs = nowTs;
+            try {
+              localStorage.setItem(`iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`, currentTime.toFixed(1));
+            } catch (e) {}
+          }
         }
         lastReportedTimeRef.current = currentTime;
         lastDurationRef.current = duration;
@@ -2060,6 +2065,14 @@ export default function VideoPlayer({
 
     const flushProgress = () => {
       if (streamTypeRef.current !== 'live' && lastReportedTimeRef.current > 5 && lastDurationRef.current > 0) {
+        if (lastReportedTimeRef.current < lastDurationRef.current - 10) {
+          try {
+            localStorage.setItem(
+              `iptv_pos_${streamTypeRef.current}_${streamIdRef.current}`,
+              lastReportedTimeRef.current.toFixed(1)
+            );
+          } catch {}
+        }
         onProgressRef.current?.({
           currentTime: lastReportedTimeRef.current,
           duration: lastDurationRef.current,
