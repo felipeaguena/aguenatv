@@ -817,7 +817,6 @@ export default function VideoPlayer({
       (Artplayer as any).DBCLICK_FULLSCREEN = false;
       (Artplayer as any).MOBILE_CLICK_PLAY = false;
       (Artplayer as any).MOBILE_DBCLICK_PLAY = false;
-      (Artplayer as any).FULLSCREEN_WEB_IN_BODY = false;
       (Artplayer as any).CONTROL_HIDE_TIME =
         currentDeviceCategory === 'mobile' ? 5000 : currentDeviceCategory === 'tablet' ? 4500 : 3500;
     } catch (e) {}
@@ -2306,8 +2305,8 @@ export default function VideoPlayer({
                 ? deviceCategory === 'desktop'
                   ? isPlaying
                     ? 'opacity-0 pointer-events-none bg-transparent'
-                    : 'opacity-100 pointer-events-auto bg-black/25 backdrop-blur-[1px]'
-                  : 'opacity-100 pointer-events-auto bg-black/35 backdrop-blur-[1px]'
+                    : 'opacity-100 pointer-events-auto bg-black/25'
+                  : 'opacity-100 pointer-events-auto bg-black/35'
                 : 'opacity-0 pointer-events-none bg-transparent'
             }`}
             onClick={(e) => {
