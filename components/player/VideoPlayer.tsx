@@ -451,9 +451,24 @@ export default function VideoPlayer({
   // Suporte ao botão/gesto voltar nativo do Android no APK: sair do fullscreen antes de navegar para trás
   useEffect(() => {
     const handleAndroidBack = (e: Event) => {
-      if (isFullscreenRef.current && artInstanceRef.current) {
+      const art = artInstanceRef.current;
+      const inFullscreen = Boolean(
+        isFullscreenRef.current ||
+          art?.fullscreen ||
+          art?.fullscreenWeb ||
+          document.fullscreenElement ||
+          (document as any).webkitFullscreenElement ||
+          document.documentElement.classList.contains('art-immersive-active') ||
+          document.body.classList.contains('art-immersive-active')
+      );
+      if (inFullscreen) {
         e.preventDefault();
-        toggleFullscreen(artInstanceRef.current);
+        if (art && !art.isDestroy) {
+          toggleFullscreen(art);
+        } else {
+          isFullscreenRef.current = false;
+          setFullscreenCutoutMode(false);
+        }
       }
     };
 
@@ -802,6 +817,7 @@ export default function VideoPlayer({
       (Artplayer as any).DBCLICK_FULLSCREEN = false;
       (Artplayer as any).MOBILE_CLICK_PLAY = false;
       (Artplayer as any).MOBILE_DBCLICK_PLAY = false;
+      (Artplayer as any).FULLSCREEN_WEB_IN_BODY = false;
       (Artplayer as any).CONTROL_HIDE_TIME =
         currentDeviceCategory === 'mobile' ? 5000 : currentDeviceCategory === 'tablet' ? 4500 : 3500;
     } catch (e) {}
@@ -1536,6 +1552,14 @@ export default function VideoPlayer({
       setIsTransitioning(false);
     });
 
+    art.on('video:loadeddata', () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
+      setIsTransitioning(false);
+    });
+
     art.on('video:canplay', () => {
       if (transitionTimeoutRef.current) {
         clearTimeout(transitionTimeoutRef.current);
@@ -2106,17 +2130,31 @@ export default function VideoPlayer({
       }
       window.removeEventListener('mousemove', handleWindowMouseMove);
 
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+        transitionTimeoutRef.current = null;
+      }
       isFullscreenRef.current = false;
       setFullscreenCutoutMode(false);
       setPlayerMountNode(null);
       if (artInstanceRef.current) {
+        const currentArt = artInstanceRef.current;
+        const playerNode = currentArt.template?.$player;
         try {
-          if (artInstanceRef.current.video) {
-            artInstanceRef.current.video.pause();
-            artInstanceRef.current.video.removeAttribute('src');
-            artInstanceRef.current.video.load();
+          if (currentArt.fullscreenWeb) {
+            currentArt.fullscreenWeb = false;
           }
-          artInstanceRef.current.destroy(true);
+        } catch (e) {}
+        try {
+          if (currentArt.video) {
+            currentArt.video.pause();
+            currentArt.video.removeAttribute('src');
+            currentArt.video.load();
+          }
+          currentArt.destroy(true);
+        } catch (e) {}
+        try {
+          playerNode?.remove();
         } catch (e) {}
         artInstanceRef.current = null;
       }
@@ -2158,10 +2196,24 @@ export default function VideoPlayer({
       document.body.classList.contains('art-immersive-active')
     );
 
-    if (wasFullscreen) {
+    const ensureFullscreenPreserved = () => {
+      if (!wasFullscreen || art.isDestroy) return;
+      if (isMobileDevice()) {
+        if (!art.fullscreenWeb) {
+          art.fullscreenWeb = true;
+        }
+      } else if (!art.fullscreen && !document.fullscreenElement) {
+        try {
+          art.fullscreen = true;
+        } catch (e) {
+          if (!art.fullscreenWeb) art.fullscreenWeb = true;
+        }
+      }
       isFullscreenRef.current = true;
       setFullscreenCutoutMode(true);
-    }
+    };
+
+    ensureFullscreenPreserved();
 
     try {
       art.loading.show = true;
@@ -2177,7 +2229,7 @@ export default function VideoPlayer({
     if (transitionTimeoutRef.current) clearTimeout(transitionTimeoutRef.current);
     transitionTimeoutRef.current = setTimeout(() => {
       setIsTransitioning(false);
-    }, 12000);
+    }, 5000);
 
     // Limpa instância HLS anterior e atualiza o tipo do Artplayer conforme o novo fluxo
     const isNewHls = streamUrl.toLowerCase().includes('.m3u8') || streamType === 'live';
@@ -2189,34 +2241,16 @@ export default function VideoPlayer({
     }
     (art.option as any).type = isNewHls ? 'm3u8' : '';
 
-    // Limpa src anterior antes do novo fluxo sem disparar video:error transitório
-    if (art.video) {
-      try {
-        isSwitchingUrlRef.current = true;
-        art.video.pause();
-        art.video.removeAttribute('src');
-        art.video.load();
-      } catch (e) {}
-      isSwitchingUrlRef.current = false;
-    }
     setError(null);
     if (switchingTimeoutRef.current) clearTimeout(switchingTimeoutRef.current);
 
-    const restoreFullscreenAfterSwitch = () => {
-      if (!wasFullscreen) return;
-      if (isMobileDevice()) {
-        art.fullscreenWeb = true;
-      } else {
-        try { art.fullscreen = true; } catch (e) { art.fullscreenWeb = true; }
-      }
-      isFullscreenRef.current = true;
-      setFullscreenCutoutMode(true);
-    };
+    const shouldAutoPlay = autoPlay || isPlayingRef.current;
 
     try {
       art.switchUrl(streamUrl).then(() => {
-        restoreFullscreenAfterSwitch();
-        if (autoPlay) {
+        ensureFullscreenPreserved();
+        setIsTransitioning(false);
+        if (shouldAutoPlay && art.video?.paused) {
           art.play().catch(() => {
             setIsPlaying(false);
             isPlayingRef.current = false;
@@ -2225,7 +2259,7 @@ export default function VideoPlayer({
       }).catch((err) => {
         console.warn('[VideoPlayer] Falha no switchUrl do Artplayer:', err);
         setIsTransitioning(false);
-        restoreFullscreenAfterSwitch();
+        ensureFullscreenPreserved();
       });
     } catch (err) {
       console.warn('[VideoPlayer] Erro síncrono no switchUrl, recarregando instância:', err);
