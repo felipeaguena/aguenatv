@@ -2,40 +2,39 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
-import fs from 'fs/promises';
+import {
+  NO_STORE_HEADERS,
+  readJsonFileSafe,
+  runWithFileLock,
+  writeJsonFileAtomic,
+} from '@/lib/json-store';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const WATCHED_FILE = path.join(DATA_DIR, 'local-watched.json');
 
-async function getLocalWatched(): Promise<any[]> {
-  try {
-    const raw = await fs.readFile(WATCHED_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-async function saveLocalWatched(items: any[]): Promise<void> {
-  if (process.env.VERCEL) return;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(WATCHED_FILE, JSON.stringify(items, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[Watched] Aviso: persistência em disco local indisponível:', err);
-  }
+interface LocalWatchedRow {
+  id: string;
+  user_id: string;
+  stream_id: string;
+  stream_type: string;
+  title: string;
+  poster_url?: string | null;
+  category_name?: string | null;
+  rating?: string | null;
+  progress_seconds: number;
+  is_completed: boolean;
+  watched_at?: string;
 }
 
 export async function GET() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
 
-  // 1. Turso: busca estritamente pelo user_id logado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -44,19 +43,21 @@ export async function GET() {
         args: [session.userId],
       });
 
-      const items = res.rows.map((row: any) => ({
+      const items = res.rows.map((row: Record<string, unknown>) => ({
         ...row,
         is_completed: Boolean(row.is_completed),
       }));
 
-      return NextResponse.json({ watched: items, userId: session.userId });
+      return NextResponse.json(
+        { watched: items, userId: session.userId },
+        { headers: NO_STORE_HEADERS }
+      );
     } catch (e) {
       console.warn('[Watched] Falha no Turso, usando armazenamento local:', e);
     }
   }
 
-  // 2. Armazenamento local: estritamente o user_id logado
-  const allWatched = await getLocalWatched();
+  const allWatched = await readJsonFileSafe<LocalWatchedRow[]>(WATCHED_FILE, []);
   const userWatched = allWatched
     .filter((w) => w.user_id === session.userId)
     .sort(
@@ -64,13 +65,16 @@ export async function GET() {
         new Date(b.watched_at || 0).getTime() - new Date(a.watched_at || 0).getTime()
     );
 
-  return NextResponse.json({ watched: userWatched, userId: session.userId });
+  return NextResponse.json(
+    { watched: userWatched, userId: session.userId },
+    { headers: NO_STORE_HEADERS }
+  );
 }
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
@@ -79,13 +83,12 @@ export async function POST(req: NextRequest) {
   const { streamId, streamType, title, posterUrl, categoryName, rating, progressSeconds, isCompleted } = body;
 
   if (!streamId || !streamType || !title) {
-    return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
+    return NextResponse.json({ error: 'Dados incompletos' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
   const isComp = typeof isCompleted === 'boolean' ? (isCompleted ? 1 : 0) : 1;
   const now = new Date().toISOString();
 
-  // 1. Turso se configurado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -123,7 +126,7 @@ export async function POST(req: NextRequest) {
       });
 
       if (res.rows.length > 0) {
-        const row: any = res.rows[0];
+        const row = res.rows[0] as Record<string, unknown>;
         return NextResponse.json(
           {
             watchedItem: {
@@ -132,7 +135,7 @@ export async function POST(req: NextRequest) {
             },
             userId: session.userId,
           },
-          { status: 201 }
+          { status: 201, headers: NO_STORE_HEADERS }
         );
       }
     } catch (e) {
@@ -140,9 +143,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2. Persistência Local: Grava em data/local-watched.json isolado por user_id
-  const allWatched = await getLocalWatched();
-  const newWatched = {
+  const newWatched: LocalWatchedRow = {
     id: `watched_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     user_id: session.userId,
     stream_id: String(streamId),
@@ -156,25 +157,30 @@ export async function POST(req: NextRequest) {
     watched_at: now,
   };
 
-  const filtered = allWatched.filter(
-    (w) =>
-      !(
-        w.user_id === session.userId &&
-        String(w.stream_id) === String(streamId) &&
-        w.stream_type === streamType
-      )
+  await runWithFileLock(WATCHED_FILE, async () => {
+    const allWatched = await readJsonFileSafe<LocalWatchedRow[]>(WATCHED_FILE, []);
+    const filtered = allWatched.filter(
+      (w) =>
+        !(
+          w.user_id === session.userId &&
+          String(w.stream_id) === String(streamId) &&
+          w.stream_type === streamType
+        )
+    );
+    filtered.unshift(newWatched);
+    await writeJsonFileAtomic(WATCHED_FILE, filtered);
+  });
+
+  return NextResponse.json(
+    { watchedItem: newWatched, userId: session.userId },
+    { status: 201, headers: NO_STORE_HEADERS }
   );
-
-  filtered.unshift(newWatched);
-  await saveLocalWatched(filtered);
-
-  return NextResponse.json({ watchedItem: newWatched, userId: session.userId }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   const { searchParams } = new URL(req.url);
@@ -182,10 +188,9 @@ export async function DELETE(req: NextRequest) {
   const streamType = searchParams.get('streamType');
 
   if (!streamId || !streamType) {
-    return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400 });
+    return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
-  // 1. Turso se configurado (isolado por user_id)
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -193,22 +198,30 @@ export async function DELETE(req: NextRequest) {
         sql: 'DELETE FROM watched_items WHERE user_id = ? AND stream_id = ? AND stream_type = ?',
         args: [session.userId, String(streamId), streamType],
       });
+      return NextResponse.json(
+        { success: true, message: 'Item removido do histórico', userId: session.userId },
+        { headers: NO_STORE_HEADERS }
+      );
     } catch (e) {
       console.warn('[Watched] Falha ao deletar do Turso:', e);
     }
   }
 
-  // 2. Remove de data/local-watched.json (estritamente para o user_id logado)
-  const allWatched = await getLocalWatched();
-  const filtered = allWatched.filter(
-    (w) =>
-      !(
-        w.user_id === session.userId &&
-        String(w.stream_id) === String(streamId) &&
-        w.stream_type === streamType
-      )
-  );
-  await saveLocalWatched(filtered);
+  await runWithFileLock(WATCHED_FILE, async () => {
+    const allWatched = await readJsonFileSafe<LocalWatchedRow[]>(WATCHED_FILE, []);
+    const filtered = allWatched.filter(
+      (w) =>
+        !(
+          w.user_id === session.userId &&
+          String(w.stream_id) === String(streamId) &&
+          w.stream_type === streamType
+        )
+    );
+    await writeJsonFileAtomic(WATCHED_FILE, filtered);
+  });
 
-  return NextResponse.json({ success: true, message: 'Item removido do histórico', userId: session.userId });
+  return NextResponse.json(
+    { success: true, message: 'Item removido do histórico', userId: session.userId },
+    { headers: NO_STORE_HEADERS }
+  );
 }

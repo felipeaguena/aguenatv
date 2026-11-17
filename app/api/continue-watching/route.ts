@@ -2,80 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
-import fs from 'fs/promises';
-import path from 'path';
 import { ContinueWatchingItem } from '@/lib/types';
+import {
+  NO_STORE_HEADERS,
+  readJsonFileSafe,
+  runWithFileLock,
+  writeJsonFileAtomic,
+} from '@/lib/json-store';
+import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CONTINUE_WATCHING_FILE = path.join(DATA_DIR, 'local-continue-watching.json');
 const CONTINUE_WATCHING_BACKUP = path.join(DATA_DIR, 'local-continue-watching.bak.json');
 
-// Mutex de fila em memória para garantir operações de leitura/escrita atômicas sem race condition
-let writeQueue = Promise.resolve();
-function runWithLock<T>(fn: () => Promise<T>): Promise<T> {
-  const result = writeQueue.then(fn, fn);
-  writeQueue = result.then(() => {}, () => {});
-  return result;
-}
-
-async function getLocalContinueWatching(): Promise<ContinueWatchingItem[]> {
-  try {
-    const raw = await fs.readFile(CONTINUE_WATCHING_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      if (parsed.length > 0) {
-        // Mantém cópia de backup redundante sempre atualizada
-        fs.writeFile(CONTINUE_WATCHING_BACKUP, raw, 'utf-8').catch(() => {});
-      }
-      return parsed;
-    }
-  } catch (err) {
-    console.warn('[ContinueWatching] Falha ao ler arquivo principal, verificando backup redundante:', err);
-  }
-
-  // Fallback seguro para o backup caso o arquivo principal esteja corrompido ou vazio
-  try {
-    const bkpRaw = await fs.readFile(CONTINUE_WATCHING_BACKUP, 'utf-8');
-    const parsedBkp = JSON.parse(bkpRaw);
-    if (Array.isArray(parsedBkp) && parsedBkp.length > 0) {
-      console.info('[ContinueWatching] Restaurando dados a partir do backup redundante');
-      return parsedBkp;
-    }
-  } catch {}
-
-  return [];
-}
-
-async function saveLocalContinueWatching(items: ContinueWatchingItem[]): Promise<void> {
-  if (process.env.VERCEL) return;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    const content = JSON.stringify(items, null, 2);
-
-    // Escrita atômica segura via arquivo temporário + renomeação para evitar arquivos truncados
-    const tmpFile = `${CONTINUE_WATCHING_FILE}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-    await fs.writeFile(tmpFile, content, 'utf-8');
-    await fs.rename(tmpFile, CONTINUE_WATCHING_FILE);
-
-    if (items.length > 0) {
-      await fs.writeFile(CONTINUE_WATCHING_BACKUP, content, 'utf-8').catch(() => {});
-    }
-  } catch (err) {
-    console.warn('[ContinueWatching] Aviso: persistência em disco local indisponível:', err);
-  }
-}
-
-// GET: Retorna os itens de Continue Assistindo ordenados por data mais recente estritamente do usuário logado
 export async function GET() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
   const userId = session.userId;
 
   await ensureDataMigratedToFelipeAguena();
 
-  // 1. Se o Turso estiver configurado, busca por user_id estrito
+  // 1. Se o Turso estiver configurado, retorna estritamente do banco para o usuário logado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -84,24 +33,25 @@ export async function GET() {
         args: [userId],
       });
 
-      if (res.rows.length > 0) {
-        return NextResponse.json({ items: res.rows, userId });
-      }
+      return NextResponse.json({ items: res.rows, userId }, { headers: NO_STORE_HEADERS });
     } catch (e) {
-      console.warn('[ContinueWatching] Turso falhou ou tabela ausente, usando arquivo local:', e);
+      console.warn('[ContinueWatching] Turso falhou, usando arquivo local:', e);
     }
   }
 
-  // 2. Armazenamento local: estritamente o user_id logado
-  const allItems = await getLocalContinueWatching();
+  // 2. Fallback em disco: estritamente o user_id logado
+  const allItems = await readJsonFileSafe<ContinueWatchingItem[]>(
+    CONTINUE_WATCHING_FILE,
+    [],
+    CONTINUE_WATCHING_BACKUP
+  );
   const sortedItems = allItems
-    .filter((item: any) => item.user_id === userId)
+    .filter((item) => item.user_id === userId)
     .sort(
       (a, b) =>
         new Date(b.last_watched_at).getTime() - new Date(a.last_watched_at).getTime()
     );
 
-  // Garante que cada título apareça apenas uma vez com o seu último capítulo assistido
   const seenTitles = new Set<string>();
   const userItems: ContinueWatchingItem[] = [];
 
@@ -116,15 +66,17 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ items: userItems.slice(0, 25), userId });
+  return NextResponse.json(
+    { items: userItems.slice(0, 25), userId },
+    { headers: NO_STORE_HEADERS }
+  );
 }
 
-// POST: Salva ou atualiza o progresso de reprodução estritamente para o usuário logado
 export async function POST(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
     }
     const userId = session.userId;
 
@@ -149,15 +101,18 @@ export async function POST(req: NextRequest) {
     } = body;
 
     if (!streamId || !streamType) {
-      return NextResponse.json({ error: 'streamId e streamType são obrigatórios' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'streamId e streamType são obrigatórios' },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
     }
 
     const curTime = Number(currentTime) || 0;
     const dur = Number(duration) || 0;
     const progressPercent = dur > 0 ? Math.min(100, Math.round((curTime / dur) * 1000) / 10) : 0;
 
-    // Chave única: armazena 1 único registro por título para este usuário
-    const effectiveStreamId = streamType === 'series' && seriesId ? String(seriesId) : String(streamId);
+    const effectiveStreamId =
+      streamType === 'series' && seriesId ? String(seriesId) : String(streamId);
     const uniqueId = `${streamType}_${effectiveStreamId}`;
 
     const item: ContinueWatchingItem & { user_id?: string } = {
@@ -169,37 +124,19 @@ export async function POST(req: NextRequest) {
       poster_url: posterUrl || undefined,
       backdrop_url: backdropUrl || undefined,
       category_name: categoryName || undefined,
-
       series_id: seriesId ? String(seriesId) : undefined,
       series_title: seriesTitle || undefined,
       episode_id: episodeId ? String(episodeId) : undefined,
       episode_num: episodeNum !== undefined ? episodeNum : undefined,
       season_num: seasonNum !== undefined ? seasonNum : undefined,
       episode_title: episodeTitle || undefined,
-
       current_time: curTime,
       duration: dur,
       progress_percentage: progressPercent,
       last_watched_at: new Date().toISOString(),
     };
 
-    // 1. Persiste no arquivo JSON local com bloqueio de concorrência e isolamento estrito de usuário
-    await runWithLock(async () => {
-      const allItems = await getLocalContinueWatching();
-      const filtered = allItems.filter(
-        (i: any) =>
-          !(
-            i.user_id === userId &&
-            (i.id === uniqueId ||
-              (i.stream_type === streamType && (String(i.stream_id) === effectiveStreamId || String(i.series_id) === effectiveStreamId)) ||
-              String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`))
-          )
-      );
-      const updated = [item, ...filtered];
-      await saveLocalContinueWatching(updated);
-    });
-
-    // 2. Se o Turso estiver configurado, salva na nuvem
+    // 1. Se o Turso estiver configurado, grava com chave composta (user_id, id)
     if (isTursoConfigured()) {
       try {
         await ensureTursoSchema();
@@ -211,8 +148,7 @@ export async function POST(req: NextRequest) {
                   episode_id, episode_num, season_num, episode_title,
                   current_time, duration, progress_percentage, last_watched_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                  user_id = excluded.user_id,
+                ON CONFLICT(user_id, id) DO UPDATE SET
                   stream_id = excluded.stream_id,
                   stream_type = excluded.stream_type,
                   title = excluded.title,
@@ -228,8 +164,7 @@ export async function POST(req: NextRequest) {
                   current_time = excluded.current_time,
                   duration = excluded.duration,
                   progress_percentage = excluded.progress_percentage,
-                  last_watched_at = excluded.last_watched_at
-                WHERE continue_watching.user_id = excluded.user_id`,
+                  last_watched_at = excluded.last_watched_at`,
           args: [
             uniqueId,
             userId,
@@ -242,8 +177,8 @@ export async function POST(req: NextRequest) {
             item.series_id || null,
             item.series_title || null,
             item.episode_id || null,
-            item.episode_num !== undefined ? item.episode_num : null,
-            item.season_num !== undefined ? item.season_num : null,
+            item.episode_num !== undefined ? Number(item.episode_num) : null,
+            item.season_num !== undefined ? Number(item.season_num) : null,
             item.episode_title || null,
             curTime,
             dur,
@@ -251,24 +186,50 @@ export async function POST(req: NextRequest) {
             item.last_watched_at,
           ],
         });
+
+        return NextResponse.json({ success: true, item, userId }, { headers: NO_STORE_HEADERS });
       } catch (e) {
-        console.warn('[ContinueWatching] Erro ao sincronizar com Turso:', e);
+        console.warn('[ContinueWatching] Erro ao sincronizar com Turso, usando fallback local:', e);
       }
     }
 
-    return NextResponse.json({ success: true, item, userId });
+    // 2. Persistência local com mutex e escrita atômica isolada por usuário
+    await runWithFileLock(CONTINUE_WATCHING_FILE, async () => {
+      const allItems = await readJsonFileSafe<ContinueWatchingItem[]>(
+        CONTINUE_WATCHING_FILE,
+        [],
+        CONTINUE_WATCHING_BACKUP
+      );
+      const filtered = allItems.filter(
+        (i) =>
+          !(
+            i.user_id === userId &&
+            (i.id === uniqueId ||
+              (i.stream_type === streamType &&
+                (String(i.stream_id) === effectiveStreamId ||
+                  String(i.series_id) === effectiveStreamId)) ||
+              String(i.id).startsWith(`${streamType}_${effectiveStreamId}_`))
+          )
+      );
+      const updated = [item, ...filtered];
+      await writeJsonFileAtomic(CONTINUE_WATCHING_FILE, updated, CONTINUE_WATCHING_BACKUP);
+    });
+
+    return NextResponse.json({ success: true, item, userId }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('[ContinueWatching] Erro no POST:', error);
-    return NextResponse.json({ error: 'Erro ao salvar progresso' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Erro ao salvar progresso' },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
   }
 }
 
-// DELETE: Remove um item do Continue Assistindo do usuário logado
 export async function DELETE(req: NextRequest) {
   try {
     const session = await getSession();
     if (!session) {
-      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
     }
     const userId = session.userId;
 
@@ -278,19 +239,11 @@ export async function DELETE(req: NextRequest) {
     const streamType = searchParams.get('streamType');
 
     if (!id && (!streamId || !streamType)) {
-      return NextResponse.json({ error: 'id ou streamId+streamType são necessários' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'id ou streamId+streamType são necessários' },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
     }
-
-    await runWithLock(async () => {
-      const allItems = await getLocalContinueWatching();
-      const updated = allItems.filter((i: any) => {
-        if (i.user_id !== userId) return true; // Preserva itens de outros usuários
-        if (id && i.id === id) return false;
-        if (streamId && streamType && i.stream_id === streamId && i.stream_type === streamType) return false;
-        return true;
-      });
-      await saveLocalContinueWatching(updated);
-    });
 
     if (isTursoConfigured()) {
       try {
@@ -306,14 +259,35 @@ export async function DELETE(req: NextRequest) {
             args: [String(streamId), streamType, userId],
           });
         }
+        return NextResponse.json({ success: true, userId }, { headers: NO_STORE_HEADERS });
       } catch (e) {
         console.warn('[ContinueWatching] Erro ao deletar no Turso:', e);
       }
     }
 
-    return NextResponse.json({ success: true, userId });
+    await runWithFileLock(CONTINUE_WATCHING_FILE, async () => {
+      const allItems = await readJsonFileSafe<ContinueWatchingItem[]>(
+        CONTINUE_WATCHING_FILE,
+        [],
+        CONTINUE_WATCHING_BACKUP
+      );
+      const updated = allItems.filter((i) => {
+        if (i.user_id !== userId) return true;
+        if (id && i.id === id) return false;
+        if (streamId && streamType && i.stream_id === streamId && i.stream_type === streamType) {
+          return false;
+        }
+        return true;
+      });
+      await writeJsonFileAtomic(CONTINUE_WATCHING_FILE, updated, CONTINUE_WATCHING_BACKUP);
+    });
+
+    return NextResponse.json({ success: true, userId }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('[ContinueWatching] Erro no DELETE:', error);
-    return NextResponse.json({ error: 'Erro ao remover item' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Erro ao remover item' },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
   }
 }

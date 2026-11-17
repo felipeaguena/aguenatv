@@ -2,40 +2,37 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
-import fs from 'fs/promises';
+import {
+  NO_STORE_HEADERS,
+  readJsonFileSafe,
+  runWithFileLock,
+  writeJsonFileAtomic,
+} from '@/lib/json-store';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const FAVORITES_FILE = path.join(DATA_DIR, 'local-favorites.json');
 
-async function getLocalFavorites(): Promise<any[]> {
-  try {
-    const raw = await fs.readFile(FAVORITES_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
-}
-
-async function saveLocalFavorites(items: any[]): Promise<void> {
-  if (process.env.VERCEL) return;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(FAVORITES_FILE, JSON.stringify(items, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[Favorites] Aviso: persistência em disco local indisponível:', err);
-  }
+interface LocalFavoriteRow {
+  id: string;
+  user_id: string;
+  stream_id: string;
+  stream_type: string;
+  title: string;
+  poster_url?: string | null;
+  category_name?: string | null;
+  rating?: string | null;
+  created_at?: string;
 }
 
 export async function GET() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
 
-  // 1. Se o Turso estiver configurado, busca no banco por user_id estrito
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -44,14 +41,16 @@ export async function GET() {
         args: [session.userId],
       });
 
-      return NextResponse.json({ favorites: res.rows, userId: session.userId });
+      return NextResponse.json(
+        { favorites: res.rows, userId: session.userId },
+        { headers: NO_STORE_HEADERS }
+      );
     } catch (e) {
       console.warn('[Favorites] Turso falhou, usando armazenamento local:', e);
     }
   }
 
-  // 2. Armazenamento local: estritamente o user_id logado
-  const allFavorites = await getLocalFavorites();
+  const allFavorites = await readJsonFileSafe<LocalFavoriteRow[]>(FAVORITES_FILE, []);
   const userFavorites = allFavorites
     .filter((f) => f.user_id === session.userId)
     .sort(
@@ -59,13 +58,16 @@ export async function GET() {
         new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
     );
 
-  return NextResponse.json({ favorites: userFavorites, userId: session.userId });
+  return NextResponse.json(
+    { favorites: userFavorites, userId: session.userId },
+    { headers: NO_STORE_HEADERS }
+  );
 }
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
@@ -74,10 +76,9 @@ export async function POST(req: NextRequest) {
   const { streamId, streamType, title, posterUrl, categoryName, rating } = body;
 
   if (!streamId || !streamType || !title) {
-    return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 });
+    return NextResponse.json({ error: 'Dados incompletos' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
-  // 1. Se o Turso estiver configurado, salva no banco
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -111,16 +112,17 @@ export async function POST(req: NextRequest) {
       });
 
       if (res.rows.length > 0) {
-        return NextResponse.json({ favorite: res.rows[0], userId: session.userId }, { status: 201 });
+        return NextResponse.json(
+          { favorite: res.rows[0], userId: session.userId },
+          { status: 201, headers: NO_STORE_HEADERS }
+        );
       }
     } catch (e) {
       console.warn('[Favorites] Falha no Turso, gravando em persistência local:', e);
     }
   }
 
-  // 2. Persistência Localhost: Grava no arquivo JSON local data/local-favorites.json
-  const allFavorites = await getLocalFavorites();
-  const newFav = {
+  const newFav: LocalFavoriteRow = {
     id: `fav_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     user_id: session.userId,
     stream_id: String(streamId),
@@ -132,26 +134,30 @@ export async function POST(req: NextRequest) {
     created_at: new Date().toISOString(),
   };
 
-  // Remove duplicata pré-existente do mesmo título para este usuário específico
-  const filtered = allFavorites.filter(
-    (f) =>
-      !(
-        f.user_id === session.userId &&
-        String(f.stream_id) === String(streamId) &&
-        f.stream_type === streamType
-      )
+  await runWithFileLock(FAVORITES_FILE, async () => {
+    const allFavorites = await readJsonFileSafe<LocalFavoriteRow[]>(FAVORITES_FILE, []);
+    const filtered = allFavorites.filter(
+      (f) =>
+        !(
+          f.user_id === session.userId &&
+          String(f.stream_id) === String(streamId) &&
+          f.stream_type === streamType
+        )
+    );
+    filtered.unshift(newFav);
+    await writeJsonFileAtomic(FAVORITES_FILE, filtered);
+  });
+
+  return NextResponse.json(
+    { favorite: newFav, userId: session.userId },
+    { status: 201, headers: NO_STORE_HEADERS }
   );
-
-  filtered.unshift(newFav);
-  await saveLocalFavorites(filtered);
-
-  return NextResponse.json({ favorite: newFav, userId: session.userId }, { status: 201 });
 }
 
 export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   const { searchParams } = new URL(req.url);
@@ -159,10 +165,9 @@ export async function DELETE(req: NextRequest) {
   const streamType = searchParams.get('streamType');
 
   if (!streamId || !streamType) {
-    return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400 });
+    return NextResponse.json({ error: 'Parâmetros insuficientes' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
-  // 1. Remove do Turso se configurado (isolado por user_id)
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -170,22 +175,30 @@ export async function DELETE(req: NextRequest) {
         sql: 'DELETE FROM favorites WHERE user_id = ? AND stream_id = ? AND stream_type = ?',
         args: [session.userId, String(streamId), streamType],
       });
+      return NextResponse.json(
+        { success: true, message: 'Removido dos favoritos', userId: session.userId },
+        { headers: NO_STORE_HEADERS }
+      );
     } catch (e) {
       console.warn('[Favorites] Falha ao deletar do Turso:', e);
     }
   }
 
-  // 2. Remove do arquivo local-favorites.json (estritamente para o user_id logado)
-  const allFavorites = await getLocalFavorites();
-  const filtered = allFavorites.filter(
-    (f) =>
-      !(
-        f.user_id === session.userId &&
-        String(f.stream_id) === String(streamId) &&
-        f.stream_type === streamType
-      )
-  );
-  await saveLocalFavorites(filtered);
+  await runWithFileLock(FAVORITES_FILE, async () => {
+    const allFavorites = await readJsonFileSafe<LocalFavoriteRow[]>(FAVORITES_FILE, []);
+    const filtered = allFavorites.filter(
+      (f) =>
+        !(
+          f.user_id === session.userId &&
+          String(f.stream_id) === String(streamId) &&
+          f.stream_type === streamType
+        )
+    );
+    await writeJsonFileAtomic(FAVORITES_FILE, filtered);
+  });
 
-  return NextResponse.json({ success: true, message: 'Removido dos favoritos', userId: session.userId });
+  return NextResponse.json(
+    { success: true, message: 'Removido dos favoritos', userId: session.userId },
+    { headers: NO_STORE_HEADERS }
+  );
 }

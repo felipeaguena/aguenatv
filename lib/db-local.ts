@@ -98,7 +98,7 @@ export async function saveIPTVConfig(config: IPTVAccount): Promise<void> {
 async function fetchUserServerPlaylists(): Promise<{ playlists: IPTVPlaylist[]; userId: string } | null> {
   if (typeof window === 'undefined') return null;
   try {
-    const res = await fetch('/api/playlists');
+    const res = await fetch('/api/playlists', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.playlists)) {
@@ -133,8 +133,16 @@ export async function getSavedPlaylists(): Promise<IPTVPlaylist[]> {
   const storedUserSetting = await localDB.settings.get('iptv_user_id');
   const storedUserId = storedUserSetting?.value || null;
 
-  // Se o usuário na sessão mudou em relação ao que estava salvo no Dexie, sincroniza com o usuário atual
+  // Se o usuário na sessão mudou em relação ao que estava salvo no Dexie, limpa catálogo anterior e sincroniza com o usuário atual
   if (currentUserId && storedUserId !== currentUserId) {
+    if (storedUserId) {
+      await localDB.streams.clear();
+      await localDB.categories.clear();
+      await localDB.settings.delete('last_sync_timestamp');
+    }
+    try {
+      localStorage.setItem('aguenatv_active_uid', currentUserId);
+    } catch {}
     const lists = serverResult?.playlists || [];
     await localDB.settings.put({ key: 'iptv_user_id', value: currentUserId });
     await localDB.settings.put({ key: 'iptv_playlists', value: lists });
@@ -262,6 +270,7 @@ export async function clearUserLocalData(): Promise<void> {
       await localDB.categories.clear();
     }
     // Limpa chaves de cache em localStorage
+    localStorage.removeItem('aguenatv_active_uid');
     const toRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);

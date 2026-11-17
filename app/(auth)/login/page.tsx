@@ -1,6 +1,10 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { Tv, Lock, User, AlertCircle, ShieldAlert, Sparkles, Server } from 'lucide-react';
+import { clearUserLocalData } from '@/lib/db-local';
+import { resetFavoritesCache } from '@/hooks/useFavorites';
+import { resetWatchedCache } from '@/hooks/useWatched';
+import { resetContinueCache } from '@/hooks/useContinueWatching';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -64,6 +68,24 @@ export default function LoginPage() {
         }
         setLoading(false);
         return;
+      }
+
+      // Se outro usuário estava em cache no mesmo aparelho/navegador, isola e limpa dados locais anteriores
+      if (typeof window !== 'undefined' && data?.user?.id) {
+        try {
+          const prevUid = localStorage.getItem('aguenatv_active_uid');
+          if (prevUid && prevUid !== data.user.id) {
+            resetFavoritesCache();
+            resetWatchedCache();
+            resetContinueCache();
+            await clearUserLocalData();
+          } else {
+            localStorage.removeItem('miruro_local_favorites');
+            localStorage.removeItem('miruro_local_watched');
+            localStorage.removeItem('miruro_continue_watching');
+          }
+          localStorage.setItem('aguenatv_active_uid', String(data.user.id));
+        } catch {}
       }
 
       // Login bem-sucedido: redireciona para a aplicação privada com carregamento completo de cookies

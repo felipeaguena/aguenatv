@@ -4,8 +4,22 @@ import { ContinueWatchingItem, StreamType } from '@/lib/types';
 
 const EMPTY_CONTINUE_LIST: ContinueWatchingItem[] = [];
 
-function getStorageKey(userId?: string | null): string {
-  return userId ? `miruro_con_${userId}` : 'miruro_continue_watching';
+const ACTIVE_UID_KEY = 'aguenatv_active_uid';
+
+function getActiveUid(userId?: string | null): string | null {
+  if (userId) return userId;
+  if (globalContinueUserId) return globalContinueUserId;
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(ACTIVE_UID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getStorageKey(userId?: string | null): string | null {
+  const uid = getActiveUid(userId);
+  return uid ? `miruro_con_${uid}` : null;
 }
 
 // Store singleton em memória compartilhado
@@ -63,7 +77,14 @@ function broadcastContinueUpdated(next: ContinueWatchingItem[], userId?: string 
   }
   if (persist && typeof window !== 'undefined') {
     try {
-      localStorage.setItem(getStorageKey(globalContinueUserId), JSON.stringify(next));
+      if (globalContinueUserId) {
+        localStorage.setItem(ACTIVE_UID_KEY, globalContinueUserId);
+      }
+      const key = getStorageKey(globalContinueUserId);
+      if (key) {
+        localStorage.setItem(key, JSON.stringify(next));
+      }
+      localStorage.removeItem('miruro_continue_watching');
     } catch {}
   }
   notifyContinueListeners();
@@ -73,7 +94,8 @@ function attachCrossTabContinueListener() {
   if (storageListenerAttached || typeof window === 'undefined') return;
   storageListenerAttached = true;
   window.addEventListener('storage', (e: StorageEvent) => {
-    if (e.key !== getStorageKey(globalContinueUserId) || !e.newValue) return;
+    const key = getStorageKey(globalContinueUserId);
+    if (!key || e.key !== key || !e.newValue) return;
     try {
       const parsed = JSON.parse(e.newValue) as ContinueWatchingItem[];
       if (Array.isArray(parsed)) {
@@ -90,13 +112,14 @@ async function syncContinueFromServer(): Promise<ContinueWatchingItem[]> {
 
   continueInFlight = (async () => {
     try {
-      const res = await fetch('/api/continue-watching');
+      const res = await fetch('/api/continue-watching', { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const serverItems: ContinueWatchingItem[] = data.items || [];
         const resUserId: string | null = data.userId || null;
+        const previousUid = getActiveUid();
 
-        if (resUserId && globalContinueUserId && resUserId !== globalContinueUserId) {
+        if (resUserId && previousUid && resUserId !== previousUid) {
           globalContinueCache = null;
         }
         globalContinueUserId = resUserId;
@@ -109,7 +132,7 @@ async function syncContinueFromServer(): Promise<ContinueWatchingItem[]> {
     } finally {
       continueInFlight = null;
     }
-    return globalContinueCache || [];
+    return globalContinueCache || EMPTY_CONTINUE_LIST;
   })();
 
   return continueInFlight;
@@ -164,7 +187,8 @@ export function useContinueWatching(options: { subscribe?: boolean } = {}) {
       attachCrossTabContinueListener();
       if (!globalContinueCache) {
         try {
-          const cached = localStorage.getItem(getStorageKey(globalContinueUserId));
+          const key = getStorageKey(globalContinueUserId);
+          const cached = key ? localStorage.getItem(key) : null;
           if (cached) {
             const parsed = JSON.parse(cached) as ContinueWatchingItem[];
             if (Array.isArray(parsed)) {

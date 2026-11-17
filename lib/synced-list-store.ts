@@ -42,8 +42,22 @@ export function createSyncedListStore<T>(
   let storageListenerAttached = false;
   const listeners = new Set<() => void>();
 
-  const getStorageKey = (userId?: string | null): string =>
-    userId ? `${config.storagePrefix}${userId}` : config.fallbackStorageKey;
+  const ACTIVE_UID_KEY = 'aguenatv_active_uid';
+
+  const getActiveUid = (): string | null => {
+    if (currentUserId) return currentUserId;
+    if (typeof window === 'undefined') return null;
+    try {
+      return localStorage.getItem(ACTIVE_UID_KEY);
+    } catch {
+      return null;
+    }
+  };
+
+  const getStorageKey = (userId?: string | null): string | null => {
+    const uid = userId || getActiveUid();
+    return uid ? `${config.storagePrefix}${uid}` : null;
+  };
 
   const rebuildKeySet = (list: T[]) => {
     const nextKeys = new Set<string>();
@@ -72,7 +86,15 @@ export function createSyncedListStore<T>(
 
     if (persist && typeof window !== 'undefined') {
       try {
-        localStorage.setItem(getStorageKey(currentUserId), JSON.stringify(next));
+        if (currentUserId) {
+          localStorage.setItem(ACTIVE_UID_KEY, currentUserId);
+        }
+        const key = getStorageKey(currentUserId);
+        if (key) {
+          localStorage.setItem(key, JSON.stringify(next));
+        }
+        // Remove legado compartilhado para impedir vazamento entre contas
+        localStorage.removeItem(config.fallbackStorageKey);
       } catch {
         // Ignora cota de localStorage
       }
@@ -85,7 +107,8 @@ export function createSyncedListStore<T>(
     if (storageListenerAttached || typeof window === 'undefined') return;
     storageListenerAttached = true;
     window.addEventListener('storage', (event: StorageEvent) => {
-      if (event.key !== getStorageKey(currentUserId) || !event.newValue) return;
+      const key = getStorageKey(currentUserId);
+      if (!key || event.key !== key || !event.newValue) return;
       try {
         const parsed = JSON.parse(event.newValue) as T[];
         if (Array.isArray(parsed)) {
@@ -103,7 +126,9 @@ export function createSyncedListStore<T>(
     if (itemsCache !== null) return;
 
     try {
-      const raw = localStorage.getItem(getStorageKey(currentUserId));
+      const key = getStorageKey(currentUserId);
+      if (!key) return;
+      const raw = localStorage.getItem(key);
       if (raw) {
         const parsed = JSON.parse(raw) as T[];
         if (Array.isArray(parsed)) {
@@ -129,14 +154,16 @@ export function createSyncedListStore<T>(
 
     inFlight = (async () => {
       try {
-        const res = await fetch(config.apiEndpoint);
+        const res = await fetch(config.apiEndpoint, { cache: 'no-store' });
         if (res.ok) {
           const data = (await res.json()) as Record<string, unknown>;
           const serverItems = config.extractItems(data);
           const resUserId = typeof data.userId === 'string' && data.userId ? data.userId : null;
+          const previousUid = getActiveUid();
 
-          if (resUserId && currentUserId && resUserId !== currentUserId) {
+          if (resUserId && previousUid && resUserId !== previousUid) {
             itemsCache = null;
+            keySet = new Set<string>();
           }
           if (resUserId) {
             currentUserId = resUserId;
@@ -149,7 +176,7 @@ export function createSyncedListStore<T>(
       } finally {
         inFlight = null;
       }
-      return itemsCache || [];
+      return itemsCache ?? emptyList;
     })();
 
     return inFlight;

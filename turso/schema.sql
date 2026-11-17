@@ -1,7 +1,13 @@
 -- ========================================================
 -- AGUENATV - Esquema de Banco de Dados Oficial (Turso / SQLite)
 -- Compatível com libSQL Serverless e Edge Runtime
+-- Padrão SaaS Multi-usuário com isolamento estrito por user_id
 -- ========================================================
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id TEXT PRIMARY KEY,
+  applied_at TEXT DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS login_attempts (
   ip_address TEXT PRIMARY KEY,
@@ -50,7 +56,7 @@ CREATE TABLE IF NOT EXISTS watched_items (
 );
 
 CREATE TABLE IF NOT EXISTS continue_watching (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   stream_id TEXT NOT NULL,
   stream_type TEXT NOT NULL CHECK (stream_type IN ('live', 'movie', 'series')),
@@ -68,11 +74,11 @@ CREATE TABLE IF NOT EXISTS continue_watching (
   duration REAL DEFAULT 0,
   progress_percentage REAL DEFAULT 0,
   last_watched_at TEXT DEFAULT (datetime('now')),
-  UNIQUE (user_id, id)
+  PRIMARY KEY (user_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS user_playlists (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   name TEXT NOT NULL,
   server_url TEXT NOT NULL,
@@ -85,7 +91,7 @@ CREATE TABLE IF NOT EXISTS user_playlists (
   channels_count INTEGER,
   movies_count INTEGER,
   series_count INTEGER,
-  UNIQUE (user_id, id)
+  PRIMARY KEY (user_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_login_attempts_ip ON login_attempts(ip_address);

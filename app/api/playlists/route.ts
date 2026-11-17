@@ -3,43 +3,27 @@ import { getSession } from '@/lib/auth';
 import { turso, isTursoConfigured, ensureTursoSchema } from '@/lib/turso';
 import { IPTVPlaylist } from '@/lib/types';
 import { ensureDataMigratedToFelipeAguena } from '@/lib/users-local';
-import fs from 'fs/promises';
+import {
+  NO_STORE_HEADERS,
+  readJsonFileSafe,
+  runWithFileLock,
+  writeJsonFileAtomic,
+} from '@/lib/json-store';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PLAYLISTS_FILE = path.join(DATA_DIR, 'local-playlists.json');
 
-async function getLocalFilePlaylists(): Promise<Record<string, IPTVPlaylist[]>> {
-  try {
-    const raw = await fs.readFile(PLAYLISTS_FILE, 'utf-8');
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-async function saveLocalFilePlaylists(data: Record<string, IPTVPlaylist[]>): Promise<void> {
-  if (process.env.VERCEL) return;
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    await fs.writeFile(PLAYLISTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[Playlists] Erro ao salvar playlists locais:', err);
-  }
-}
-
-// GET /api/playlists - Retorna as playlists exclusivamente do usuário logado
 export async function GET() {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
 
   const userId = session.userId;
 
-  // 1. Se Turso configurado, busca do banco para o usuário logado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -48,7 +32,7 @@ export async function GET() {
         args: [userId],
       });
 
-      const playlists: IPTVPlaylist[] = res.rows.map((row: any) => ({
+      const playlists: IPTVPlaylist[] = res.rows.map((row: Record<string, unknown>) => ({
         id: String(row.id),
         name: String(row.name),
         server_url: String(row.server_url),
@@ -63,23 +47,24 @@ export async function GET() {
         series_count: row.series_count ? Number(row.series_count) : undefined,
       }));
 
-      return NextResponse.json({ playlists, userId });
+      return NextResponse.json({ playlists, userId }, { headers: NO_STORE_HEADERS });
     } catch (e) {
       console.warn('[Playlists] Turso falhou, usando fallback em arquivo local:', e);
     }
   }
 
-  // 2. Fallback de arquivo local por usuário
-  const allUserPlaylists = await getLocalFilePlaylists();
+  const allUserPlaylists = await readJsonFileSafe<Record<string, IPTVPlaylist[]>>(
+    PLAYLISTS_FILE,
+    {}
+  );
   const userLists = allUserPlaylists[userId] || [];
-  return NextResponse.json({ playlists: userLists, userId });
+  return NextResponse.json({ playlists: userLists, userId }, { headers: NO_STORE_HEADERS });
 }
 
-// POST /api/playlists - Salva a lista completa de playlists exclusivamente do usuário logado
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: NO_STORE_HEADERS });
   }
 
   await ensureDataMigratedToFelipeAguena();
@@ -88,7 +73,6 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const playlists: IPTVPlaylist[] = Array.isArray(body.playlists) ? body.playlists : [];
 
-  // 1. Salva no Turso se configurado
   if (isTursoConfigured()) {
     try {
       await ensureTursoSchema();
@@ -99,9 +83,20 @@ export async function POST(req: NextRequest) {
 
       for (const pl of playlists) {
         await turso.execute({
-          sql: `INSERT INTO user_playlists 
+          sql: `INSERT INTO user_playlists
                 (id, user_id, name, server_url, username, password, is_active, created_at, updated_at, last_synced, channels_count, movies_count, series_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, id) DO UPDATE SET
+                  name = excluded.name,
+                  server_url = excluded.server_url,
+                  username = excluded.username,
+                  password = excluded.password,
+                  is_active = excluded.is_active,
+                  updated_at = excluded.updated_at,
+                  last_synced = excluded.last_synced,
+                  channels_count = excluded.channels_count,
+                  movies_count = excluded.movies_count,
+                  series_count = excluded.series_count`,
           args: [
             pl.id,
             userId,
@@ -120,16 +115,20 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      return NextResponse.json({ success: true, playlists, userId });
+      return NextResponse.json({ success: true, playlists, userId }, { headers: NO_STORE_HEADERS });
     } catch (e) {
       console.warn('[Playlists] Erro ao salvar playlists no Turso, usando fallback:', e);
     }
   }
 
-  // 2. Salva no arquivo local persistente no servidor com chave de usuário isolada
-  const allUserPlaylists = await getLocalFilePlaylists();
-  allUserPlaylists[userId] = playlists;
-  await saveLocalFilePlaylists(allUserPlaylists);
+  await runWithFileLock(PLAYLISTS_FILE, async () => {
+    const allUserPlaylists = await readJsonFileSafe<Record<string, IPTVPlaylist[]>>(
+      PLAYLISTS_FILE,
+      {}
+    );
+    allUserPlaylists[userId] = playlists;
+    await writeJsonFileAtomic(PLAYLISTS_FILE, allUserPlaylists);
+  });
 
-  return NextResponse.json({ success: true, playlists, userId });
+  return NextResponse.json({ success: true, playlists, userId }, { headers: NO_STORE_HEADERS });
 }
